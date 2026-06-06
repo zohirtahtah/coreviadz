@@ -1,0 +1,6 @@
+{
+  "name": "Corevia",
+  "description": "منصة الإدارة الذكية الشاملة للشركات - Corevia ERP Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend Dashboard Masterpiece - Corevia</title>
+    
+    <!-- CDNs and Styling Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind Configuration and custom core styling overrides -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Cairo', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f1016;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #272a39;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3f4459;
+        }
+
+        /* Glassmorphic overlays and custom background lights */
+        body {
+            background-color: #0b0c10;
+            color: #e2e8f0;
+            font-family: 'Cairo', sans-serif;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 15%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 85% 70%, rgba(16, 185, 129, 0.04) 0%, transparent 45%);
+        }
+
+        .glass-card {
+            background: rgba(17, 18, 25, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+        }
+
+        /* Leaflet custom dark theme overlays */
+        .leaflet-container {
+            font-family: 'Cairo', sans-serif !important;
+            background: #0d0f14 !important;
+        }
+        .leaflet-bar {
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: none !important;
+        }
+        .leaflet-bar a {
+            background-color: rgba(17, 18, 25, 0.95) !important;
+            color: #ffffff !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+        .leaflet-bar a:hover {
+            background-color: #1f2937 !important;
+        }
+        
+        /* Tooltip custom overrides */
+        .leaflet-tooltip-own {
+            background: rgba(10, 11, 16, 0.96) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #ffffff !important;
+            border-radius: 8px !important;
+            padding: 8px 12px !important;
+            font-family: 'Cairo', sans-serif !important;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+            font-size: 11px !important;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <!-- MAIN HEADER -->
+    <header class="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h1 class="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-3">
+                <span class="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400">
+                    <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+                </span>
+                <span>لوحة التحكم المعززة بالذكاء الجغرافي</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span>يقوم هذا النظام بسحب وتحليل وتلوين البيانات الحية تلقائياً من جدول الطلبات الفعلي على الشاشة.</span>
+            </p>
+        </div>
+
+        <!-- CONTROL DOCK -->
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <!-- Scraper Status Indicator -->
+            <div class="hidden sm:flex items-center gap-2 p-2 px-3 bg-zinc-900/60 border border-zinc-800 rounded-xl text-xs">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-zinc-400 animate-spin"></i>
+                <span class="text-slate-300 font-medium">سحب تلقائي:</span>
+                <span class="text-emerald-400 font-extrabold" id="scraper-status">نشط ومستمر</span>
+            </div>
+
+            <!-- Country Switcher -->
+            <div class="flex items-center gap-2">
+                <label for="country-selector" class="text-xs font-bold text-slate-300 whitespace-nowrap">البلد الجغرافي:</label>
+                <select id="country-selector" onchange="changeCountryMap(this.value)" class="p-2 text-xs font-black bg-zinc-900 border border-zinc-800 rounded-xl text-white outline-none focus:border-indigo-500 transition-colors cursor-pointer">
+                    <option value="dz" selected>🇩🇿 الجزائر (58 ولاية)</option>
+                    <option value="ma">🇲🇦 المغرب (الجهات الرئيسية)</option>
+                    <option value="fr">🇫🇷 فرنسا (المناطق الرئيسية)</option>
+                </select>
+            </div>
+
+            <!-- Manual Trigger -->
+            <button onclick="triggerManualScrape()" class="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 px-4 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-all cursor-pointer">
+                <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-350"></i>
+                <span>تحديث الفرز المباشر</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto space-y-6">
+
+        <!-- TOP ROW: KPI METRICS CARDS -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="kpi-deck">
+            <!-- Total Sent Card -->
+            <div class="glass-card p-5 rounded-2xl relative overflow-hidden" id="kpi-sent">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-tr from-sky-500/5 to-transparent rounded-full blur-xl pointer-events-none"></div>
+                <div class="flex justify-between items-start">
+                    <span class="text-xs font-bold text-slate-400">إجمالي الطلبات (مرسل)</span>
+                    <span class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+                        <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    </span>
+                </div>
+                <div class="mt-4">
+                    <h2 class="text-2xl md:text-3xl font-black text-white font-mono" id="metric-sent">0</h2>
+                    <p class="text-[10px] text-sky-450 font-semibold mt-1 font-mono">100% النشط الكلي</p>
+                </div>
+            </div>
+
+            <!-- Total Delivered Card -->
+            <div class="glass-card p-5 rounded-2xl relative overflow-hidden" id="kpi-delivered">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-tr from-emerald-500/5 to-transparent rounded-full blur-xl pointer-events-none"></div>
+                <div class="flex justify-between items-start">
+                    <span class="text-xs font-bold text-slate-400">طلبيات سلمت (نجاح)</span>
+                    <span class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <i data-lucide="package-check" class="w-4 h-4"></i>
+                    </span>
+                </div>
+                <div class="mt-4">
+                    <h2 class="text-2xl md:text-3xl font-black text-white font-mono" id="metric-delivered">0</h2>
+                    <p class="text-[10px] text-emerald-400 font-semibold mt-1" id="rate-delivered">نسبة نجاح: 0%</p>
+                </div>
+            </div>
+
+            <!-- Total Pending Card -->
+            <div class="glass-card p-5 rounded-2xl relative overflow-hidden" id="kpi-pending">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-tr from-amber-500/5 to-transparent rounded-full blur-xl pointer-events-none"></div>
+                <div class="flex justify-between items-start">
+                    <span class="text-xs font-bold text-slate-400 font-sans">قيد الانتظار والترتيب</span>
+                    <span class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                        <i data-lucide="clock" class="w-4 h-4"></i>
+                    </span>
+                </div>
+                <div class="mt-4">
+                    <h2 class="text-2xl md:text-3xl font-black text-white font-mono" id="metric-pending">0</h2>
+                    <p class="text-[10px] text-amber-550 font-semibold mt-1">تجهيز للشحن في الطريق</p>
+                </div>
+            </div>
+
+            <!-- Total Returned Card -->
+            <div class="glass-card p-5 rounded-2xl relative overflow-hidden" id="kpi-returned">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-tr from-rose-500/5 to-transparent rounded-full blur-xl pointer-events-none"></div>
+                <div class="flex justify-between items-start">
+                    <span class="text-xs font-bold text-slate-400">ملغي ومرتجع</span>
+                    <span class="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                        <i data-lucide="package-x" class="w-4 h-4"></i>
+                    </span>
+                </div>
+                <div class="mt-4">
+                    <h2 class="text-2xl md:text-3xl font-black text-white font-mono" id="metric-returned">0</h2>
+                    <p class="text-[10px] text-rose-400 font-semibold mt-1" id="rate-returned">نسبة المرتجع: 0%</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- MIDDLE ROW: INTERACTIVE VECTOR CHOROPLETH MAP -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            
+            <div class="lg:col-span-8 flex flex-col h-full">
+                <div class="glass-card p-4 rounded-3xl flex flex-col flex-1 h-[480px] overflow-hidden relative">
+                    <!-- Subtle loading backdrop for map transactions -->
+                    <div id="map-loader" class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm z-[999] rounded-3xl flex items-center justify-center gap-3 transition-opacity duration-300 opacity-0 pointer-events-none">
+                        <i data-lucide="loader-2" class="w-8 h-8 text-indigo-400 animate-spin"></i>
+                        <span class="text-slate-200 text-sm font-bold">جاري تحميل الخريطة الجغرافية للبلد وثنائيات الاحداثيات...</span>
+                    </div>
+
+                    <div class="flex justify-between items-center border-b border-zinc-800/40 pb-3 mb-3">
+                        <div>
+                            <h2 class="text-xs font-extrabold text-white flex items-center gap-1.5" id="map-country-title">🇩🇿 الخارطة التحليلية الجغرافية للجمهورية الجزائرية</h2>
+                            <p class="text-[10px] text-slate-400 mt-1">توضح نسب الارتجاع والنجاح المالي لكل ولاية حسب التوزيع الرقمي للون (أخضر للنجاح، أحمر للمرتجعات)</p>
+                        </div>
+                        <div class="flex items-center gap-4 text-[10px]">
+                            <!-- Color Scales Instructions -->
+                            <div class="hidden sm:flex items-center gap-3.5">
+                                <span class="flex items-center gap-1 text-slate-450">
+                                    <span class="w-2.5 h-2.5 rounded bg-emerald-600"></span>
+                                    <span>ممتاز (&gt;50%)</span>
+                                </span>
+                                <span class="flex items-center gap-1 text-slate-450">
+                                    <span class="w-2.5 h-2.5 rounded bg-rose-600"></span>
+                                    <span>حرجة (&lt;50%)</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Map container viewport element -->
+                    <div id="map-container" class="flex-1 w-full rounded-2xl relative overflow-hidden">
+                        <div id="map" class="w-full h-full rounded-2xl"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WILAYA HIGHLIGHT LEADBOARD PANEL -->
+            <div class="lg:col-span-4 flex flex-col h-full">
+                <div class="glass-card p-5 rounded-3xl flex flex-col h-[480px] overflow-hidden">
+                    <div class="border-b border-zinc-800 pb-3 mb-4 flex justify-between items-center text-right">
+                        <div>
+                            <h3 class="text-xs font-black text-amber-50">متصدرين وسير الولايات والجهات</h3>
+                            <p class="text-[10.5px] text-slate-400 mt-1">ترتيب الأداء الجغرافي بناءً على نسب التسليم</p>
+                        </div>
+                        <span class="text-[10px] px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-lg font-black font-mono" id="leaderboard-count">0 جهة</span>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto space-y-2 pr-1" id="leaderboard-list">
+                        <!-- Simulated leaderboard items dynamically spawned -->
+                        <div class="py-12 text-center text-zinc-650 text-xs font-bold">
+                            لا تتوفر ولايات نشطة بعد. يرجى إدراج طلبيات أو تشغيل المحاكاة بالأسفل.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- BOTTOM ROW: BI INDICATORS (CHART & LEADERBOARD STATS) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 pb-6">
+            
+            <!-- Pie/Donut Chart return reasons -->
+            <div class="glass-card p-5 rounded-3xl flex flex-col h-[350px] justify-between">
+                <div>
+                    <h3 class="text-xs font-black text-white">إحصائيات تفصيلية لأسباب الإرجاع والرفض</h3>
+                    <p class="text-[10.5px] text-slate-405 mt-1 font-sans">توزيع نسبي مئوي لحالات الطرود العائدة المستخرجة من جدول البيانات</p>
+                </div>
+                <div class="flex-1 flex items-center justify-center py-2 relative" id="reasons-chart-wrapper">
+                    <div id="reasons-pie-chart" class="w-full max-w-[280px]"></div>
+                </div>
+            </div>
+
+            <!-- Key performance indicators and dynamic insights text summaries -->
+            <div class="glass-card p-5 rounded-3xl flex flex-col h-[350px] justify-between">
+                <div>
+                    <h3 class="text-xs font-black text-white">نص لغة وتحليل التدفق الذكي</h3>
+                    <p class="text-[10.5px] text-slate-405 mt-1">ذكاء اصطناعي تحليلي يقرأ البيانات المستخلصة live وينصح بإجراءات فورية</p>
+                </div>
+                
+                <div class="flex-1 bg-zinc-950/45 border border-zinc-900 rounded-2xl p-4 overflow-y-auto mt-4 text-xs leading-relaxed space-y-3" id="ai-insights-box">
+                    <div class="flex items-start gap-2.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 flex-shrink-0"></span>
+                        <p class="text-slate-300">مرحباً بك في نظام التحليل الذكي التلقائي. يبحث محرك السحب عن الولايات الجزائرية الـ 58 (مثل الجزائر، البليدة، وهران، قسنطينة إلخ) ويحدد الولاية ذات المردود الأعلى.</p>
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500 mt-2 flex-shrink-0"></span>
+                        <p class="text-slate-300 font-medium">ملاحظة ذكية: إذا قمت بتغيير البلد إلى المغرب أو فرنسا، يمكنك الضغط على سحب وتلوين لمشاهدة تفاعلية فريدة للجهتين الأخريين!</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- DYNAMIC CONFIGURATION & SOURCE MAP DETAILED SECTION -->
+        <section class="glass-card p-6 rounded-3xl border border-dashed border-indigo-500/25 relative">
+            <div class="absolute -top-3.5 right-6 bg-[#0c0d11] p-1 px-4 border border-[#272a39] rounded-xl text-[10px] font-mono text-indigo-400 font-extrabold shadow">
+                CSS SELECTOR CONFIGURATION GUIDE
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <div class="text-right">
+                    <h3 class="text-sm font-bold text-slate-200">دليل ربط كود السحب بجدول طلبياتك الفعلي (صفحة الطلبات)</h3>
+                    <p class="text-xs text-slate-400 mt-1 lines-normal leading-relaxed">
+                        لقد بنيت محرك سحب البيانات البرمجي المباشر ذو قدرة ومرونة فائقة ليتم تركيبه فوق مشروعك الحالي. للربط ومزامنة جدولك، قم فقط بفتح هذا الملف وتغيير واختيار محددات الصفوف والأعمدة المناسبة لكلاسات جدولك البرمجي، كما نوضحه لك عبر الخطوات التالية:
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs mt-2">
+                    <div class="p-3.5 bg-zinc-950/80 rounded-2xl border border-zinc-900 text-right">
+                        <span class="font-mono text-[10px] text-amber-500 font-black block mb-1">الخطوة 1: محددات صفوف الجدول</span>
+                        <p class="text-slate-400 leading-relaxed text-[11px]">حدد في الكود كيف يستعلم الاسكربت عن الصف الكامل داخل التابل. الافتراضي هو:</p>
+                        <code class="block bg-zinc-900 p-1.5 rounded text-[10.5px] mt-2 font-mono text-rose-400 text-center">document.querySelectorAll('.order-row-item')</code>
+                    </div>
+
+                    <div class="p-3.5 bg-zinc-950/80 rounded-2xl border border-zinc-900 text-right">
+                        <span class="font-mono text-[10px] text-emerald-400 font-black block mb-1">الخطوة 2: محدد خلايا الولايات</span>
+                        <p class="text-slate-400 leading-relaxed text-[11px]">حدد الكلاس الخاص بخلية العنوان أو المحافظة/الولاية لسحبها. الافتراضي هو:</p>
+                        <code class="block bg-zinc-900 p-1.5 rounded text-[10.5px] mt-2 font-mono text-emerald-400 text-center">row.querySelector('.wilaya-cell')</code>
+                    </div>
+
+                    <div class="p-3.5 bg-zinc-950/80 rounded-2xl border border-zinc-900 text-right">
+                        <span class="font-mono text-[10px] text-sky-400 font-black block mb-1">الخطوة 3: خلايا السعر والحالة</span>
+                        <p class="text-slate-400 leading-relaxed text-[11px]">بالمثل، حدد خلايا سعر الطلب وحالة الشحن. افتراضياً يستهدف:</p>
+                        <code class="block bg-zinc-900 p-1.5 rounded text-[10.5px] mt-2 font-mono text-sky-400 text-center">.status-cell & .price-cell</code>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SIMULATED LIVE ORDERS TABLE & CONTROL CENTER PLAYGROUND -->
+        <section class="glass-card p-6 rounded-3xl" id="sandbox-playable-section">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-zinc-800/40 pb-4 mb-4">
+                <div>
+                    <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
+                        <i data-lucide="play-circle" class="w-4 h-4 text-emerald-400 animate-pulse"></i>
+                        <span>محاكاة لوحة الطلبات المباشرة (جدول تواصل حي لتدريب Scraper)</span>
+                    </h3>
+                    <p class="text-[11px] text-slate-400 mt-1">توضح هذه اللوحة كيف يتعامل محرك السحب الذكي مع خلايا تابل المبيعات الفعلي للعملاء.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="addSimulatedRow()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 p-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer">
+                        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                        <span>إضافة طلبية تجريبية</span>
+                    </button>
+                    <button onclick="resetSimulatedData()" class="bg-rose-500/10 border border-rose-550/20 text-rose-400 hover:bg-rose-500/20 p-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer">
+                        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                        <span>إعادة تصفير الجدول</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Playable simulated table element -->
+            <div class="overflow-x-auto rounded-xl border border-zinc-900">
+                <table class="w-full text-right text-xs" id="simulated-orders-table">
+                    <thead>
+                        <tr class="bg-zinc-950/60 text-slate-400 text-[10px] uppercase font-bold border-b border-zinc-900">
+                            <th class="p-3 text-right">رقم الطلب والزبون</th>
+                            <th class="p-3 text-right">البلد والولاية / المنطقة</th>
+                            <th class="p-3 text-right">سبب الإرجاع (إن وجد)</th>
+                            <th class="p-3 text-right">قيمة الطلب</th>
+                            <th class="p-3 text-center">حالة الطلبية</th>
+                            <th class="p-3 text-center">خيارات التعديل التفاعلي</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-900" id="table-payload">
+                        <!-- Default rows loaded automatically -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- FOOTER LICENSE -->
+    <footer class="max-w-7xl mx-auto mt-12 mb-8 text-center text-[10.5px] text-slate-500 border-t border-zinc-900 pt-5">
+        <p>نظام Corevia Dashboard Masterpiece مجهز بالكامل للمزامنة والتلوين الذكي وتكامل Leaflet + ApexCharts.</p>
+        <p class="mt-1 font-mono">Platform v4.2 ERP GIS Module - Secured Client Side Webpage</p>
+    </footer>
+
+    <!-- LEAFLET & APEXCHARTS ENGINE SCRIPT -->
+    <script>
+        // State variables
+        let map = null;
+        let activeCountry = 'dz';
+        let geojsonLayer = null;
+        let reasonsChart = null;
+
+        // Leaflet Markers and Layer Group Reference
+        let layerGroup = null;
+
+        // Set default simulated rows on start
+        const DEFAULT_SIMULATED_ORDERS = [
+            { id: "ORD-9281", customer: "حمزة بن بوزيد", country: "dz", region: "16- الجزائر", reason: "", price: 8200, status: "Delivered / مستلم" },
+            { id: "ORD-1204", customer: "أنس بومدين", country: "dz", region: "16- الجزائر", reason: "", price: 11000, status: "Delivered / مستلم" },
+            { id: "ORD-7391", customer: "عبد الهادي بن رابح", country: "dz", region: "31- وهران", reason: "", price: 4500, status: "Delivered / مستلم" },
+            { id: "ORD-2041", customer: "فريد بوعلام", country: "dz", region: "16- الجزائر", reason: "Refused / رفض الاستلام", price: 6000, status: "Returned / مرجع / ملغى" },
+            { id: "ORD-9304", customer: "سفيان مليكي", country: "dz", region: "09- البليدة", reason: "", price: 5900, status: "Delivered / مستلم" },
+            { id: "ORD-4859", customer: "طارق زياد", country: "dz", region: "25- قسنطينة", reason: "", price: 9500, status: "Delivered / مستلم" },
+            { id: "ORD-2811", customer: "سمير جلول", country: "dz", region: "09- البليدة", reason: "Delayed / تأخر التوصيل", price: 5400, status: "Returned / مرجع / ملغى" },
+            
+            // Morocco simulated defaults (Only triggers if switching country)
+            { id: "MA-3829", customer: "ياسين الإدريسي", country: "ma", region: "الدار البيضاء - سطات", reason: "", price: 400, status: "Delivered / مستلم" },
+            { id: "MA-1102", customer: "خالد بن جلون", country: "ma", region: "الرباط - سلا - القنيطرة", reason: "", price: 650, status: "Delivered / مستلم" },
+            { id: "MA-7749", customer: "سعيد العمراني", country: "ma", region: "مراكش - آسفي", reason: "Refused / رفض الاستلام", price: 320, status: "Returned / مرجع / ملغى" },
+            { id: "MA-8840", customer: "محمد تلمساني", country: "ma", region: "فاس - مكناس", reason: "", price: 450, status: "Delivered / مستلم" },
+
+            // France simulated defaults (Only triggers if switching country)
+            { id: "FR-5028", customer: "Jean Dupont", country: "fr", region: "Île-de-France", reason: "", price: 89, status: "Delivered / مستلم" },
+            { id: "FR-4911", customer: "Michel Bertrand", country: "fr", region: "Île-de-France", reason: "Size Error / مقاس خاطئ", price: 120, status: "Returned / مرجع / ملغى" },
+            { id: "FR-6729", customer: "Sarah Petit", country: "fr", region: "Auvergne-Rhône-Alpes", reason: "", price: 65, status: "Delivered / مستلم" },
+            { id: "FR-1182", customer: "Pierre Lemoine", country: "fr", region: "Provence-Alpes-Côte d'Azur", reason: "", price: 154, status: "Delivered / مستلم" }
+        ];
+
+        // Central statistics mapping object
+        let scrapedStats = {
+            kpi: {
+                totalSent: 0,
+                totalDelivered: 0,
+                totalPending: 0,
+                totalReturned: 0,
+                successRate: 0,
+                returnRate: 0
+            },
+            regions: {},
+            reasons: {
+                refused: 0,
+                delayed: 0,
+                wrongSize: 0,
+                noResponse: 0
+            }
+        };
+
+        // Centroids for gorgeous fallback visual representations when GeoJSON isn't reachable
+        const REGION_CENTROIDS = {
+            dz: {
+                "09- البليدة": [36.4700, 2.8277],
+                "16- الجزائر": [36.7538, 3.0588],
+                "31- وهران": [35.6971, -0.6308],
+                "25- قسنطينة": [36.3650, 6.6147],
+                "06- بجاية": [36.7558, 5.0843],
+                "15- تيزي وزو": [36.7118, 4.0459],
+                "19- سطيف": [36.1901, 5.4137]
+            },
+            ma: {
+                "الدار البيضاء - سطات": [33.5731, -7.5898],
+                "الرباط - سلا - القنيطرة": [34.0209, -6.8416],
+                "مراكش - آسفي": [31.6295, -7.9811],
+                "فاس - مكناس": [34.0333, -5.0000],
+                "سوس - ماسة": [30.4200, -9.5600]
+            },
+            fr: {
+                "Île-de-France": [48.8499, 2.6370],
+                "Auvergne-Rhône-Alpes": [45.7485, 4.8467],
+                "Provence-Alpes-Côte d'Azur": [43.9352, 6.0679],
+                "Nouvelle-Aquitaine": [44.8378, -0.5792],
+                "Occitanie": [43.6047, 1.4442]
+            }
+        };
+
+        // Standard dynamic list mapping codes to names
+        const GEOGRAPHIC_MAPPING = {
+            dz: ["الجزائر", "البليدة", "وهران", "قسنطينة", "بجاية", "تيزي وزو", "سطيف", "تلمسان", "شلف", "عنابة", "باتنة", "تبسة", "سيدي بلعباس", "الأغواط", "ادير", "البيض", "بسكرة", "توقرت", "مسيلة", "جيجل", "سكيكدة", "مستغانم", "معسكر"],
+            ma: ["الدار البيضاء - سطات", "الرباط - سلا - القنيطرة", "مراكش - آسفي", "فاس - مكناس", "طنجة - تطوان - الحسيمة", "الشرق", "درعة - تافيلالت", "بني ملال - خنيفرة", "سوس - ماسة"],
+            fr: ["Île-de-France", "Auvergne-Rhône-Alpes", "Provence-Alpes-Côte d'Azur", "Nouvelle-Aquitaine", "Occitanie", "Hauts-de-France", "Grand Est", "Pays de la Loire", "Bretagne", "Normandie"]
+        };
+
+        // STEP-BY-STEP EXPLANATORY GUIDE TO HELP YOU CUSTOM-STYLE AND ADJUST CSS SELECTORS IN THE TARGET WEBSITE HTML
+        // =========================================================================================================
+        // 1. SELECT_ROW: Write a selector targeting the row elements of your orders table. E.g. 'table tr' or '.order-row'
+        const CSS_SELECT_ROW = ".order-row-item"; 
+        
+        // 2. CELL_STATUS: Select a column or class inside the row displaying status. E.g. '.status' or 'td:nth-child(8)'
+        const CSS_CELL_STATUS = ".status-cell";
+        
+        // 3. CELL_LOCATION: Specify the cell with the customer state/wilaya. E.g. '.wilaya-cell' or 'td:nth-child(6)'
+        const CSS_CELL_LOCATION = ".wilaya-cell";
+        
+        // 4. CELL_PRICE: Cell carrying order revenue/price. E.g. '.price-cell' or 'td:nth-child(7)'
+        const CSS_CELL_PRICE = ".price-cell";
+
+        // 5. CELL_REASON: Optional column capturing return reasoning. E.g. '.return-reason-cell'
+        const CSS_CELL_REASON = ".reason-cell";
+
+        /**
+         * Core dynamic DOM scraper engine. 
+         * Automatically loops through the specified selectors on your active page,
+         * aggregates KPIs, computes regional delivered-to-returned ratios, and populates states.
+         */
+        function extractLiveOrdersFromPage() {
+            // Re-initialize state statistics
+            scrapedStats = {
+                kpi: { totalSent: 0, totalDelivered: 0, totalPending: 0, totalReturned: 0, successRate: 0, returnRate: 0 },
+                regions: {},
+                reasons: { refused: 0, delayed: 0, wrongSize: 0, noResponse: 0 }
+            };
+
+            // Query rows from active HTML
+            const rows = document.querySelectorAll(CSS_SELECT_ROW);
+            
+            if (rows.length === 0) {
+                console.warn("Dynamic Scraper: No rows detected using selector: " + CSS_SELECT_ROW);
+                return false;
+            }
+
+            rows.forEach(row => {
+                try {
+                    // Extract values using innerText or textContent of target cells
+                    const cellStatusEl = row.querySelector(CSS_CELL_STATUS);
+                    const cellLocationEl = row.querySelector(CSS_CELL_LOCATION);
+                    const cellPriceEl = row.querySelector(CSS_CELL_PRICE);
+                    const cellReasonEl = row.querySelector(CSS_CELL_REASON);
+
+                    if (!cellStatusEl || !cellLocationEl) return; // Skip invalid lines
+
+                    const rawStatus = cellStatusEl.innerText || cellStatusEl.textContent || "";
+                    const rawLocation = cellLocationEl.innerText || cellLocationEl.textContent || "";
+                    const rawPrice = cellPriceEl ? (cellPriceEl.innerText || cellPriceEl.textContent || "0") : "0";
+                    const rawReason = cellReasonEl ? (cellReasonEl.innerText || cellReasonEl.textContent || "") : "";
+
+                    // Normalize and map Statuses
+                    let status = "pending";
+                    const statusString = rawStatus.toLowerCase().trim();
+                    if (statusString.includes("delivered") || statusString.includes("مستلم") || statusString.includes("تسليم") || statusString.includes("تم التوصيل")) {
+                        status = "delivered";
+                    } else if (statusString.includes("returned") || statusString.includes("مرجع") || statusString.includes("ملغى") || statusString.includes("canceled") || statusString.includes("مرفوض")) {
+                        status = "returned";
+                    } else if (statusString.includes("sent") || statusString.includes("مرسل") || statusString.includes("شحن") || statusString.includes("في الطريق")) {
+                        status = "sent";
+                    }
+
+                    // Parse numerical money values
+                    const price = parseFloat(rawPrice.replace(/[^\d.]/g, '')) || 0;
+
+                    // Clean and map locations
+                    const locationCleaned = rawLocation.trim();
+
+                    // Map Return Reasons
+                    const reasonString = rawReason.toLowerCase();
+                    if (status === "returned") {
+                        if (reasonString.includes("refused") || reasonString.includes("رفض") || reasonString.includes("امتناع") || reasonString.includes("رفض الاستلام")) {
+                            scrapedStats.reasons.refused++;
+                        } else if (reasonString.includes("delayed") || reasonString.includes("تأخر") || reasonString.includes("تأخر التوصيل")) {
+                            scrapedStats.reasons.delayed++;
+                        } else if (reasonString.includes("size") || reasonString.includes("مقاس") || reasonString.includes("قياس")) {
+                            scrapedStats.reasons.wrongSize++;
+                        } else {
+                            scrapedStats.reasons.noResponse++;
+                        }
+                    }
+
+                    // Increment core accounts KPI records
+                    scrapedStats.kpi.totalSent++;
+                    if (status === "delivered") {
+                        scrapedStats.kpi.totalDelivered++;
+                    } else if (status === "returned") {
+                        scrapedStats.kpi.totalReturned++;
+                    } else if (status === "pending" || status === "sent") {
+                        scrapedStats.kpi.totalPending++;
+                    }
+
+                    // Initialize regional data bucket if it doesn't exist
+                    if (!scrapedStats.regions[locationCleaned]) {
+                        scrapedStats.regions[locationCleaned] = {
+                            name: locationCleaned,
+                            total: 0,
+                            delivered: 0,
+                            returned: 0,
+                            pending: 0,
+                            revenue: 0,
+                            ratio: 0
+                        };
+                    }
+
+                    // Append regional row variables
+                    const reg = scrapedStats.regions[locationCleaned];
+                    reg.total++;
+                    if (status === "delivered") {
+                        reg.delivered++;
+                        reg.revenue += price;
+                    } else if (status === "returned") {
+                        reg.returned++;
+                    } else {
+                        reg.pending++;
+                    }
+
+                    // Re-calculate delivery success ratios dynamically: Ratio = Delivered / (Delivered + Returned)
+                    const totalFinished = reg.delivered + reg.returned;
+                    reg.ratio = totalFinished > 0 ? (reg.delivered / totalFinished) : 0;
+
+                } catch (err) {
+                    console.error("Error scraping row: ", err);
+                }
+            });
+
+            // Adjust dynamic score ranges for system accounts
+            const totalDone = scrapedStats.kpi.totalDelivered + scrapedStats.kpi.totalReturned;
+            scrapedStats.kpi.successRate = totalDone > 0 ? Math.round((scrapedStats.kpi.totalDelivered / totalDone) * 100) : 0;
+            scrapedStats.kpi.returnRate = totalDone > 0 ? Math.round((scrapedStats.kpi.totalReturned / totalDone) * 100) : 0;
+
+            return true;
+        }
+
+        // Populate KPIs elements live from scraped model
+        function updateKPIdisplays() {
+            document.getElementById('metric-sent').innerText = scrapedStats.kpi.totalSent;
+            document.getElementById('metric-delivered').innerText = scrapedStats.kpi.totalDelivered;
+            document.getElementById('metric-pending').innerText = scrapedStats.kpi.totalPending;
+            document.getElementById('metric-returned').innerText = scrapedStats.kpi.totalReturned;
+
+            document.getElementById('rate-delivered').innerText = `نسبة نجاح التوصيل: ${scrapedStats.kpi.successRate}%`;
+            document.getElementById('rate-returned').innerText = `نسبة المرتجعات: ${scrapedStats.kpi.returnRate}%`;
+        }
+
+        // Render Leaderboards values
+        function updateLeaderboards() {
+            const listContainer = document.getElementById('leaderboard-list');
+            listContainer.innerHTML = '';
+
+            const rankingRegions = Object.values(scrapedStats.regions)
+                .sort((a, b) => b.delivered - a.delivered || b.revenue - a.revenue);
+
+            document.getElementById('leaderboard-count').innerText = `${rankingRegions.length} جهة نشطة`;
+
+            if (rankingRegions.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="py-12 text-center text-zinc-650 text-xs font-bold leading-relaxed">
+                        لا توجد تداولات مسجلة لهذه الفئة الجغرافية.<br>استعمل جدول المحاكاة لملء المدن بسرعة.
+                    </div>
+                `;
+                return;
+            }
+
+            rankingRegions.forEach((reg, rankIndex) => {
+                const percentageRate = Math.round(reg.ratio * 100);
+                const isWinner = reg.ratio >= 0.5;
+                const badgesClass = isWinner 
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
+                    : "bg-rose-500/10 text-rose-400 border border-rose-500/20";
+
+                const currencyLabel = activeCountry === 'dz' ? 'دج' : activeCountry === 'ma' ? 'درهم' : '€';
+
+                listContainer.innerHTML += `
+                    <div class="p-3 bg-[#111219]/60 border border-zinc-900 rounded-2xl flex justify-between items-center transition-all hover:bg-zinc-900/40">
+                        <div class="flex items-center gap-3">
+                            <span class="w-6 h-6 rounded-lg bg-zinc-950 text-[10.5px] font-mono font-bold text-slate-500 flex items-center justify-center">${rankIndex + 1}</span>
+                            <div class="text-right">
+                                <h4 class="text-xs font-black text-slate-200">${reg.name}</h4>
+                                <span class="text-[9.5px] text-zinc-500 font-bold block mt-0.5">الطلبات: ${reg.total} ➔ نسبة النجاح: ${percentageRate}%</span>
+                            </div>
+                        </div>
+                        <div class="text-left font-mono">
+                            <span class="text-xs font-extrabold block text-emerald-400">${reg.revenue.toLocaleString()} ${currencyLabel}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // Generate and update BI reasons chart
+        function renderApexReasonsChart() {
+            const reasonsData = [
+                scrapedStats.reasons.refused,
+                scrapedStats.reasons.delayed,
+                scrapedStats.reasons.wrongSize,
+                scrapedStats.reasons.noResponse
+            ];
+
+            const options = {
+                chart: {
+                    type: 'donut',
+                    height: 220,
+                    foreColor: '#94a3b8',
+                    fontFamily: 'Cairo, sans-serif'
+                },
+                series: reasonsData.every(val => val === 0) ? [1, 1, 1, 1] : reasonsData,
+                labels: reasonsData.every(val => val === 0) 
+                    ? ['بانتظار البيانات', 'بانتظار البيانات', 'بانتظار البيانات', 'بانتظار البيانات'] 
+                    : ['رفض الزبون', 'تأخر شاحنة الشحن', 'مقاس غير دقيق', 'لا يرد على الهاتف'],
+                colors: ['#ef4444', '#f59e0b', '#3b82f6', '#64748b'],
+                stroke: {
+                    colors: ['#111219'],
+                    width: 2
+                },
+                legend: {
+                    position: 'bottom',
+                    fontSize: '11px',
+                    markers: {
+                        radius: 4
+                    }
+                },
+                dataLabels: {
+                    enabled: false
+                }
+            };
+
+            const targetDiv = document.querySelector('#reasons-pie-chart');
+            if (reasonsChart) {
+                reasonsChart.destroy();
+            }
+            reasonsChart = new ApexCharts(targetDiv, options);
+            reasonsChart.render();
+        }
+
+        // Re-generate automated diagnostic suggestions
+        function generateAutomatedInsights() {
+            const insightsBox = document.getElementById('ai-insights-box');
+            insightsBox.innerHTML = '';
+
+            let topState = null;
+            let maxRev = -1;
+            Object.values(scrapedStats.regions).forEach(reg => {
+                if (reg.revenue > maxRev) {
+                    maxRev = reg.revenue;
+                    topState = reg;
+                }
+            });
+
+            if (!topState) {
+                insightsBox.innerHTML = `
+                    <div class="flex items-start gap-2.5 text-zinc-500">
+                        <i data-lucide="info" class="w-4 h-4 flex-shrink-0 mt-0.5"></i>
+                        <p>بانتظار سحب وتحليل تداولات المبيعات لإصدار التقارير الميدانية.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            const successPercentage = Math.round(scrapedStats.kpi.successRate);
+            const currencyLabel = activeCountry === 'dz' ? 'دج' : activeCountry === 'ma' ? 'درهم' : '€';
+
+            insightsBox.innerHTML += `
+                <div class="flex items-start gap-2.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 flex-shrink-0"></span>
+                    <p class="text-slate-300">الولاية/الجهة الأكثر ربحية حالياً هي <strong class="text-white">${topState.name}</strong> بعوائد مالية مسلمة صافية قدرها <strong class="text-emerald-400 font-mono">${topState.revenue.toLocaleString()} ${currencyLabel}</strong>.</p>
+                </div>
+            `;
+
+            if (successPercentage < 60) {
+                insightsBox.innerHTML += `
+                    <div class="flex items-start gap-2.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-rose-500 mt-2 flex-shrink-0"></span>
+                        <p class="text-slate-300">تنبيـه هام: معدل التسليم الإجمالي منخفض نسبياً (<strong class="text-rose-450">${successPercentage}%</strong>). نقترح مراجعة شركة الشحن وتقييد المدن ذات المرتجعات المرتفعة.</p>
+                    </div>
+                `;
+            } else {
+                insightsBox.innerHTML += `
+                    <div class="flex items-start gap-2.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 flex-shrink-0"></span>
+                        <p class="text-slate-300">أداء مميز! جودة الشحن والتسليم والتنسيق مستقرة اليوم بمعدل نجاح يفوق <strong class="text-white">${successPercentage}%</strong>. استمر في تعزيز المخزون الأساسي.</p>
+                    </div>
+                `;
+            }
+
+            const highReturnStates = Object.values(scrapedStats.regions).filter(r => r.returned > r.delivered && r.returned > 0);
+            if (highReturnStates.length > 0) {
+                const stateNames = highReturnStates.map(s => s.name).join('، ');
+                insightsBox.innerHTML += `
+                    <div class="flex items-start gap-2.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500 mt-2 flex-shrink-0"></span>
+                        <p class="text-slate-300">ملاحظة حرجة: سجلت الجهات التالية (<strong class="text-amber-400">${stateNames}</strong>) نسبة مرتجعات مرتفعة مقارنة بالمستلم. ينصح بالاتصال التحققي بالزبائن قبل الشحن وتأكيد الطلبية.</p>
+                    </div>
+                `;
+            }
+            
+            // Re-render lucide icons
+            lucide.createIcons();
+        }
+
+        // Map rendering controller
+        function reinitializeMap(countryCode) {
+            const mapLoader = document.getElementById('map-loader');
+            mapLoader.classList.remove('pointer-events-none');
+            mapLoader.classList.add('opacity-100');
+
+            activeCountry = countryCode;
+
+            // 1. Destroy and clear layers perfectly as requested
+            if (map !== null) {
+                map.off();
+                map.remove();
+                map = null;
+            }
+
+            // 2. Refresh physical container alignment
+            const container = document.getElementById('map-container');
+            container.innerHTML = '<div id="map" class="w-full h-full rounded-2xl"></div>';
+
+            // 3. Define country anchors coordinates
+            let center = [28.0339, 1.6596]; // Default Algeria
+            let zoom = 5;
+
+            if (countryCode === 'ma') {
+                center = [31.5000, -7.0926];
+                zoom = 5.5;
+                document.getElementById('map-country-title').innerText = "🇲🇦 الخارطة التحليلية الجغرافية للمملكة المغربية";
+            } else if (countryCode === 'fr') {
+                center = [46.2276, 2.2137];
+                zoom = 6;
+                document.getElementById('map-country-title').innerText = "🇫🇷 الخارطة التحليلية الجغرافية لجمهورية فرنسا";
+            } else {
+                document.getElementById('map-country-title').innerText = "🇩🇿 الخارطة التحليلية الجغرافية للجمهورية الجزائرية";
+            }
+
+            // 4. Create Leaflet map instance
+            map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false,
+                scrollWheelZoom: true
+            }).setView(center, zoom);
+
+            // Add ultra premium elegant carto dark tile layer
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 18,
+                attribution: 'Corevia maps'
+            }).addTo(map);
+
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            // Create Layer Group for custom markers / polygons
+            layerGroup = L.layerGroup().addTo(map);
+
+            // 5. Load GeoJSON shapes or Fallback dynamically
+            loadGeoJsonLayers(countryCode);
+        }
+
+        // Apply color gradient math: Ratio = Delivered / (Delivered + Returned)
+        function getsStateColor(ratio, hasSales) {
+            if (!hasSales) return "#27272a"; // Inactive standard slate gray
+            
+            // Green scale if delivered > returned, otherwise Red scale
+            if (ratio >= 0.5) {
+                // Return different degrees of green based on strength of ratio (0.5 to 1.0)
+                if (ratio > 0.8) return "#059669"; // Dark forest green for high success
+                if (ratio > 0.6) return "#10b981"; // Vibrant emerald
+                return "#34d399"; // Soft green
+            } else {
+                if (ratio < 0.2) return "#9f1239"; // Dark crimson for high returns
+                if (ratio < 0.4) return "#dc2626"; // Strong red
+                return "#f87171"; // Soft rose red
+            }
+        }
+
+        // Dynamic Loading of GeoJSON boundaries
+        function loadGeoJsonLayers(countryCode) {
+            const mapLoader = document.getElementById('map-loader');
+            
+            // Build raw file paths for simplified high-fidelity vector boundaries
+            let url = "";
+            if (countryCode === 'dz') {
+                url = "https://raw.githubusercontent.com/yannforget/algeria-geojson/master/algeria-provinces.json";
+            } else if (countryCode === 'ma') {
+                url = "https://raw.githubusercontent.com/isellami/morocco-geojson/master/regions.json";
+            } else if (countryCode === 'fr') {
+                url = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/regions-version-simplifiee.geojson";
+            }
+
+            // Fetch high quality shapes
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error("Blocked or offline fetch response.");
+                    return res.json();
+                })
+                .then(data => {
+                    geojsonLayer = L.geoJSON(data, {
+                        style: function(feature) {
+                            // Coordinate feature properties representing state
+                            const name = feature.properties.name || feature.properties.nom || feature.properties.region || "";
+                            
+                            // Find matching scraped region statistics
+                            let matchingStat = null;
+                            Object.values(scrapedStats.regions).forEach(reg => {
+                                if (isMatchRegion(reg.name, name)) {
+                                    matchingStat = reg;
+                                }
+                            });
+
+                            const hasSales = matchingStat && matchingStat.total > 0;
+                            const colors = getsStateColor(matchingStat ? matchingStat.ratio : 0, hasSales);
+
+                            return {
+                                fillColor: colors,
+                                weight: 1.5,
+                                opacity: 0.85,
+                                color: '#18181b', // sleek boundary line colors
+                                fillOpacity: hasSales ? 0.6 : 0.2
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            const name = feature.properties.name || feature.properties.nom || feature.properties.region || "";
+                            
+                            // Mouse interactive hover highlights
+                            layer.on({
+                                mouseover: function(e) {
+                                    const layer = e.target;
+                                    layer.setStyle({
+                                        weight: 2.5,
+                                        color: '#3b82f6',
+                                        fillOpacity: 0.8
+                                    });
+                                    layer.bringToFront();
+                                },
+                                mouseout: function(e) {
+                                    geojsonLayer.resetStyle(e.target);
+                                }
+                            });
+
+                            // Find matching scraped stats
+                            let matchingStat = null;
+                            Object.values(scrapedStats.regions).forEach(reg => {
+                                if (isMatchRegion(reg.name, name)) {
+                                    matchingStat = reg;
+                                }
+                            });
+
+                            const currencyLabel = activeCountry === 'dz' ? 'دج' : activeCountry === 'ma' ? 'درهم' : '€';
+
+                            let tooltipHtml = `<strong class="text-xs text-white block mb-0.5">${name}</strong>`;
+                            if (matchingStat && matchingStat.total > 0) {
+                                tooltipHtml += `
+                                    <div class="mt-1 space-y-1 font-sans text-[10.5px]">
+                                        <span class="block">إجمالي الطرود: <b class="text-slate-200">${matchingStat.total} طرد</b></span>
+                                        <span class="block text-emerald-400">مسلمة بنجاح: <b>${matchingStat.delivered}</b></span>
+                                        <span class="block text-rose-400">مرجعة/ملغاة: <b>${matchingStat.returned}</b></span>
+                                        <span class="block text-indigo-400">صافي المبيعات: <b>${matchingStat.revenue.toLocaleString()} ${currencyLabel}</b></span>
+                                    </div>
+                                `;
+                            } else {
+                                tooltipHtml += `<span class="text-zinc-500 block text-[9.5px] mt-1">لا توجد مبيعات نشطة حالياً</span>`;
+                            }
+
+                            layer.bindTooltip(tooltipHtml, {
+                                sticky: true,
+                                className: 'leaflet-tooltip-own'
+                            });
+                        }
+                    }).addTo(map);
+
+                    // Fade out screen loading loader
+                    mapLoader.classList.add('pointer-events-none');
+                    mapLoader.classList.remove('opacity-100');
+                })
+                .catch(err => {
+                    console.warn("GeoJSON URL Fetch failed due to network sandbox restrictions. Activating high-contrast Centroids Marker fallback layer...", err);
+                    drawFallbackCentroidMarkers();
+                    mapLoader.classList.add('pointer-events-none');
+                    mapLoader.classList.remove('opacity-100');
+                });
+        }
+
+        // Fuzzy region matcher to connect scraper names with geojson metadata properties
+        function isMatchRegion(scrapedName, geojsonName) {
+            if (!scrapedName || !geojsonName) return false;
+            const sn = scrapedName.toLowerCase().trim();
+            const gn = geojsonName.toLowerCase().trim();
+            return sn.includes(gn) || gn.includes(sn);
+        }
+
+        // Resilient Fallback Algorithm: Draws beautiful glowing CSS circles at centroid coordinates
+        function drawFallbackCentroidMarkers() {
+            if (!layerGroup || !map) return;
+            layerGroup.clearLayers();
+
+            const centroids = REGION_CENTROIDS[activeCountry] || {};
+            const currencyLabel = activeCountry === 'dz' ? 'دج' : activeCountry === 'ma' ? 'درهم' : '€';
+
+            Object.entries(centroids).forEach(([regName, coords]) => {
+                const regStat = scrapedStats.regions[regName] || { total: 0, delivered: 0, returned: 0, pending: 0, revenue: 0, ratio: 0 };
+                const hasSales = regStat.total > 0;
+                
+                const markerColor = getsStateColor(regStat.ratio, hasSales);
+                
+                // Construct beautiful glowing circle marker of proportionate scale
+                const radiusVal = hasSales ? Math.min(30, 10 + (regStat.total * 3)) : 8;
+
+                const circle = L.circleMarker(coords, {
+                    radius: radiusVal,
+                    fillColor: markerColor,
+                    color: '#ffffff',
+                    weight: 1,
+                    opacity: 0.9,
+                    fillOpacity: hasSales ? 0.75 : 0.35
+                }).addTo(layerGroup);
+
+                let content = `
+                    <div class="p-1 font-sans text-right">
+                        <strong class="text-xs text-white block">${regName}</strong>
+                `;
+                if (hasSales) {
+                    content += `
+                        <div class="mt-1 space-y-0.5 text-[10.5px]">
+                            <span class="block">إجمالي الطلبيات: <b class="text-slate-200">${regStat.total}</b></span>
+                            <span class="block text-emerald-400">مسلمة: <b>${regStat.delivered}</b></span>
+                            <span class="block text-rose-400">مرجعة: <b>${regStat.returned}</b></span>
+                            <span class="block text-indigo-400 font-mono">صافي: <b>${regStat.revenue.toLocaleString()} ${currencyLabel}</b></span>
+                        </div>
+                    `;
+                } else {
+                    content += `<span class="text-zinc-500 text-[9px] block mt-1">لا توجد مبيعات مسجلة في هذا النطاق</span>`;
+                }
+                content += `</div>`;
+
+                circle.bindTooltip(content, {
+                    sticky: true,
+                    className: 'leaflet-tooltip-own'
+                });
+            });
+        }
+
+        // Toggle dropdown map transaction
+        function changeCountryMap(value) {
+            // Instantly clear layers and re-initialize perfectly without losing layouts
+            reinitializeMap(value);
+            
+            // Build simulated table rows matching typical locations for this country
+            renderSimulatedTable();
+            
+            // Analyze the new table and update metrics
+            triggerManualScrape();
+        }
+
+        // Scrape trigger wrapper
+        function triggerManualScrape() {
+            const hasRows = extractLiveOrdersFromPage();
+            if (hasRows) {
+                updateKPIdisplays();
+                updateLeaderboards();
+                renderApexReasonsChart();
+                generateAutomatedInsights();
+                
+                // Re-draw either vector choropleth layer style or dynamic fallback centroids markers
+                if (geojsonLayer) {
+                    geojsonLayer.eachLayer(layer => {
+                        const name = layer.feature.properties.name || layer.feature.properties.nom || layer.feature.properties.region || "";
+                        let matchingStat = null;
+                        Object.values(scrapedStats.regions).forEach(reg => {
+                            if (isMatchRegion(reg.name, name)) {
+                                matchingStat = reg;
+                            }
+                        });
+                        const hasSales = matchingStat && matchingStat.total > 0;
+                        const colors = getsStateColor(matchingStat ? matchingStat.ratio : 0, hasSales);
+                        layer.setStyle({
+                            fillColor: colors,
+                            fillOpacity: hasSales ? 0.6 : 0.2
+                        });
+                    });
+                } else {
+                    drawFallbackCentroidMarkers();
+                }
+            }
+        }
+
+        // SANDBOX DATA MANIPULATION FUNCTIONS FOR DEMO VISIBILITY
+        // =======================================================
+        let tableRowsMemory = [...DEFAULT_SIMULATED_ORDERS];
+
+        function renderSimulatedTable() {
+            const container = document.getElementById('table-payload');
+            container.innerHTML = '';
+
+            // Filter rows by country to make it incredibly lifelike and smart!
+            const filtered = tableRowsMemory.filter(r => r.country === activeCountry);
+
+            filtered.forEach(row => {
+                const statusBadge = row.status.includes('Delivered') 
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : row.status.includes('Returned')
+                    ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                    : "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+
+                const currencyLabel = activeCountry === 'dz' ? 'دج' : activeCountry === 'ma' ? 'درهم' : '€';
+
+                container.innerHTML += `
+                    <tr class="order-row-item hover:bg-zinc-900/30 transition-colors">
+                        <td class="p-3 text-right">
+                            <span class="font-extrabold text-slate-200 block">${row.customer}</span>
+                            <span class="text-[9.5px] text-zinc-500 font-mono block mt-0.5">${row.id}</span>
+                        </td>
+                        <td class="p-3 text-right font-bold text-slate-300 wilaya-cell">
+                            ${row.region}
+                        </td>
+                        <td class="p-3 text-right font-medium text-rose-400 reason-cell">
+                            ${row.reason || '<span class="text-zinc-650 font-bold">✓ لا يوجد</span>'}
+                        </td>
+                        <td class="p-3 text-right font-mono font-bold text-sky-400 price-cell">
+                            ${row.price.toLocaleString()} ${currencyLabel}
+                        </td>
+                        <td class="p-3 text-center">
+                            <select onchange="updateSimulatedStatus('${row.id}', this.value)" class="p-1 px-2.5 bg-zinc-950 border border-zinc-805 text-[10px] rounded-lg font-black text-center cursor-pointer text-slate-300 status-cell">
+                                <option value="Delivered / مستلم" ${row.status.includes('Delivered') ? 'selected' : ''}>Delivered / مستلم</option>
+                                <option value="Returned / مرجع / ملغى" ${row.status.includes('Returned') ? 'selected' : ''}>Returned / مرجع / ملغى</option>
+                                <option value="Pending / قيد الانتظار" ${row.status.includes('Pending') ? 'selected' : ''}>Pending / قيد الانتظار</option>
+                            </select>
+                        </td>
+                        <td class="p-3 text-center">
+                            <button onclick="deleteSimulatedRow('${row.id}')" class="text-rose-400 hover:text-white transition-colors bg-rose-500/10 hover:bg-rose-600 p-1 rounded-lg">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            // Initialize icons
+            lucide.createIcons();
+        }
+
+        // Inline status updater for simulation
+        function updateSimulatedStatus(rowId, newStatus) {
+            const index = tableRowsMemory.findIndex(r => r.id === rowId);
+            if (index !== -1) {
+                tableRowsMemory[index].status = newStatus;
+                
+                // Clear reason if set to delivered, otherwise assign a random reason
+                if (newStatus.includes('Delivered')) {
+                    tableRowsMemory[index].reason = "";
+                } else if (newStatus.includes('Returned') && !tableRowsMemory[index].reason) {
+                    const reasons = ["Refused / رفض الاستلام", "Delayed / تأخر التوصيل", "Size Error / مقاس خاطئ"];
+                    tableRowsMemory[index].reason = reasons[Math.floor(Math.random() * reasons.length)];
+                }
+                
+                renderSimulatedTable();
+                triggerManualScrape();
+            }
+        }
+
+        // Delete simulated row action
+        function deleteSimulatedRow(rowId) {
+            tableRowsMemory = tableRowsMemory.filter(r => r.id !== rowId);
+            renderSimulatedTable();
+            triggerManualScrape();
+        }
+
+        // Add simulated row action
+        function addSimulatedRow() {
+            // Select random region for active country
+            const list = GEOGRAPHIC_MAPPING[activeCountry] || [];
+            const randomRegion = list[Math.floor(Math.random() * list.length)] || "Unknown";
+
+            const arabicNames = ["أحمد مرابط", "مصطفى قادري", "حميد بلحاج", "سليمان طيبي", "عمر بن عيسى", "كريمة منصور", "منى حداد"];
+            const frenchNames = ["Jean-Pierre", "Claire Martin", "David Dubois", "Alice Laurent", "Sophie Bernard"];
+            const randomNames = activeCountry === 'fr' 
+                ? frenchNames[Math.floor(Math.random() * frenchNames.length)]
+                : arabicNames[Math.floor(Math.random() * arabicNames.length)];
+
+            const randomPrice = activeCountry === 'fr' 
+                ? Math.floor(40 + Math.random() * 180)
+                : Math.floor(2500 + Math.random() * 12000);
+
+            const statuses = ["Delivered / مستلم", "Returned / مرجع / ملغى", "Delivered / مستلم", "Pending / قيد الانتظار"];
+            const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+
+            // Return reason if returned
+            let randomReason = "";
+            if (randomStatus.includes('Returned')) {
+                const reasons = ["Refused / رفض الاستلام", "Delayed / تأخر التوصيل", "Size Error / مقاس خاطئ"];
+                randomReason = reasons[Math.floor(Math.random() * reasons.length)];
+            }
+
+            const idNumber = Math.floor(1000 + Math.random() * 9000);
+
+            // Construct new row object
+            const newRow = {
+                id: `${activeCountry.toUpperCase()}-${idNumber}`,
+                customer: randomNames,
+                country: activeCountry,
+                region: randomRegion,
+                reason: randomReason,
+                price: randomPrice,
+                status: randomStatus
+            };
+
+            tableRowsMemory.unshift(newRow);
+            renderSimulatedTable();
+            triggerManualScrape();
+        }
+
+        // Reset memory table to default values
+        function resetSimulatedData() {
+            tableRowsMemory = [...DEFAULT_SIMULATED_ORDERS];
+            renderSimulatedTable();
+            triggerManualScrape();
+        }
+
+        // On document loaded, run the automatic system sequences
+        window.addEventListener('DOMContentLoaded', () => {
+            // Init Lucide Icons variables
+            lucide.createIcons();
+
+            // Render table grid
+            renderSimulatedTable();
+
+            // Fire scraper first sequence
+            extractLiveOrdersFromPage();
+            updateKPIdisplays();
+            updateLeaderboards();
+            renderApexReasonsChart();
+            generateAutomatedInsights();
+
+            // Bootstrap Leaflet map dark frame
+            reinitializeMap('dz');
+
+            // Set up automatic scraper looping every 4 seconds to catch table edits
+            setInterval(() => {
+                extractLiveOrdersFromPage();
+                updateKPIdisplays();
+                updateLeaderboards();
+                generateAutomatedInsights();
+            }, 4000);
+        });
+    </script>
+</body>
+</html>

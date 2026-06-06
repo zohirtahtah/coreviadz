@@ -1,0 +1,448 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect } from "react";
+import { 
+  LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
+  Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
+  Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check
+} from "lucide-react";
+import { LanguageType, ThemeType, BusinessProfile } from "../types";
+import { translations } from "../translations";
+import { Flag } from "./Flag";
+
+interface SidebarProps {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  lang: LanguageType;
+  setLang: (l: LanguageType) => void;
+  theme: ThemeType;
+  toggleTheme: () => void;
+  profile: BusinessProfile;
+  passcode: string;
+  isLocked: boolean;
+  unlockedTabs: string[];
+  onUnlockTab: (tab: string) => void;
+  onLogout: () => void;
+  notifications: string[];
+  clearNotifications: () => void;
+}
+
+export default function Sidebar({
+  activeTab,
+  setActiveTab,
+  lang,
+  setLang,
+  theme,
+  toggleTheme,
+  profile,
+  passcode,
+  isLocked,
+  unlockedTabs,
+  onUnlockTab,
+  onLogout,
+  notifications,
+  clearNotifications
+}: SidebarProps) {
+  const t = translations[lang];
+  const isRtl = lang === "ar";
+  
+  // Local Passcode Modal State
+  const [showLockScreen, setShowLockScreen] = useState<string | null>(null);
+  const [enteredCode, setEnteredCode] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+
+  // Locked pages registry
+  const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
+
+  const navItems = [
+    { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: false },
+    { id: "orders", label: t.navOrders, icon: ShoppingCart, isRestricted: false },
+    { id: "inventory", label: t.navInventory, icon: Package, isRestricted: false },
+    { id: "products", label: t.navProducts, icon: ShoppingBag, isRestricted: false },
+    { id: "workers", label: t.navWorkers, icon: Users, isRestricted: true },
+    { id: "expenses", label: t.navExpenses, icon: Receipt, isRestricted: true },
+    { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: true },
+    { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: true },
+    { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: true },
+    { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
+    { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
+  ];
+
+  const handleNavClick = (tabId: string, isRestricted: boolean) => {
+    if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
+      setShowLockScreen(tabId);
+      setEnteredCode("");
+      setErrorMsg("");
+    } else {
+      setActiveTab(tabId);
+    }
+  };
+
+  const verifyPasscode = () => {
+    if (enteredCode === passcode) {
+      onUnlockTab(showLockScreen!);
+      setActiveTab(showLockScreen!);
+      setShowLockScreen(null);
+      setEnteredCode("");
+      setErrorMsg("");
+    } else {
+      setErrorMsg(lang === "ar" ? "كلمة المرور خاطئة" : "Incorrect Passcode");
+      setEnteredCode("");
+    }
+  };
+
+  const handleCellClick = (num: string) => {
+    if (enteredCode.length < 4) {
+      setEnteredCode(prev => prev + num);
+    }
+  };
+
+  const handleBackspace = () => {
+    setEnteredCode(prev => prev.slice(0, -1));
+  };
+
+  // Add Keyboard input listener for physical keyboard support
+  useEffect(() => {
+    if (!showLockScreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Allow numerical entries
+      if (e.key >= "0" && e.key <= "9") {
+        e.preventDefault();
+        handleCellClick(e.key);
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        handleBackspace();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        verifyPasscode();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setShowLockScreen(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showLockScreen, enteredCode, passcode]);
+
+  // Auto-verify when 4 characters are entered
+  useEffect(() => {
+    if (showLockScreen && enteredCode.length === 4) {
+      verifyPasscode();
+    }
+  }, [enteredCode, showLockScreen]);
+
+  return (
+    <>
+      {/* SIDEBAR MAINCONTAINER */}
+      <aside className={`w-64 max-h-screen bg-[#09090b] border-[#27272a] flex flex-col justify-between p-4 z-40 fixed top-0 bottom-0 ${isRtl ? "right-0 border-l" : "left-0 border-r"} hidden md:flex`} id="desktop_sidebar">
+        <div className="space-y-6 flex flex-col" id="sidebar_main_section">
+          
+          {/* Brand Info with Profile Avatar & Logo */}
+          <div className="flex items-center gap-3 border-b border-[#27272a] pb-4" id="sidebar_brand_card">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center overflow-hidden shadow-md flex-shrink-0">
+              {profile.logoUrl ? (
+                <img src={profile.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-lg font-bold font-mono text-white text-center">
+                  {profile.businessName ? profile.businessName.charAt(0).toUpperCase() : "C"}
+                </span>
+              )}
+            </div>
+            <div className="min-w-0" id="sidebar_brand_meta">
+              <h1 className="text-sm font-bold text-white truncate">{profile.businessName || "Corevia ERP"}</h1>
+              <span className="text-[10px] font-mono text-indigo-400 tracking-tight block truncate">● {profile.businessType || "Core Workspace"}</span>
+            </div>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="space-y-1 flex-1 overflow-y-auto max-h-[calc(100vh-220px)] pr-1" id="sidebar_navigation_links">
+            {navItems.map((item) => {
+              const IconComp = item.icon;
+              const isItemUnlocked = !item.isRestricted || !isLocked || unlockedTabs.includes(item.id);
+              const isActive = activeTab === item.id;
+              
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleNavClick(item.id, item.isRestricted)}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium rounded-lg transition-all outline-none group text-right ${
+                    isActive 
+                      ? "bg-indigo-600/10 text-indigo-400"
+                      : "text-slate-400 hover:bg-[#18181b] hover:text-slate-200"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <IconComp className={`w-4 h-4 transition-colors ${isActive ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+                    <span>{item.label}</span>
+                  </div>
+                  {item.isRestricted && !isItemUnlocked && (
+                    <Lock className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Sidebar Footer with Session actions */}
+        <div className="border-t border-[#27272a] pt-3 space-y-3" id="sidebar_footer_section">
+          
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono px-2" id="sidebar_metainfo">
+            <span>Corevia Pro</span>
+            <span>2026 UTC</span>
+          </div>
+
+          <button 
+            onClick={onLogout}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all outline-none cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>{lang === "ar" ? "تسجيل الخروج" : lang === "fr" ? "Se déconnecter" : "Log Out"}</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* HEADER & TOPBAR WITH RESPONSIVE ALIGNMENT */}
+      <header className={`h-16 bg-[#09090b]/80 backdrop-blur-md border-b border-[#27272a] flex items-center justify-between px-4 z-30 fixed top-0 transition-all duration-300 ${
+        isRtl 
+          ? "right-0 md:right-64 left-0 w-full md:w-[calc(100%-16rem)] flex-row-reverse" 
+          : "left-0 md:left-64 right-0 w-full md:w-[calc(100%-16rem)] flex-row"
+      }`} id="global_topbar">
+        {/* Brand visual (on left for LTR, right for RTL) */}
+        <div className="flex items-center gap-3" id="topbar_left">
+          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white md:hidden animate-pulse">
+            {profile.businessName ? profile.businessName.charAt(0).toUpperCase() : "C"}
+          </div>
+          <span className="text-white text-sm font-bold truncate max-w-[120px] sm:max-w-[200px]">{profile.businessName || "Corevia"}</span>
+        </div>
+
+        {/* Right side options: language switchers, alerts and visuals */}
+        <div className="flex items-center gap-2 sm:gap-2.5" id="topbar_right_instruments">
+          
+          {/* Quick Config Pills Deck (Side-by-side theme + language selector) */}
+          <div className="flex items-center bg-[#18181b] dark:bg-[#121214] border border-[#27272a] rounded-xl p-0.5 gap-1.2" id="header_control_dock">
+            
+            {/* Light/Dark Toggle */}
+            <button 
+              onClick={toggleTheme}
+              className="p-1.5 px-2.5 hover:bg-[#27272a] dark:hover:bg-[#1c1c1e] text-slate-300 hover:text-white rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+              title={theme === "light" ? "Switch to Dark Mode" : "Switch to Light Mode"}
+            >
+              {theme === "light" ? (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-[10px] hidden sm:inline">{lang === "ar" ? "ليلي" : lang === "fr" ? "Nuit" : "Dark"}</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-[10px] hidden sm:inline">{lang === "ar" ? "نهاري" : lang === "fr" ? "Jour" : "Light"}</span>
+                </>
+              )}
+            </button>
+
+            {/* Visual Divider */}
+            <span className="h-4 w-[1px] bg-[#27272a]" />
+
+            {/* Languages Dropdown Trigger (Algeria flag, France flag, US Flag) */}
+            <div className="relative" id="lang_dropdown_menu">
+              <button 
+                onClick={() => setShowLangDropdown(!showLangDropdown)}
+                className="flex items-center gap-1.5 p-1.5 px-2.5 hover:bg-[#27272a] dark:hover:bg-[#1c1c1e] text-slate-200 text-xs rounded-lg transition-all font-bold cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[11px] flex items-center gap-1.5 font-bold">
+                  <Flag lang={lang} />
+                  <span>{lang === "ar" ? "العربية" : lang === "fr" ? "Français" : "English"}</span>
+                </span>
+              </button>
+              
+              {showLangDropdown && (
+                <>
+                  {/* Invisible backdrop to capture clicks outside and close the dropdown */}
+                  <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setShowLangDropdown(false)} />
+                  <div className={`absolute ${isRtl ? "left-0" : "right-0"} top-9 bg-[#09090b] border border-[#27272a] rounded-xl shadow-2xl p-1 z-50 flex flex-col gap-1 w-32 text-right transition-all animate-fade-in`}>
+                    <button 
+                      onClick={() => {
+                        setLang("ar");
+                        setShowLangDropdown(false);
+                      }} 
+                      className="flex items-center justify-between p-2 text-xs text-slate-300 hover:bg-[#18181b] rounded-lg cursor-pointer w-full text-right"
+                    >
+                      <span className="flex items-center gap-1.5"><Flag lang="ar" /> <span>العربية</span></span>
+                      {lang === "ar" && <Check className="w-3 h-3 text-emerald-400" />}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setLang("fr");
+                        setShowLangDropdown(false);
+                      }} 
+                      className="flex items-center justify-between p-2 text-xs text-slate-300 hover:bg-[#18181b] rounded-lg cursor-pointer w-full text-left ltr"
+                    >
+                      <span className="flex items-center gap-1.5"><Flag lang="fr" /> <span>Français</span></span>
+                      {lang === "fr" && <Check className="w-3 h-3 text-emerald-400" />}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setLang("en");
+                        setShowLangDropdown(false);
+                      }} 
+                      className="flex items-center justify-between p-2 text-xs text-slate-300 hover:bg-[#18181b] rounded-lg cursor-pointer w-full text-left ltr"
+                    >
+                      <span className="flex items-center gap-1.5"><Flag lang="en" /> <span>English</span></span>
+                      {lang === "en" && <Check className="w-3 h-3 text-emerald-400" />}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+          </div>
+
+          {/* Alarm Bell Notifications Panel */}
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-2 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl transition-all border border-slate-700/20 relative cursor-pointer"
+            >
+              <Bell className="w-4 h-4" />
+              {notifications.length > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+              )}
+            </button>
+
+            {showNotifications && (
+              <div className={`absolute ${isRtl ? "left-0" : "right-0"} top-11 w-80 bg-[#09090b] border border-[#27272a] shadow-2xl rounded-2xl p-4 z-50 max-h-96 overflow-y-auto`} id="notifications_popover">
+                <div className="flex justify-between items-center pb-2 border-b border-[#27272a] mb-2">
+                  <h3 className="text-xs font-bold text-white">{t.notifTitle}</h3>
+                  {notifications.length > 0 && (
+                    <button onClick={clearNotifications} className="text-[10px] text-indigo-400 hover:underline">
+                      {isRtl ? "تفريغ الكل" : "Clear All"}
+                    </button>
+                  )}
+                </div>
+                
+                {notifications.length === 0 ? (
+                  <p className="text-slate-400 text-xs text-center py-4">{t.notifEmpty}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {notifications.map((notif, index) => (
+                      <div key={index} className="p-2.5 bg-slate-900 border border-slate-850 rounded-xl text-[11px] text-slate-300 leading-relaxed text-right">
+                        {notif}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Exit/Logout button visible on both mobile & desktop */}
+          <button 
+            onClick={onLogout}
+            className="p-2 bg-rose-550/10 hover:bg-rose-550/20 text-rose-400 rounded-xl transition-all border border-rose-500/20 cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+            title={lang === "ar" ? "تسجيل الخروج" : "Log Out"}
+            id="topbar_logout_action"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="text-[10px] font-black hidden sm:inline">{lang === "ar" ? "خروج" : "Exit"}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* MOBILE BOTTOM NAVIGATION */}
+      <nav className="fixed bottom-0 left-0 right-0 h-14 bg-[#09090b]/90 backdrop-blur-md border-t border-[#27272a] flex items-center justify-around px-2 z-40 md:hidden" id="mobile_subnavigation">
+        <button onClick={() => handleNavClick("dashboard", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "dashboard" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+          <LayoutDashboard className="w-4 h-4" />
+          <span>{lang === "ar" ? "الرئيسية" : "Home"}</span>
+        </button>
+        <button onClick={() => handleNavClick("orders", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "orders" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+          <ShoppingCart className="w-4 h-4" />
+          <span>{lang === "ar" ? "الطلبيات" : "Orders"}</span>
+        </button>
+        <button onClick={() => handleNavClick("inventory", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "inventory" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+          <Package className="w-4 h-4" />
+          <span>{lang === "ar" ? "المخزون" : "Stock"}</span>
+        </button>
+        <button onClick={() => handleNavClick("profit", true)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "profit" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+          <LandmarkIcon className="w-4 h-4" />
+          <span>{lang === "ar" ? "الأرباح" : "Finance"}</span>
+        </button>
+        <button onClick={() => handleNavClick("settings", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+          <Settings className="w-4 h-4" />
+          <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
+        </button>
+      </nav>
+
+      {/* OVERLAY CUSTOM PASSCODE PAD */}
+      {showLockScreen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" id="passcode_overlay_modal">
+          <div className="w-full max-w-sm bg-[#09090b] border border-[#27272a] shadow-2xl rounded-2xl p-6 relative overflow-hidden text-center" id="pascode_card_container">
+            <div className="absolute top-3 right-3">
+              <button onClick={() => setShowLockScreen(null)} className="text-slate-400 hover:text-white text-sm font-semibold p-1">✕</button>
+            </div>
+
+            <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center mb-4">
+              <KeyRound className="w-5 h-5 text-indigo-400" />
+            </div>
+
+            <h2 className="text-lg font-bold text-white mb-2">{t.navLocked}</h2>
+            <p className="text-xs text-slate-400 mb-6 px-4">{t.enterPasscode}</p>
+
+            {/* Code Dots Indicator */}
+            <div className="flex justify-center gap-3 mb-6">
+              {[0, 1, 2, 3].map((dotIndex) => (
+                <div 
+                  key={dotIndex}
+                  className={`w-3.5 h-3.5 rounded-full border transition-all ${
+                    enteredCode.length > dotIndex 
+                      ? "bg-indigo-550 border-indigo-550 scale-110 shadow-lg shadow-indigo-500/20" 
+                      : "border-[#27272a] bg-[#040406]"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {errorMsg && <p className="text-xs text-rose-400 font-medium mb-4">{errorMsg}</p>}
+
+            {/* Custom Interactive Grid Keypad */}
+            <div className="grid grid-cols-3 gap-3 max-w-[240px] mx-auto mb-6 font-mono" id="keypad_interaction_grid">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((numVal) => (
+                <button
+                  key={numVal}
+                  onClick={() => handleCellClick(numVal)}
+                  className="w-14 h-14 rounded-full bg-[#1c1c1e] hover:bg-[#27272a] active:bg-[#27272a]/70 text-lg font-bold text-slate-200 transition-all flex items-center justify-center mx-auto shadow-sm border border-[#27272a]"
+                >
+                  {numVal}
+                </button>
+              ))}
+              <button 
+                onClick={handleBackspace} 
+                className="w-14 h-14 rounded-full bg-[#1c1c1e]/40 hover:bg-[#27272a] text-xs font-semibold text-slate-400 transition-all flex items-center justify-center mx-auto border border-[#27272a]/30"
+              >
+                {isRtl ? "حذف" : "DEL"}
+              </button>
+              <button
+                onClick={() => handleCellClick("0")}
+                className="w-14 h-14 rounded-full bg-[#1c1c1e] hover:bg-[#27272a] text-lg font-bold text-slate-250 transition-all flex items-center justify-center mx-auto border border-[#27272a]"
+              >
+                0
+              </button>
+              <button 
+                onClick={verifyPasscode} 
+                className="w-14 h-14 rounded-full bg-indigo-650 hover:bg-indigo-600 text-xs font-bold text-white transition-all flex items-center justify-center mx-auto shadow-md"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
