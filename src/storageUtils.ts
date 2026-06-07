@@ -324,16 +324,11 @@ const KEYS = {
 };
 
 export function initializeDatabase(forceReset = false): void {
-  const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v5";
+  const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v15";
   const hasCleaned = localStorage.getItem(CLEAN_SLATE_MARKER);
-  if (!hasCleaned) {
-    // Clear old keys to avoid any trace of demo data in user browser!
-    Object.values(KEYS).forEach(k => {
-      if (k !== KEYS.SESSION) { // Keep session logged in so they don't lose session if already authenticated
-        localStorage.removeItem(k);
-      }
-    });
-    localStorage.removeItem("corevia_unified_expenses_v1"); // also key defined in App.tsx
+  if (!hasCleaned || forceReset) {
+    // Purge ALL keys in localStorage so that everything is 100% empty and logged out
+    localStorage.clear();
     localStorage.setItem(CLEAN_SLATE_MARKER, "true");
     forceReset = true;
   }
@@ -341,7 +336,7 @@ export function initializeDatabase(forceReset = false): void {
   const hasProfile = localStorage.getItem(KEYS.PROFILE);
   if (hasProfile && !forceReset) return;
 
-  // Set default empty profile info
+  // Set default empty profile info (when first loaded or reset)
   const emptyOwnerProfile: BusinessProfile = {
     businessName: "المؤسسة السحابية",
     businessType: "تجارة إلكترونية",
@@ -361,18 +356,6 @@ export function initializeDatabase(forceReset = false): void {
     taxNumber: ""
   };
   localStorage.setItem(KEYS.PROFILE, JSON.stringify(emptyOwnerProfile));
-  
-  // Set default session (Admin fallback) if no session exists yet
-  if (!localStorage.getItem(KEYS.SESSION)) {
-    const defaultSession: UserSession = {
-      username: "Adel Corevia",
-      email: "coreviadz@gmail.com",
-      isRegistered: true,
-      isApproved: true,
-      isSuspended: false
-    };
-    localStorage.setItem(KEYS.SESSION, JSON.stringify(defaultSession));
-  }
   
   // Set datasets to completely EMPTY arrays
   localStorage.setItem(KEYS.ORDERS, JSON.stringify([]));
