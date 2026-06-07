@@ -324,7 +324,7 @@ const KEYS = {
 };
 
 export function initializeDatabase(forceReset = false): void {
-  const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v15";
+  const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v16";
   const hasCleaned = localStorage.getItem(CLEAN_SLATE_MARKER);
   if (!hasCleaned || forceReset) {
     // Purge ALL keys in localStorage so that everything is 100% empty and logged out

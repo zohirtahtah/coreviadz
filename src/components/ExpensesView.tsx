@@ -61,17 +61,12 @@ export default function ExpensesView({
   // Collections (with storage persistence)
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>(() => {
     const stored = localStorage.getItem("fixedExpenses");
-    return stored ? JSON.parse(stored) : [
-      { id: "fe-demo-1", name: "كراء الورشة والمقر الرئيسي", amount: 25000, date: `${currentYear}-01-01` },
-      { id: "fe-demo-2", name: "اشتراك إنترنت للعمل", amount: 4800, date: `${currentYear}-01-05` }
-    ];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [variableExpenses, setVariableExpenses] = useState<VariableExpense[]>(() => {
     const stored = localStorage.getItem("variableExpenses");
-    return stored ? JSON.parse(stored) : [
-      { id: "ve-demo-1", name: "شراء شريط لاصق وأكياس تغليف شحن", amount: 12000, date: `${currentYear}-06-01`, monthYear: `${currentYear}-06` }
-    ];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [workerExpenseEntries, setWorkerExpenseEntries] = useState<WorkerExpenseEntry[]>(() => {
@@ -81,43 +76,27 @@ export default function ExpensesView({
 
   const [adExpenses, setAdExpenses] = useState<AdExpense[]>(() => {
     const stored = localStorage.getItem("adExpenses");
-    return stored ? JSON.parse(stored) : [
-      { 
-        id: "ad-demo-1", 
-        platform: "Facebook", 
-        amountUSD: 120, 
-        exchangeRate: 245, 
-        amountCurrency: 29400, 
-        startDate: `${currentYear}-06-01`, 
-        endDate: `${currentYear}-06-15`, 
-        monthYear: `${currentYear}-06` 
-      }
-    ];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [allFixedExpenseNames, setAllFixedExpenseNames] = useState<string[]>(() => {
     const stored = localStorage.getItem("allFixedExpenseNames");
-    return stored ? JSON.parse(stored) : ["كراء الورشة والمقر الرئيسي", "اشتراك إنترنت للعمل", "فاتورة مياه وكهرباء غاز", "اشتراك ساس تليغرام بوت"];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [allVariableExpenseNames, setAllVariableExpenseNames] = useState<string[]>(() => {
     const stored = localStorage.getItem("allVariableExpenseNames");
-    return stored ? JSON.parse(stored) : ["شراء شريط لاصق وأكياس تغليف شحن", "كرتون تغليف مقوى سميك", "صيانة آلات وماكينات الخياطة", "فاتورة وقود مركبة التوصيل"];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [fixedExpenseLastAmounts, setFixedExpenseLastAmounts] = useState<Record<string, number>>(() => {
     const stored = localStorage.getItem("fixedExpenseLastAmounts");
-    return stored ? JSON.parse(stored) : {
-      "كراء الورشة والمقر الرئيسي": 25000,
-      "اشتراك إنترنت للعمل": 4800
-    };
+    return stored ? JSON.parse(stored) : {};
   });
 
   const [varExpenseLastAmounts, setVarExpenseLastAmounts] = useState<Record<string, number>>(() => {
     const stored = localStorage.getItem("varExpenseLastAmounts");
-    return stored ? JSON.parse(stored) : {
-      "شراء شريط لاصق وأكياس تغليف شحن": 12000
-    };
+    return stored ? JSON.parse(stored) : {};
   });
 
   const [workers, setWorkers] = useState<Worker[]>(() => {
