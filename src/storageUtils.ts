@@ -324,81 +324,74 @@ const KEYS = {
 };
 
 export function initializeDatabase(forceReset = false): void {
+  const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v5";
+  const hasCleaned = localStorage.getItem(CLEAN_SLATE_MARKER);
+  if (!hasCleaned) {
+    // Clear old keys to avoid any trace of demo data in user browser!
+    Object.values(KEYS).forEach(k => {
+      if (k !== KEYS.SESSION) { // Keep session logged in so they don't lose session if already authenticated
+        localStorage.removeItem(k);
+      }
+    });
+    localStorage.removeItem("corevia_unified_expenses_v1"); // also key defined in App.tsx
+    localStorage.setItem(CLEAN_SLATE_MARKER, "true");
+    forceReset = true;
+  }
+
   const hasProfile = localStorage.getItem(KEYS.PROFILE);
   if (hasProfile && !forceReset) return;
 
-  // Set Profile
-  localStorage.setItem(KEYS.PROFILE, JSON.stringify(demoOwnerProfile));
-  
-  // Set default session
-  const defaultSession: UserSession = {
-    username: "Adel Corevia",
-    email: "coreviadz@gmail.com",
-    isRegistered: true,
-    isApproved: true,
-    isSuspended: false
+  // Set default empty profile info
+  const emptyOwnerProfile: BusinessProfile = {
+    businessName: "المؤسسة السحابية",
+    businessType: "تجارة إلكترونية",
+    experienceYears: "سنة واحدة",
+    estimatedOrders: "0",
+    estimatedWorkers: "0",
+    currency: "DZD",
+    defaultLanguage: "ar",
+    preferredTheme: "dark",
+    country: "Algeria",
+    ownerName: "المدير",
+    phone: "",
+    email: "",
+    address: "",
+    website: "",
+    commercialRegistry: "",
+    taxNumber: ""
   };
-  localStorage.setItem(KEYS.SESSION, JSON.stringify(defaultSession));
+  localStorage.setItem(KEYS.PROFILE, JSON.stringify(emptyOwnerProfile));
   
-  // Set datasets
-  localStorage.setItem(KEYS.ORDERS, JSON.stringify(demoOrders));
-  localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(demoProducts));
-  localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(demoSuppliers));
-  localStorage.setItem(KEYS.INVOICES, JSON.stringify(demoInvoices));
-  localStorage.setItem(KEYS.WORKERS, JSON.stringify(demoWorkers));
-  localStorage.setItem(KEYS.SALARY_SHEETS, JSON.stringify(demoSalarySheets));
-  localStorage.setItem(KEYS.FIXED_EXP, JSON.stringify(demoFixedExpenses));
-  localStorage.setItem(KEYS.VAR_EXP, JSON.stringify(demoVarExpenses));
-  localStorage.setItem(KEYS.AD_EXP, JSON.stringify(demoAdExpenses));
+  // Set default session (Admin fallback) if no session exists yet
+  if (!localStorage.getItem(KEYS.SESSION)) {
+    const defaultSession: UserSession = {
+      username: "Adel Corevia",
+      email: "coreviadz@gmail.com",
+      isRegistered: true,
+      isApproved: true,
+      isSuspended: false
+    };
+    localStorage.setItem(KEYS.SESSION, JSON.stringify(defaultSession));
+  }
+  
+  // Set datasets to completely EMPTY arrays
+  localStorage.setItem(KEYS.ORDERS, JSON.stringify([]));
+  localStorage.setItem(KEYS.PRODUCTS, JSON.stringify([]));
+  localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify([]));
+  localStorage.setItem(KEYS.INVOICES, JSON.stringify([]));
+  localStorage.setItem(KEYS.WORKERS, JSON.stringify([]));
+  localStorage.setItem(KEYS.SALARY_SHEETS, JSON.stringify([]));
+  localStorage.setItem(KEYS.FIXED_EXP, JSON.stringify([]));
+  localStorage.setItem(KEYS.VAR_EXP, JSON.stringify([]));
+  localStorage.setItem(KEYS.AD_EXP, JSON.stringify([]));
   localStorage.setItem(KEYS.SETTINGS, JSON.stringify(defaultSettings));
   localStorage.setItem(KEYS.TRASH, JSON.stringify([]));
 
-  // Bootstrap Inventory from Products and Supplier Invoice
-  const basicInv: BasicInventoryItem[] = [];
-  const subInv: SubInventoryItem[] = [];
-  const returnInv: ReturnInventoryItem[] = [];
-
-  // Populate basic level from available colors inside Products
-  demoProducts.forEach(prod => {
-    prod.colors.forEach(col => {
-      basicInv.push({
-        productId: prod.id,
-        productName: prod.name,
-        color: col.color,
-        quantity: col.quantity
-      });
-    });
-  });
-
-  // Populate sub level from invoices or manually
-  // Put some into sub inventory for demo
-  subInv.push({
-    productId: "prod-1",
-    productName: "Classic Hoodie Premium",
-    color: "Black (أسود)",
-    size: "M",
-    quantity: 15
-  });
-  subInv.push({
-    productId: "prod-2",
-    productName: "Summer Oversized T-Shirt",
-    color: "White (أبيض)",
-    size: "L",
-    quantity: 25
-  });
-
-  // Populate return inventory from returned order in demo
-  returnInv.push({
-    orderId: "ORD-1003",
-    productName: "Classic Hoodie Premium",
-    color: "Ruby Red (أحمر جوري)",
-    size: "XL",
-    quantity: 1
-  });
-
-  localStorage.setItem(KEYS.INVENTORY_BASIC, JSON.stringify(basicInv));
-  localStorage.setItem(KEYS.INVENTORY_SUB, JSON.stringify(subInv));
-  localStorage.setItem(KEYS.INVENTORY_RETURN, JSON.stringify(returnInv));
+  // Empty basic, sub, return inventories
+  localStorage.setItem(KEYS.INVENTORY_BASIC, JSON.stringify([]));
+  localStorage.setItem(KEYS.INVENTORY_SUB, JSON.stringify([]));
+  localStorage.setItem(KEYS.INVENTORY_RETURN, JSON.stringify([]));
+  localStorage.setItem(KEYS.STOCK_MOVEMENTS, JSON.stringify([]));
 }
 
 // Safe Local Storage parse helper to prevent JSON parsing exceptions from locking up the browser
