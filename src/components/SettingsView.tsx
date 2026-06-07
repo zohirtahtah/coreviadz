@@ -6,8 +6,24 @@
 import React, { useState } from "react";
 import { BusinessProfile, LanguageType } from "../types";
 import { translations } from "../translations";
-import { Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Sliders, Upload, Image } from "lucide-react";
+import { 
+  Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Sliders, Upload, Image,
+  Database, RefreshCw, CloudLightning, Copy, Check, CheckCircle2, Download, Terminal,
+  Server, Sparkles, Key, AlertCircle
+} from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
+import { supabase, isSupabaseConfigured } from "../supabaseClient";
+import {
+  getOrders, saveOrders,
+  getProducts, saveProducts,
+  getSuppliers, saveSuppliers,
+  getWorkers, saveWorkers,
+  getSalarySheets, saveSalarySheets,
+  getFixedExpenses, saveFixedExpenses,
+  getVarExpenses, saveVarExpenses,
+  getAdExpenses, saveAdExpenses,
+  saveBusinessProfile
+} from "../storageUtils";
 
 interface SettingsViewProps {
   profile: BusinessProfile;
@@ -50,6 +66,588 @@ export default function SettingsView({
 
   // New color adding block
   const [newColorEntry, setNewColorEntry] = useState("");
+
+  // Supabase Integration & Synchronization Modules
+  const [isSyncingToSupabase, setIsSyncingToSupabase] = useState(false);
+  const [isPullingFromSupabase, setIsPullingFromSupabase] = useState(false);
+  const [dbTestResult, setDbTestResult] = useState<string | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [showSqlSchema, setShowSqlSchema] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Connection tester
+  const handleTestConnection = async () => {
+    if (!supabase) {
+      setDbTestResult("MISSING_KEYS");
+      return;
+    }
+    setIsTestingConnection(true);
+    setDbTestResult(null);
+
+    try {
+      // Execute simple query to test connection
+      const { data, error } = await supabase.from("corevia_profile").select("id").limit(1);
+      
+      if (error) {
+        // Table might not exist yet, which is expected before schema setup
+        if (error.code === "PGRST116" || error.code === "42P01") {
+          setDbTestResult("CONNECTED_BUT_NO_TABLES");
+          onTriggerNotification(
+            lang === "ar"
+              ? "🟢 متصل بـ Supabase بنجاح! ولكن يرجى تشغيل كود إنشاء الجداول الأولية أولاً."
+              : "🟢 Connected to Supabase! However, you need to execute the SQL tables schema script."
+          );
+        } else {
+          throw error;
+        }
+      } else {
+        setDbTestResult("FULLY_CONNECTED");
+        onTriggerNotification(
+          lang === "ar"
+            ? "🟢 تم الاتصال بنجاح وقراءة قاعدة البيانات بنشاط!"
+            : "🟢 Successfully connected and authenticated with Supabase database!"
+        );
+      }
+    } catch (err: any) {
+      console.error("Supabase test error:", err);
+      setDbTestResult(`ERROR: ${err.message || "Failed to query database"}`);
+      onTriggerNotification(
+        lang === "ar"
+          ? "❌ فشل الاتصال بقاعدة البيانات. تحقق من صحة المفاتيح وصلاحية الخادم."
+          : "❌ Connection failed. Check credentials and server availability."
+      );
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  // Push Local Data to Supabase
+  const handlePushToSupabase = async () => {
+    if (!supabase) return;
+    setIsSyncingToSupabase(true);
+    setDbTestResult(null);
+    try {
+      const orders = getOrders();
+      const products = getProducts();
+      const suppliers = getSuppliers();
+      const fixedExpenses = getFixedExpenses();
+      const variableExpenses = getVarExpenses();
+      const adExpenses = getAdExpenses();
+      const workers = getWorkers();
+      const salarySheets = getSalarySheets();
+
+      onTriggerNotification(lang === "ar" ? "جاري تجهيز وبث البيانات لسحابة Supabase..." : "Preparing and syncing data to Supabase...");
+
+      // 1. Profile Sync
+      await supabase.from("corevia_profile").upsert({
+        id: "primary-profile",
+        business_name: bName,
+        business_type: profile.businessType || "متجر",
+        currency: bCurrency,
+        country: bCountry,
+        owner_name: profile.ownerName || "Owner",
+        phone: bPhone,
+        email: bEmail,
+        address: bAddress,
+        commercial_registry: bRegistry,
+        tax_number: profile.taxNumber || ""
+      });
+
+      // 2. Products Sync
+      if (products.length > 0) {
+        const formattedProducts = products.map(p => ({
+          id: p.id,
+          name: p.name,
+          wholesale_cost_price: p.wholesaleCostPrice,
+          wholesale_percentage: p.wholesalePercentage,
+          wholesale_price: p.wholesalePrice,
+          retail_cost_price: p.retailCostPrice,
+          retail_percentage: p.retailPercentage,
+          retail_price: p.retailPrice,
+          colors: p.colors,
+          sizes: p.sizes,
+          created_at: p.createdAt
+        }));
+        const { error: pError } = await supabase.from("corevia_products").upsert(formattedProducts);
+        if (pError) throw pError;
+      }
+
+      // 3. Orders Sync
+      if (orders.length > 0) {
+        const formattedOrders = orders.map(o => ({
+          id: o.id,
+          date: o.date,
+          customer_name: o.customerName,
+          phone: o.phone,
+          wilaya: o.wilaya,
+          commune: o.commune,
+          delivery_location: o.deliveryLocation,
+          delivery_company: o.deliveryCompany,
+          delivery_type: o.deliveryType,
+          delivery_price: o.deliveryPrice,
+          items: o.items,
+          total_price: o.totalPrice,
+          paid_amount: o.paidAmount,
+          discount: o.discount,
+          customer_pays_delivery: o.customerPaysDelivery,
+          is_exchange: o.isExchange,
+          exchange_order_ref: o.exchangeOrderRef || null,
+          agent_name: o.agentName,
+          source: o.source,
+          status: o.status,
+          return_cost: o.returnCost || null,
+          return_date: o.returnDate || null,
+          notes: o.notes || null,
+          deleted_at: o.deletedAt || null
+        }));
+        const { error: oError } = await supabase.from("corevia_orders").upsert(formattedOrders);
+        if (oError) throw oError;
+      }
+
+      // 4. Suppliers Sync
+      if (suppliers.length > 0) {
+        const formattedSuppliers = suppliers.map(s => ({
+          id: s.id,
+          name: s.name,
+          phone: s.phone,
+          address: s.address,
+          email: s.email,
+          created_at: s.createdAt
+        }));
+        const { error: sError } = await supabase.from("corevia_suppliers").upsert(formattedSuppliers);
+        if (sError) throw sError;
+      }
+
+      // 5. Expenses Sync (Fixed, Variable, Ad)
+      const allExpenses = [
+        ...fixedExpenses.map(e => ({ 
+          id: e.id, 
+          type: "fixed", 
+          name: e.name, 
+          amount: e.amount, 
+          date: e.date,
+          month_year: null,
+          platform: null,
+          amount_usd: null,
+          exchange_rate: null,
+          amount_currency: null,
+          start_date: null,
+          end_date: null
+        })),
+        ...variableExpenses.map(e => ({ 
+          id: e.id, 
+          type: "variable", 
+          name: e.name, 
+          amount: e.amount, 
+          date: e.date,
+          month_year: e.monthYear,
+          platform: null,
+          amount_usd: null,
+          exchange_rate: null,
+          amount_currency: null,
+          start_date: null,
+          end_date: null
+        })),
+        ...adExpenses.map(e => ({ 
+          id: e.id, 
+          type: "ads", 
+          name: null, 
+          amount: null, 
+          date: null,
+          month_year: e.monthYear,
+          platform: e.platform,
+          amount_usd: e.amountUSD,
+          exchange_rate: e.exchangeRate,
+          amount_currency: e.amountCurrency,
+          start_date: e.startDate,
+          end_date: e.endDate
+        }))
+      ];
+      if (allExpenses.length > 0) {
+        const { error: eError } = await supabase.from("corevia_expenses").upsert(allExpenses);
+        if (eError) throw eError;
+      }
+
+      // 6. Workers Sync
+      if (workers.length > 0) {
+        const formattedWorkers = workers.map(w => ({
+          id: w.id,
+          name: w.name,
+          code: w.code,
+          phone: w.phone,
+          base_salary: w.baseSalary,
+          daily_hours: w.dailyHours,
+          overtime_rate: w.overtimeRate,
+          role: w.role,
+          monthly_salary: w.monthlySalary,
+          payrolls: w.payrolls,
+          created_at: w.createdAt
+        }));
+        const { error: wError } = await supabase.from("corevia_workers").upsert(formattedWorkers);
+        if (wError) throw wError;
+      }
+
+      // 7. Work Salary Sheets Sync
+      if (salarySheets.length > 0) {
+        const formattedSheets = salarySheets.map(sh => ({
+          id: sh.id,
+          worker_id: sh.workerId,
+          worker_name: sh.workerName,
+          month_year: sh.monthYear,
+          date_from: sh.dateFrom,
+          date_to: sh.dateTo,
+          overtime_hours: sh.overtimeHours,
+          absence_days: sh.absenceDays,
+          missing_hours: sh.missingHours,
+          paid_vacation_days: sh.paidVacationDays,
+          expenses: sh.expenses,
+          pay_status: sh.payStatus,
+          calculated_salary: sh.calculatedSalary,
+          updated_at: sh.updatedAt
+        }));
+        const { error: shError } = await supabase.from("corevia_salary_sheets").upsert(formattedSheets);
+        if (shError) throw shError;
+      }
+
+      onTriggerNotification(lang === "ar" ? "✅ تمت مزامنة جميع البيانات ورفعها بنجاح إلى قاعدة Supabase!" : "✅ Successfully backed up & synchronized all datasets with Supabase Cloud Postgres.");
+      setDbTestResult("CONNECTED_AND_SYNCED");
+    } catch (err: any) {
+      console.error(err);
+      setDbTestResult(`ERROR: ${err.message || "Unknown schema sync error"}`);
+      onTriggerNotification(lang === "ar" ? `❌ خطأ في الرفع: يرجى التأكد من تشغيل كود إنشاء الجداول أولاً` : `❌ Sync failed: Ensure you have executed the tables database script first.`);
+    } finally {
+      setIsSyncingToSupabase(false);
+    }
+  };
+
+  // Pull Cloud Data from Supabase
+  const handlePullFromSupabase = async () => {
+    if (!supabase) return;
+    const confirmAction = window.confirm(
+      lang === "ar"
+        ? "⚠️ تحذير: تنزيل البيانات من Supabase سيستبدل جميع البيانات المحلية المحفوظة في هذا المتصفح تماماً. هل أنت متأكد من الاستمرار؟"
+        : "⚠️ Warning: Downloading data from Supabase will fully overwrite your browser's local sandbox state. Proceed?"
+    );
+    if (!confirmAction) return;
+
+    setIsPullingFromSupabase(true);
+    setDbTestResult(null);
+
+    try {
+      // 1. Fetch Profile
+      const { data: profileData } = await supabase.from("corevia_profile").select("*").eq("id", "primary-profile").single();
+      if (profileData) {
+        saveBusinessProfile({
+          ...profile,
+          businessName: profileData.business_name || profile.businessName,
+          currency: (profileData.currency === "DZD" || profileData.currency === "USD" || profileData.currency === "EUR") ? profileData.currency : profile.currency,
+          country: profileData.country || profile.country,
+          phone: profileData.phone || profile.phone,
+          email: profileData.email || profile.email,
+          address: profileData.address || profile.address,
+          commercialRegistry: profileData.commercial_registry || profile.commercialRegistry,
+          taxNumber: profileData.tax_number || profile.taxNumber
+        });
+      }
+
+      // 2. Fetch Products
+      const { data: dbProducts } = await supabase.from("corevia_products").select("*");
+      if (dbProducts) {
+        const formattedProducts = dbProducts.map(p => ({
+          id: p.id,
+          name: p.name,
+          wholesaleCostPrice: Number(p.wholesale_cost_price),
+          wholesalePercentage: Number(p.wholesale_percentage),
+          wholesalePrice: Number(p.wholesale_price),
+          retailCostPrice: Number(p.retail_cost_price),
+          retailPercentage: Number(p.retail_percentage),
+          retailPrice: Number(p.retail_price),
+          colors: p.colors || [],
+          sizes: p.sizes || [],
+          createdAt: p.created_at || new Date().toISOString()
+        }));
+        saveProducts(formattedProducts);
+      }
+
+      // 3. Fetch Orders
+      const { data: dbOrders } = await supabase.from("corevia_orders").select("*");
+      if (dbOrders) {
+        const formattedOrders = dbOrders.map(o => ({
+          id: o.id,
+          date: o.date,
+          customerName: o.customer_name,
+          phone: o.phone,
+          wilaya: o.wilaya,
+          commune: o.commune,
+          deliveryLocation: o.delivery_location || "Home",
+          deliveryCompany: o.delivery_company || "Yalidine Express",
+          deliveryType: o.delivery_type || "Home",
+          deliveryPrice: Number(o.delivery_price),
+          items: o.items || [],
+          totalPrice: Number(o.total_price),
+          paidAmount: Number(o.paid_amount),
+          discount: Number(o.discount),
+          customerPaysDelivery: Boolean(o.customer_pays_delivery),
+          isExchange: Boolean(o.is_exchange),
+          exchangeOrderRef: o.exchange_order_ref || undefined,
+          agentName: o.agent_name || "Owner",
+          source: (o.source === "1" || o.source === "2" || o.source === "3") ? o.source : "1",
+          status: (o.status === "pending" || o.status === "shipping" || o.status === "delivered" || o.status === "returned") ? o.status : "pending",
+          returnCost: o.return_cost ? Number(o.return_cost) : undefined,
+          returnDate: o.return_date || undefined,
+          notes: o.notes || undefined,
+          deletedAt: o.deleted_at || undefined
+        }));
+        saveOrders(formattedOrders);
+      }
+
+      // 4. Fetch Suppliers
+      const { data: dbSuppliers } = await supabase.from("corevia_suppliers").select("*");
+      if (dbSuppliers) {
+        const formattedSuppliers = dbSuppliers.map(s => ({
+          id: s.id,
+          name: s.name,
+          phone: s.phone || "",
+          address: s.address || "",
+          email: s.email || "",
+          createdAt: s.created_at || new Date().toISOString()
+        }));
+        saveSuppliers(formattedSuppliers);
+      }
+
+      // 5. Fetch Expenses
+      const { data: dbExpenses } = await supabase.from("corevia_expenses").select("*");
+      if (dbExpenses) {
+        const fixed = dbExpenses
+          .filter(e => e.type === "fixed")
+          .map(e => ({ 
+            id: e.id, 
+            name: e.name || "Expense", 
+            amount: Number(e.amount || 0), 
+            date: e.date || new Date().toISOString().split("T")[0] 
+          }));
+        const variable = dbExpenses
+          .filter(e => e.type === "variable")
+          .map(e => ({ 
+            id: e.id, 
+            name: e.name || "Expense", 
+            amount: Number(e.amount || 0), 
+            date: e.date || new Date().toISOString().split("T")[0], 
+            monthYear: e.month_year || new Date().toISOString().substring(0, 7) 
+          }));
+        const ad = dbExpenses
+          .filter(e => e.type === "ads")
+          .map(e => ({ 
+            id: e.id, 
+            platform: (e.platform === "Facebook" || e.platform === "Google" || e.platform === "TikTok" || e.platform === "Snapchat" || e.platform === "Other") ? e.platform : "Facebook", 
+            amountUSD: Number(e.amount_usd || 0),
+            exchangeRate: Number(e.exchange_rate || 200),
+            amountCurrency: Number(e.amount_currency || 0),
+            startDate: e.start_date || new Date().toISOString().split("T")[0],
+            endDate: e.end_date || new Date().toISOString().split("T")[0],
+            monthYear: e.month_year || new Date().toISOString().substring(0, 7) 
+          }));
+        
+        saveFixedExpenses(fixed);
+        saveVarExpenses(variable);
+        saveAdExpenses(ad);
+      }
+
+      // 6. Fetch Workers
+      const { data: dbWorkers } = await supabase.from("corevia_workers").select("*");
+      if (dbWorkers) {
+        const formattedWorkers = dbWorkers.map(w => ({
+          id: w.id,
+          name: w.name,
+          code: w.code || "W-" + w.id.substring(0, 4),
+          phone: w.phone || "",
+          baseSalary: Number(w.base_salary || 0),
+          dailyHours: Number(w.daily_hours || 8),
+          overtimeRate: Number(w.overtime_rate || 2),
+          role: w.role || "Employee",
+          monthlySalary: Number(w.monthly_salary || 0),
+          payrolls: w.payrolls || [],
+          createdAt: w.created_at || new Date().toISOString()
+        }));
+        saveWorkers(formattedWorkers);
+      }
+
+      // 7. Fetch Salary Sheets
+      const { data: dbSheets } = await supabase.from("corevia_salary_sheets").select("*");
+      if (dbSheets) {
+        const formattedSheets = dbSheets.map(sh => ({
+          id: sh.id,
+          workerId: sh.worker_id,
+          workerName: sh.worker_name || "",
+          monthYear: sh.month_year,
+          dateFrom: sh.date_from || "",
+          dateTo: sh.date_to || "",
+          overtimeHours: Number(sh.overtime_hours || 0),
+          absenceDays: Number(sh.absence_days || 0),
+          missingHours: Number(sh.missing_hours || 0),
+          paidVacationDays: Number(sh.paid_vacation_days || 0),
+          expenses: sh.expenses || [],
+          payStatus: (sh.pay_status === "paid" || sh.pay_status === "unpaid") ? sh.pay_status : "unpaid",
+          calculatedSalary: sh.calculated_salary || {
+            baseSalary: 0,
+            dailyRate: 0,
+            hourlyRate: 0,
+            overtimePay: 0,
+            absenceDeduction: 0,
+            expensesDeduction: 0,
+            netSalary: 0
+          },
+          updatedAt: sh.updated_at || new Date().toISOString()
+        }));
+        saveSalarySheets(formattedSheets);
+      }
+
+      onTriggerNotification(lang === "ar" ? "✅ تم جلب وتنزيل قاعدة بيانات السحابة بالكامل بنجاح للمتصفح!" : "✅ Data synchronized successfully. Pulled all tables clean from Supabase cloud.");
+      setDbTestResult("CONNECTED_AND_PULLED");
+      if (onTriggerRefreshOrders) {
+        onTriggerRefreshOrders();
+      }
+    } catch (err: any) {
+      console.error(err);
+      setDbTestResult(`ERROR_PULL: ${err.message || "Unknown error during data download"}`);
+      onTriggerNotification(lang === "ar" ? `❌ خطأ في التنزيل: يرجى التأكد من تشغيل كود SQL الأساسي` : `❌ Download failed: Ensure you have executed the tables database script first.`);
+    } finally {
+      setIsPullingFromSupabase(false);
+    }
+  };
+
+  const copySqlSchemaText = () => {
+    const rawSql = `-- Corevia ERP Database SQL Schema for Supabase
+-- Paste this script into your Supabase SQL Editor and run it in 1 click!
+
+-- 1. Create table for Business PROFILE
+create table if not exists corevia_profile (
+  id text primary key default 'primary-profile',
+  business_name text not null,
+  business_type text,
+  currency text default 'DZD',
+  country text default 'Algeria',
+  owner_name text,
+  phone text,
+  email text,
+  address text,
+  website text,
+  commercial_registry text,
+  tax_number text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 2. Create table for Products
+create table if not exists corevia_products (
+  id text primary key,
+  name text not null,
+  wholesale_cost_price numeric not null,
+  wholesale_percentage numeric,
+  wholesale_price numeric not null,
+  retail_cost_price numeric not null,
+  retail_percentage numeric,
+  retail_price numeric not null,
+  colors jsonb default '[]'::jsonb,
+  sizes text[] default '{}'::text[],
+  created_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 3. Create table for Orders
+create table if not exists corevia_orders (
+  id text primary key,
+  date text not null,
+  customer_name text not null,
+  phone text not null,
+  wilaya text,
+  commune text,
+  delivery_location text,
+  delivery_company text,
+  delivery_type text,
+  delivery_price numeric default 0,
+  items jsonb default '[]'::jsonb,
+  total_price numeric not null,
+  paid_amount numeric default 0,
+  discount numeric default 0,
+  customer_pays_delivery boolean default true,
+  is_exchange boolean default false,
+  exchange_order_ref text,
+  agent_name text,
+  source text,
+  status text default 'pending',
+  return_cost numeric,
+  return_date text,
+  notes text,
+  deleted_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 4. Create table for Suppliers
+create table if not exists corevia_suppliers (
+  id text primary key,
+  name text not null,
+  phone text,
+  address text,
+  email text,
+  created_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 5. Create table for Fixed and Variable Expenses
+create table if not exists corevia_expenses (
+  id text primary key,
+  type text not null, -- 'fixed', 'variable', 'ads'
+  name text,
+  amount numeric,
+  date text,
+  month_year text,
+  platform text,
+  amount_usd numeric,
+  exchange_rate numeric,
+  amount_currency numeric,
+  start_date text,
+  end_date text,
+  notes text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 6. Create table for Workers and Salaries
+create table if not exists corevia_workers (
+  id text primary key,
+  name text not null,
+  code text,
+  phone text,
+  base_salary numeric,
+  daily_hours numeric,
+  overtime_rate numeric,
+  role text,
+  monthly_salary numeric,
+  payrolls jsonb default '[]'::jsonb,
+  created_at text
+);
+
+create table if not exists corevia_salary_sheets (
+  id text primary key,
+  worker_id text not null,
+  worker_name text,
+  month_year text,
+  date_from text,
+  date_to text,
+  overtime_hours numeric,
+  absence_days numeric,
+  missing_hours numeric,
+  paid_vacation_days numeric,
+  expenses jsonb default '[]'::jsonb,
+  pay_status text, -- 'paid', 'unpaid'
+  calculated_salary jsonb,
+  updated_at text
+);`;
+
+    navigator.clipboard.writeText(rawSql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+    onTriggerNotification(lang === "ar" ? "✅ تم نسخ سكريبت SQL للحافظة!" : "✅ SQL Script copied to clipboard!");
+  };
 
   // Sub-tabs active page indicator
   const [activePage, setActivePage] = useState<"company" | "control" | "integrations">("company");
@@ -542,22 +1140,315 @@ export default function SettingsView({
         </div>
       )}
 
-      {/* Tab 2: Platform Technical Control Module */}
+      {/* Tab 2: Supabase Relational Database Integration & Synchronization Console */}
       {activePage === "control" && (
-        <div className="bg-[#09090b] p-8 rounded-xl border border-[#27272a] text-center space-y-4 max-w-2xl mx-auto my-6 bounce-in" id="settings_platform_control_placeholder">
-          <div className="w-16 h-16 bg-[#18181b] border border-rose-500/25 rounded-full flex items-center justify-center mx-auto text-rose-500 animate-pulse">
-            <Sliders className="w-8 h-8" />
+        <div className="space-y-6 bounce-in text-right" id="supabase_connector_console">
+          
+          {/* Main Status Header Card */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/60 pb-4 mb-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                  isSupabaseConfigured ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                }`}>
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    {isRtl ? "ربط قاعدة بيانات Supabase (PostgreSQL)" : "Supabase PostgreSQL Database Connector"}
+                  </h3>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    {isRtl 
+                      ? "إدارة الدخول، وحفظ الطلبيات، والمخزن، والعمال في سحابة مؤمنة."
+                      : "Cloud-hosted relational replication for orders, warehouse stocks and active staff."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Pill */}
+              <div>
+                {isSupabaseConfigured ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full text-[10px] font-black">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isRtl ? "متصل كودياً بالسحابة" : "Connected in code"}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/25 rounded-full text-[10px] font-black animate-pulse">
+                    <CloudLightning className="w-3.5 h-3.5" />
+                    <span>{isRtl ? "غير متصل (يعمل محلياً)" : "Disconnected (Local Sandbox)"}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Instruction block based on configure status */}
+            {!isSupabaseConfigured ? (
+              <div className="space-y-4">
+                <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-4 text-xs text-zinc-350 leading-relaxed text-right space-y-2">
+                  <p className="font-bold text-white flex items-center gap-1.5 justify-end">
+                    <span>{isRtl ? "مطلوب إعداد مفاتيح البيئة (Environment Variables)" : "Environment Keys Required!"}</span>
+                    <AlertCircle className="w-4 h-4 text-amber-500" />
+                  </p>
+                  <p>
+                    {isRtl 
+                      ? "لتفعيل الدخول السحابي وحسابات الأدمن الحقيقية والمزامنة عبر Vercel أو الخادم المحلي، يرجى تسجيل الدخول في Supabase.com وإنشاء مشروع جديد، ثم إضافة المتغيرات التالية في الإعدادات الخاصة بموقعك:"
+                      : "To enable live cloud admin accounts, login sessions and multi-device persistence in Vercel or locally, please register at Supabase.com, create a project, and add these environmental variables:"}
+                  </p>
+                  <div className="bg-[#040406]/85 p-3 rounded-lg border border-zinc-800 font-mono text-[10px] text-left text-zinc-400 space-y-1" dir="ltr">
+                    <div>VITE_SUPABASE_URL=<span className="text-zinc-500">_YOUR_SUPABASE_PROJECT_URL_</span></div>
+                    <div>VITE_SUPABASE_ANON_KEY=<span className="text-zinc-500">_YOUR_SUPABASE_ANON_PUBLIC_KEY_</span></div>
+                  </div>
+                </div>
+
+                <div className="text-zinc-400 text-xs">
+                  {isRtl 
+                    ? "💡 بمجرد وضع هذه المتغيرات في لوحة تحكم Vercel أو ملف .env محلياً، سيقوم الموقع تلقائياً بالتحويل من التخزين المحلي المؤقت (LocalStorage) إلى السحاب اللامتناهي للطلبيات والمخازن!"
+                    : "💡 Once configured on Vercel or locally inside your environment variables, Corevia ERP will seamlessly upgrade from local Web storage to persistent Postgres Cloud Synchronization!"}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-xs text-zinc-350 leading-relaxed space-y-2">
+                  <p className="font-black text-white flex items-center gap-1.5 justify-end">
+                    <span>{isRtl ? "سحابة المزامنة نشطة! 🚀" : "Cloud Connection is Enabled! 🚀"}</span>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  </p>
+                  <p>
+                    {isRtl 
+                      ? "لقد قمنا بتثبيت مكتبة Supabase JS بنجاح. يمكنك الآن اختبار الاتصال المباشر وقراءة/كتابة البيانات السحابية، ورفع النسخ المحلية الاحتياطية وتنزيلها من السحاب فورياً."
+                      : "Your application is successfully linked to your PostgreSQL database. You can test your connection, upload current local browser database backups, and recover data anytime."}
+                  </p>
+                </div>
+
+                {/* Operations Panel */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  
+                  {/* Test Connection Button */}
+                  <button
+                    onClick={handleTestConnection}
+                    disabled={isTestingConnection}
+                    className="bg-[#18181b] hover:bg-zinc-800 border border-zinc-800 text-zinc-100 hover:text-white rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+                  >
+                    <RefreshCw className={`w-5 h-5 text-indigo-400 ${isTestingConnection ? "animate-spin" : ""}`} />
+                    <span>{isRtl ? "فحص و اختبار الاتصال" : "Test Live Connection"}</span>
+                  </button>
+
+                  {/* Push Backup Data (Local to Cloud) */}
+                  <button
+                    onClick={handlePushToSupabase}
+                    disabled={isSyncingToSupabase}
+                    className="bg-[#18181b] hover:bg-zinc-850 border border-emerald-500/15 text-emerald-400 hover:text-emerald-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+                  >
+                    <Upload className="w-5 h-5 text-emerald-500" />
+                    <span>{isRtl ? "رفع النسخة المحلية الاحتياطية ☁️" : "Push Browser Backup to Cloud ☁️"}</span>
+                  </button>
+
+                  {/* Pull Local Data (Cloud to Local) */}
+                  <button
+                    onClick={handlePullFromSupabase}
+                    disabled={isPullingFromSupabase}
+                    className="bg-[#18181b] hover:bg-zinc-850 border border-indigo-500/15 text-indigo-400 hover:text-indigo-350 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+                  >
+                    <Download className="w-5 h-5 text-indigo-400" />
+                    <span>{isRtl ? "جلب وتنزيل قاعدة البيانات" : "Pull Data from Supabase"}</span>
+                  </button>
+
+                </div>
+
+                {/* DB Test Result Output */}
+                {dbTestResult && (
+                  <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900 font-mono text-[10.5px] text-zinc-400 text-left space-y-1" dir="ltr">
+                    <span className="text-zinc-500">DATABASE_DIAGNOSTICS_PAYLOAD:</span>
+                    <pre className="overflow-x-auto whitespace-pre-wrap mt-1 text-zinc-200">
+                      {dbTestResult === "CONNECTED_BUT_NO_TABLES" && (
+                        "🟢 Connection verified! But table structures are missing. Run SQL script below to provision standard schema."
+                      )}
+                      {dbTestResult === "FULLY_CONNECTED" && (
+                        "🟢 Verified active link! Corevia ERP PostgreSQL schema tables are online and fully queried."
+                      )}
+                      {dbTestResult === "CONNECTED_AND_SYNCED" && (
+                        "✅ Succeeded: Packaged profile properties, orders, products, suppliers, salary and expenses uploaded successfully!"
+                      )}
+                      {dbTestResult === "CONNECTED_AND_PULLED" && (
+                        "✅ Succeeded: Overwritten browser cache and retrieved latest cloud schema datasets."
+                      )}
+                      {!["CONNECTED_BUT_NO_TABLES", "FULLY_CONNECTED", "CONNECTED_AND_SYNCED", "CONNECTED_AND_PULLED"].includes(dbTestResult) && dbTestResult}
+                    </pre>
+                  </div>
+                )}
+
+              </div>
+            )}
           </div>
-          <h2 className="text-sm font-bold text-white">
-            {isRtl ? "لوحة التحكم وإدارة المنصة" : "Platform Technical Operations Controls"}
-          </h2>
-          <p className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-            {isRtl 
-              ? "هذه الصفحة مخصصة لخيارات تشغيل المنصة وصلاحيات الموظفين المتقدمة، وإدارة النسخ الاحتياطي، وإعداد خط كود الاستعلامات. سوف نقوم ببرمجتها وربطها بالكامل لاحقاً فور اعتماد هيكلية الاستضافة."
-              : "This dedicated system panel hosts advanced running properties, database pruning mechanisms, backups and system telemetry. We will arrive at and fully implement this viewport in subsequent sessions."}
-          </p>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/25 rounded-full text-[10px] font-bold">
-            {isRtl ? "مرحلة برمجية مستقبلية" : "Subsequent Pipeline Milestone"}
+
+          {/* COPY SCRIPT SQL ACCORDION CARD */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-3">
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-emerald-500" />
+                <h4 className="text-xs font-bold text-white">
+                  {isRtl ? "سكريبت تهيئة وجداول SQL أولية للبث" : "Supabase PostgreSQL Provisioning SQL Script"}
+                </h4>
+              </div>
+              <button
+                onClick={() => setShowSqlSchema(!showSqlSchema)}
+                className="text-xs font-extrabold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-3 py-1 bg-zinc-900 rounded-lg cursor-pointer"
+              >
+                {showSqlSchema ? (isRtl ? "إخفاء الكود ✕" : "Hide Script ✕") : (isRtl ? "عرض السكريبت 📄" : "Show Script 📄")}
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-450 leading-relaxed">
+              💡 {isRtl 
+                ? "لتهيئة الجداول وتجنيب المشروع أخطاء الاتصال، فقط انسخ هذا الكريبت المجمع، واذهب إلى لوحة تحكم Supabase > SQL Editor > اضغط على New Query والصق السكريبت واضغط على RUN لتثبيته في ثانية واحدة!"
+                : "To easily initialize Postgres tables for Corevia ERP, copy this optimized structure, and navigate to your Supabase Dashboard > SQL Editor > Paste and click RUN!"}
+            </p>
+
+            {showSqlSchema && (
+              <div className="space-y-2">
+                <div className="flex justify-end">
+                  <button
+                    onClick={copySqlSchemaText}
+                    className="flex items-center gap-1 text-[10px] uppercase font-black tracking-wider bg-emerald-500/15 border border-emerald-500/25 hover:bg-emerald-550/20 text-emerald-400 px-3 py-1.5 rounded-lg active:scale-95 transition cursor-pointer"
+                  >
+                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSql ? (isRtl ? "تم النسخ!" : "COPIED!") : (isRtl ? "نسخ الكود بالكامل" : "COPY SCRIPT")}</span>
+                  </button>
+                </div>
+                
+                <div className="relative rounded-xl overflow-hidden border border-zinc-850 bg-zinc-950 max-h-72 overflow-y-auto" dir="ltr">
+                  <pre className="p-4 text-[10px] text-zinc-300 font-mono text-left whitespace-pre select-all">
+{`-- Corevia ERP Database SQL Schema for Supabase
+-- Paste this script into your Supabase SQL Editor and run it in 1 click!
+
+-- 1. Create table for Business PROFILE
+create table if not exists corevia_profile (
+  id text primary key default 'primary-profile',
+  business_name text not null,
+  business_type text,
+  currency text default 'DZD',
+  country text default 'Algeria',
+  owner_name text,
+  phone text,
+  email text,
+  address text,
+  website text,
+  commercial_registry text,
+  tax_number text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 2. Create table for Products
+create table if not exists corevia_products (
+  id text primary key,
+  name text not null,
+  wholesale_cost_price numeric not null,
+  wholesale_percentage numeric,
+  wholesale_price numeric not null,
+  retail_cost_price numeric not null,
+  retail_percentage numeric,
+  retail_price numeric not null,
+  colors jsonb default '[]'::jsonb,
+  sizes text[] default '{}'::text[],
+  created_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 3. Create table for Orders
+create table if not exists corevia_orders (
+  id text primary key,
+  date text not null,
+  customer_name text not null,
+  phone text not null,
+  wilaya text,
+  commune text,
+  delivery_location text,
+  delivery_company text,
+  delivery_type text,
+  delivery_price numeric default 0,
+  items jsonb default '[]'::jsonb,
+  total_price numeric not null,
+  paid_amount numeric default 0,
+  discount numeric default 0,
+  customer_pays_delivery boolean default true,
+  is_exchange boolean default false,
+  exchange_order_ref text,
+  agent_name text,
+  source text,
+  status text default 'pending',
+  return_cost numeric,
+  return_date text,
+  notes text,
+  deleted_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 4. Create table for Suppliers
+create table if not exists corevia_suppliers (
+  id text primary key,
+  name text not null,
+  phone text,
+  address text,
+  email text,
+  created_at text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 5. Create table for Fixed and Variable Expenses
+create table if not exists corevia_expenses (
+  id text primary key,
+  type text not null, -- 'fixed', 'variable', 'ads'
+  name text,
+  amount numeric,
+  date text,
+  month_year text,
+  platform text,
+  amount_usd numeric,
+  exchange_rate numeric,
+  amount_currency numeric,
+  start_date text,
+  end_date text,
+  notes text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 6. Create table for Workers and Salaries
+create table if not exists corevia_workers (
+  id text primary key,
+  name text not null,
+  code text,
+  phone text,
+  base_salary numeric,
+  daily_hours numeric,
+  overtime_rate numeric,
+  role text,
+  monthly_salary numeric,
+  payrolls jsonb default '[]'::jsonb,
+  created_at text
+);
+
+create table if not exists corevia_salary_sheets (
+  id text primary key,
+  worker_id text not null,
+  worker_name text,
+  month_year text,
+  date_from text,
+  date_to text,
+  overtime_hours numeric,
+  absence_days numeric,
+  missing_hours numeric,
+  paid_vacation_days numeric,
+  expenses jsonb default '[]'::jsonb,
+  pay_status text, -- 'paid', 'unpaid'
+  calculated_salary jsonb,
+  updated_at text
+);`}
+                  </pre>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

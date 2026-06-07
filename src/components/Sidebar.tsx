@@ -7,7 +7,8 @@ import { useState, useEffect } from "react";
 import { 
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
-  Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check
+  Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
+  Shield
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -59,7 +60,11 @@ export default function Sidebar({
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
 
-  const navItems = [
+  // Read local storage to check for Super Admin session
+  const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+  const isSuperAdmin = sessionStored && JSON.parse(sessionStored).email?.toLowerCase() === "coreviadz@gmail.com";
+
+  const baseNavItems = [
     { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: false },
     { id: "orders", label: t.navOrders, icon: ShoppingCart, isRestricted: false },
     { id: "inventory", label: t.navInventory, icon: Package, isRestricted: false },
@@ -72,6 +77,14 @@ export default function Sidebar({
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
     { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
   ];
+
+  // Dynamically insert Super Admin dashboard tab if logged-in user is platform manager
+  const navItems = isSuperAdmin
+    ? [
+        { id: "super-admin", label: lang === "ar" ? "لوحة الإداري (Super Admin)" : "Super Admin Panel", icon: Shield, isRestricted: false },
+        ...baseNavItems
+      ]
+    : baseNavItems;
 
   const handleNavClick = (tabId: string, isRestricted: boolean) => {
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {

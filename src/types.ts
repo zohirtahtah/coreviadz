@@ -291,3 +291,48 @@ export interface AppSettings {
   colors: string[]; // customizable product colors
   wilayasList: string[]; // Algerian wilayas
 }
+
+export interface ActiveDevice {
+  id: string;
+  browser: string;
+  os: string;
+  activityType: string;
+  lastActive: string;
+}
+
+export interface SaaSCompany {
+  id: string;
+  companyName: string;
+  ownerName: string;
+  email: string;
+  phone: string;
+  country: string;
+  registrationDate: string;
+  lastLogin: string;
+  emailVerified: boolean;
+  subscriptionPlan: "Free" | "Basic" | "Pro" | "Enterprise";
+  seatsLimit: number;
+  seatsUsed: number;
+  accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled";
+  expirationDate: string;
+  activeDevices: ActiveDevice[];
+  twoFactorEnabled?: boolean;
+  otpCode?: string;
+}
+
+export interface SaaSActivityLog {
+  id: string;
+  timestamp: string;
+  companyName: string;
+  email: string;
+  operation: string;
+  details: string;
+  ipAddress: string;
+}
+
+export interface SuperAdminConfig {
+  twoFactorGlobalState: boolean;
+  failedLoginAttemptsCount: number;
+  ipTrackingEnabled: boolean;
+}
+

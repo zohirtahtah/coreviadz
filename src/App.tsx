@@ -33,17 +33,123 @@ import ProfitView from "./components/ProfitView";
 import YearlyView from "./components/YearlyView";
 import TrashView from "./components/TrashView";
 import SettingsView from "./components/SettingsView";
+import SuperAdminView from "./components/SuperAdminView";
+import { SaaSCompany } from "./types";
 import { 
   getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
   serializeOrderToRow, getDynamicOrderColumns, logSyncAudit 
 } from "./googleSyncUtils";
-import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check } from "lucide-react";
+import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield } from "lucide-react";
+
+// =========================================================================
+// AUTOMATIC SaaS TENANCY BINDING & SIGNUP ROUTING AGENT
+// =========================================================================
+export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: string) => {
+  if (email.toLowerCase().trim() === "coreviadz@gmail.com") return; // Super admin console bypasses
+
+  const stored = localStorage.getItem("corevia_saas_companies_v1");
+  let list: SaaSCompany[] = [];
+  try {
+    if (stored) list = JSON.parse(stored);
+  } catch (e) {
+    list = [];
+  }
+
+  const exists = list.some(c => c.email.toLowerCase() === email.toLowerCase().trim());
+  if (!exists) {
+    // Generate a fresh 6-digit verification code OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const newCompany: SaaSCompany = {
+      id: `cop-${Date.now()}`,
+      companyName: `${fullName || email.split("@")[0]} Trading`,
+      ownerName: fullName || email.split("@")[0],
+      email: email.toLowerCase().trim(),
+      phone: "+213 550 00 00 00",
+      country: "Algeria",
+      registrationDate: new Date().toISOString().split("T")[0],
+      lastLogin: new Date().toISOString().replace("T", " ").substr(0, 16),
+      emailVerified: false,
+      subscriptionPlan: "Basic",
+      seatsLimit: 5,
+      seatsUsed: 1,
+      accountStatus: "Pending Verification",
+      expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      otpCode: otp,
+      activeDevices: [
+        { id: `dev-${Date.now()}-1`, browser: "Chrome", os: "Windows", activityType: "Desktop Session", lastActive: new Date().toISOString().replace("T", " ").substr(0, 16) }
+      ]
+    };
+    list.push(newCompany);
+    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+    
+    // Seed system registration log
+    const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
+    let logsList: any[] = [];
+    try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
+    logsList.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      companyName: newCompany.companyName,
+      email: email.toLowerCase().trim(),
+      operation: "إنشاء حساب",
+      details: `تم توفير ترخيص سحابي تلقائي لمدير جديد وبانتظار التحقق بكود OTP ذو 6 أرقام: ${otp}`,
+      ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+    });
+    localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
+  } else {
+    // Sync login audit entry
+    const matched = list.find(c => c.email.toLowerCase() === email.toLowerCase().trim());
+    if (matched) {
+      matched.lastLogin = new Date().toISOString().replace("T", " ").substr(0, 16);
+      localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+
+      const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
+      let logsList: any[] = [];
+      try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
+      logsList.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        companyName: matched.companyName,
+        email: email.toLowerCase().trim(),
+        operation: "تسجيل دخول",
+        details: `تسجيل دخول ناجح لنظام الإدارة السحابي`,
+        ipAddress: "197.220." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+      });
+      localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
+    }
+  }
+};
 
 export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(getBusinessProfile());
   const [session, setSession] = useState<UserSession | null>(getUserSession());
   const [activeTab, setActiveTab] = useState<string>("dashboard");
+
+  // ==========================================
+  // MULTI-TENANT SaaS COMPLETED INTEGRATION
+  // ==========================================
+  const getSaaSAccountForSession = () => {
+    if (!session || !session.email) return null;
+    const stored = localStorage.getItem("corevia_saas_companies_v1");
+    if (!stored) return null;
+    try {
+      const parsed: SaaSCompany[] = JSON.parse(stored);
+      return parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase()) || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const saasAccount = getSaaSAccountForSession();
+  const isReadOnly = saasAccount ? saasAccount.accountStatus === "Read Only" : false;
+  const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
+  const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
+  const isPendingVerification = saasAccount ? saasAccount.accountStatus === "Pending Verification" : false;
+  const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
+
+  // OTP Validation code entry state
+  const [typedOtpCode, setTypedOtpCode] = useState("");
   const [lang, setLangState] = useState<LanguageType>("ar");
 
   const setLang = (newLang: LanguageType) => {
@@ -243,6 +349,7 @@ export default function App() {
 
   // Safe logout
   const handleLogout = () => {
+    localStorage.removeItem("corevia_session_v1");
     localStorage.removeItem("corevia_user_session_v1"); // KEYS.SESSION
     setSession({
       username: "",
@@ -297,6 +404,10 @@ export default function App() {
 
   // MUTATIONS SAVE CALLS IN UPPER APP ORCHESTRATOR
   const saveOrdersAndPersist = (newOrders: Order[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط. يرجى تجديد أو ترقية باقة اشتراكك." : "Sorry, this account is Read-Only. Please upgrade or renew your subscription.", "info");
+      return;
+    }
     setOrders(newOrders);
     saveOrders(newOrders);
 
@@ -333,6 +444,10 @@ export default function App() {
   };
 
   const saveProductsAndPersist = (newProducts: Product[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
+      return;
+    }
     setProducts(newProducts);
     saveProducts(newProducts);
     // Automatic stockpiles feedback
@@ -340,11 +455,19 @@ export default function App() {
   };
 
   const saveSuppliersAndPersist = (newSuppliers: Supplier[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
+      return;
+    }
     setSuppliers(newSuppliers);
     saveSuppliers(newSuppliers);
   };
 
   const saveInvoicesAndPersist = (newInvoices: SupplierInvoice[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
+      return;
+    }
     setInvoices(newInvoices);
     saveSupplierInvoices(newInvoices);
     
@@ -354,11 +477,33 @@ export default function App() {
   };
 
   const saveWorkersAndPersist = (newWorkers: Worker[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
+      return;
+    }
+
+    // enforces Seat Limits constraints
+    const uniqueWorkerCodes = new Set(newWorkers.map(w => w.code));
+    const currentUniqueCodes = new Set(workers.map(w => w.code));
+    if (uniqueWorkerCodes.size > currentUniqueCodes.size && uniqueWorkerCodes.size > seatsLimit) {
+      triggerToast(
+        lang === "ar" 
+          ? `عذراً! تم الوصول للحد الأقصى للمقاعد المسموحة مسبقاً (${seatsLimit} مقعد) الموظفين.` 
+          : `Sorry! Maximum seats limit (${seatsLimit}) reached for your subscription.`, 
+        "info"
+      );
+      return;
+    }
+
     setWorkers(newWorkers);
     saveWorkers(newWorkers);
   };
 
   const saveExpensesAndPersist = (newExpenses: Expense[]) => {
+    if (isReadOnly) {
+      triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
+      return;
+    }
     setExpenses(newExpenses);
     localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(newExpenses));
   };
@@ -531,6 +676,11 @@ export default function App() {
         onAuthSuccess={(newSession) => {
           setSession(newSession);
           saveUserSession(newSession);
+          
+          // Auto sync tenant list on login or sign-up!
+          if (newSession && newSession.email) {
+            registerSaaSCompanyOnLoginAndSignUp(newSession.email, newSession.username || newSession.email.split("@")[0]);
+          }
         }}
         onTriggerNotification={triggerToast}
       />
@@ -658,6 +808,181 @@ export default function App() {
           theme={theme}
           setTheme={setTheme}
         />
+      </div>
+    );
+  }
+
+  // ==========================================
+  // LANDING GATES: SaaS SUBSCRIPTION STATUSES
+  // ==========================================
+
+  // GATE I: DISABLED TENANT BLOCKADE
+  if (isDisabled) {
+    const isRtl = lang === "ar";
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_disabled">
+        <div className="w-full max-w-md bg-[#121214] border border-rose-500/20 rounded-2xl p-6 space-y-4 shadow-xl">
+          <AlertCircle className="w-16 h-16 text-rose-500 mx-auto animate-bounce" />
+          <h2 className="text-xl font-black text-white">{isRtl ? "الحساب معطل بالكامل" : "Account Suspended / Disabled"}</h2>
+          <p className="text-xs text-slate-400">
+            {isRtl 
+              ? "تم إيقاف صلاحية هذا الحساب بالكامل من قبل إدارة المنصة لإخلال بشروط الخدمة أو فواتير مستحقة. يرجى التواصل مع فريق الدعم الفني."
+              : "This account has been fully deactivated by the system administrator due to billing issues or compliance flags. Please contact support."}
+          </p>
+          <div className="pt-4 flex gap-2">
+            <button
+              onClick={() => {
+                setSession(null);
+                saveUserSession(null as any);
+              }}
+              className="w-full py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold text-slate-200 rounded-xl cursor-pointer"
+            >
+              {isRtl ? "خروج وحساب آخر" : "Switch Account"}
+            </button>
+            <a
+              href="mailto:support@corevia.dz"
+              className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
+            >
+              {isRtl ? "مراسلة الدعم" : "Contact Support"}
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE
+  if (isSuspended) {
+    const isRtl = lang === "ar";
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_suspended">
+        <div className="w-full max-w-md bg-[#121214] border border-rose-500/20 rounded-2xl p-6 space-y-4 shadow-xl">
+          <AlertCircle className="w-16 h-16 text-rose-500 mx-auto animate-bounce" />
+          <h2 className="text-xl font-black text-white">{isRtl ? "عذراً! الحساب مجمد مؤقتاً" : "Subscription Locked"}</h2>
+          <p className="text-xs text-slate-400">
+            {isRtl 
+              ? "تم تجميد اشتراك هذه المؤسسة مؤقتاً لعدم دفع الفاتورة الشهرية. يرجى مراجعة إدارة وهران أو تفعيل كود سداد لتنشيط النظام فوراً."
+              : "Your company subscription has been frozen due to a recurring payment failure. Access has been temporarily restricted."}
+          </p>
+          <div className="pt-4 flex gap-2">
+            <button
+              onClick={() => {
+                setSession(null);
+                saveUserSession(null as any);
+              }}
+              className="w-full py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold text-slate-200 rounded-xl cursor-pointer"
+            >
+              {isRtl ? "تسجيل الخروج" : "Switch Account"}
+            </button>
+            <a
+              href="mailto:billing@corevia.dz"
+              className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
+            >
+              {isRtl ? "تفاصيل الفوترة" : "Billing Details"}
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN)
+  if (isPendingVerification && saasAccount) {
+    const isRtl = lang === "ar";
+    
+    const handleVerifyOtpSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (typedOtpCode.trim() === saasAccount.otpCode) {
+        const stored = localStorage.getItem("corevia_saas_companies_v1");
+        if (stored) {
+          try {
+            const list: SaaSCompany[] = JSON.parse(stored);
+            const idx = list.findIndex(c => c.id === saasAccount.id);
+            if (idx !== -1) {
+              list[idx].accountStatus = "Active";
+              list[idx].emailVerified = true;
+              localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+              
+              // Log otp success activation
+              const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
+              let logsList: any[] = [];
+              try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
+              logsList.unshift({
+                id: `log-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                companyName: saasAccount.companyName,
+                email: saasAccount.email,
+                operation: "تفعيل بريد",
+                details: `تم تفعيل وتوثيق الحساب بنجاح من المالك بإدخال رمز OTP الصحيح الميداني: ${saasAccount.otpCode}`,
+                ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+              });
+              localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
+            }
+          } catch (e) {}
+        }
+        triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
+        setTypedOtpCode("");
+        // Force session refresh
+        setSession({ ...session!, isApproved: true });
+      } else {
+        triggerToast(isRtl ? "رمز التحقق OTP خاطئ، يرجى المحاولة مرة أخرى." : "Invalid OTP verification code.", "info");
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_verification">
+        
+        {/* Cheat indicator for preview convenience */}
+        <div className="absolute top-4 inset-x-4 max-w-sm mx-auto p-3 bg-indigo-950 border border-indigo-900 rounded-xl text-center space-y-1">
+          <span className="text-[10px] text-indigo-400 font-bold block">🔐 SIMULATED OTP MAILBOX HINT</span>
+          <span className="text-xs text-white">Your OTP verification code: <strong className="text-amber-450 px-1.5 py-0.5 bg-black rounded font-mono text-sm">{saasAccount.otpCode}</strong></span>
+        </div>
+
+        <div className="w-full max-w-md bg-[#121214] border border-indigo-500/20 rounded-2xl p-6 space-y-5 shadow-xl">
+          <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto">
+            <KeyRound className="w-8 h-8 animate-pulse" />
+          </div>
+          
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-white">{isRtl ? "تفعيل حسابك بالبريد الإلكتروني" : "Verify Corporate Account"}</h2>
+            <p className="text-xs text-slate-400">
+              {isRtl 
+                ? "لقد أرسلنا رمز تحقق (OTP) مكوناً من 6 أرقام إلى بريدك المعتمد. يرجى كتابته بالأسفل للتفعيل وتلقي رخصة ERP للعمل."
+                : "Enter the simulated 6-digit confirmation key deployed to your mailbox credentials to activate your subscription ledger."}
+            </p>
+          </div>
+
+          <form onSubmit={handleVerifyOtpSubmit} className="space-y-4">
+            <input
+              type="text"
+              required
+              maxLength={6}
+              placeholder="0 0 0 0 0 0"
+              value={typedOtpCode}
+              onChange={(e) => setTypedOtpCode(e.target.value.replace(/[^0-9]/g, ""))}
+              className="w-full p-3 bg-slate-900 border border-slate-800 text-center tracking-[0.5em] font-mono text-lg text-white rounded-xl placeholder-slate-750 outline-none focus:border-indigo-600 transition-colors"
+            />
+            
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-indigo-650 hover:bg-indigo-600 text-xs font-extrabold text-white rounded-xl shadow-lg shadow-indigo-505/10 transition-colors cursor-pointer"
+            >
+              {isRtl ? "تفعيل وتأكيد الحساب" : "Confirm and Activate"}
+            </button>
+          </form>
+
+          <div className="pt-2">
+            <button
+              onClick={() => {
+                setSession(null);
+                saveUserSession(null as any);
+              }}
+              className="text-xs text-slate-500 hover:text-white underline cursor-pointer"
+            >
+              {isRtl ? "تسجيل الخروج وحساب آخر" : "Log out and switch tenant"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -823,6 +1148,14 @@ export default function App() {
             onSaveCustomColors={saveCustomColorsAndPersist}
             onTriggerNotification={triggerToast}
             onTriggerRefreshOrders={() => setOrders(getOrders())}
+          />
+        )}
+
+        {activeTab === "super-admin" && (
+          <SuperAdminView
+            lang={lang}
+            onTriggerNotification={triggerToast}
+            onLogout={handleLogout}
           />
         )}
 
