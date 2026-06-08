@@ -39,7 +39,15 @@ import {
   getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
   serializeOrderToRow, getDynamicOrderColumns, logSyncAudit 
 } from "./googleSyncUtils";
-import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield } from "lucide-react";
+import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2 } from "lucide-react";
+import { supabase } from "./supabaseClient";
+import { 
+  fetchUserSaaSMeta, 
+  saveOnboardingCompletionInCloud, 
+  pushSingleDatasetToCloud, 
+  pullMultiTenantData, 
+  pushFullTenantData 
+} from "./supabaseSync";
 
 // =========================================================================
 // AUTOMATIC SaaS TENANCY BINDING & SIGNUP ROUTING AGENT
@@ -120,9 +128,10 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
 
 export default function App() {
   // Core Business Configurations
-  const [profile, setProfile] = useState<BusinessProfile | null>(getBusinessProfile());
-  const [session, setSession] = useState<UserSession | null>(getUserSession());
+  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [session, setSession] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
   // ==========================================
   // MULTI-TENANT SaaS COMPLETED INTEGRATION
@@ -199,15 +208,121 @@ export default function App() {
 
   const [showLangDropdown, setShowLangDropdown] = useState(false);
 
-  // Auto load configurations on start
+  // Unified Handler when Supabase session changes (Syncs, Caches, Seeds)
+  const handleAuthSessionChange = async (supabaseSession: any) => {
+    if (!supabaseSession?.user) return;
+    const user = supabaseSession.user;
+    setIsSyncingOnAuth(true);
+
+    try {
+      const userMeta = await fetchUserSaaSMeta(
+        user.id,
+        user.email,
+        user.user_metadata?.full_name || user.email?.split("@")[0] || "User"
+      );
+
+      const activeSession: UserSession = {
+        username: userMeta.username,
+        email: userMeta.email,
+        isRegistered: true,
+        isApproved: true,
+        isSuspended: false,
+        user_id: userMeta.userId,
+        company_id: userMeta.companyId
+      };
+
+      // Auto provision company details in local tenant log
+      registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
+
+      // Save user session locally which patches the activeLocalStorage Multi-Tenant key immediately
+      saveUserSession(activeSession);
+      setSession(activeSession);
+
+      if (userMeta.hasCompletedOnboarding) {
+        // Download all cloud records instantly
+        const pullSuccess = await pullMultiTenantData(userMeta.companyId);
+        
+        // Load the pulled values to memory
+        const currentProfile = getBusinessProfile();
+        setProfile(currentProfile);
+        if (currentProfile) {
+          setLangState(currentProfile.defaultLanguage || "ar");
+          setTheme(currentProfile.preferredTheme || "dark");
+        }
+        setOrders(getOrders());
+        setProducts(getProducts());
+        setBasicInventory(getBasicInventory());
+        setSubInventory(getSubInventory());
+        setReturnInventory(getReturnInventory());
+        setSuppliers(getSuppliers());
+        setInvoices(getSupplierInvoices());
+        setWorkers(getWorkers());
+        
+        const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
+        let parsedExpenses = [];
+        try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
+        setExpenses(parsedExpenses);
+      } else {
+        // Workspace onboarding questions required
+        setProfile(null);
+      }
+    } catch (err) {
+      console.error("Multi-tenant auth sync hook error:", err);
+    } finally {
+      setIsSyncingOnAuth(false);
+    }
+  };
+
+  // 1. Core Supabase Session persistence and automatic session restoration
+  useEffect(() => {
+    if (supabase) {
+      // Restore initial session in background safely
+      supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+        if (currentSession) {
+          handleAuthSessionChange(currentSession);
+        } else {
+          // If no cloud session, check cached storage
+          const localSess = getUserSession();
+          if (localSess && localSess.isRegistered && localSess.email) {
+            setSession(localSess);
+          }
+        }
+      });
+
+      // Standard RLS/Auth channel listening
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+          if (currentSession) {
+            await handleAuthSessionChange(currentSession);
+          }
+        } else if (event === "SIGNED_OUT") {
+          setSession(null);
+          setProfile(null);
+          localStorage.removeItem("corevia_session_v1");
+          localStorage.removeItem("corevia_user_session_v1");
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    } else {
+      // Local Sandbox Fallback
+      const localSess = getUserSession();
+      if (localSess && localSess.isRegistered) {
+        setSession(localSess);
+      }
+    }
+  }, []);
+
+  // 2. Local database loader triggered whenever active tenant session resolves
   useEffect(() => {
     const profObj = getBusinessProfile();
     if (profObj && profObj.businessName) {
       setProfile(profObj);
-      setLang(profObj.defaultLanguage || "ar");
+      setLangState(profObj.defaultLanguage || "ar");
       setTheme(profObj.preferredTheme || "dark");
       
-      // Load tables
       setOrders(getOrders());
       setProducts(getProducts());
       setBasicInventory(getBasicInventory());
@@ -218,45 +333,20 @@ export default function App() {
       setWorkers(getWorkers());
       setTrashItems(getTrashItems());
 
-      // Load Unified Expenses with robust parsing safety
       const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
-      let parsedExpenses: Expense[] | null = null;
-      if (storedExp) {
-        try {
-          parsedExpenses = JSON.parse(storedExp);
-        } catch (e) {
-          console.error("Failed to parse stored expenses:", e);
-        }
-      }
-      if (parsedExpenses && Array.isArray(parsedExpenses)) {
-        setExpenses(parsedExpenses);
-      } else {
-        localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify([]));
-        setExpenses([]);
-      }
+      let parsedExpenses = [];
+      try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
+      setExpenses(parsedExpenses);
 
-      // Load custom colors with robust parsing safety
       const storedColors = localStorage.getItem("corevia_custom_colors_v1");
-      let parsedColors: string[] | null = null;
-      if (storedColors) {
-        try {
-          parsedColors = JSON.parse(storedColors);
-        } catch (e) {
-          console.error("Failed to parse stored colors:", e);
-        }
-      }
-      if (parsedColors && Array.isArray(parsedColors)) {
-        setCustomColorsList(parsedColors);
-      } else {
-        const defaults = [
-          "Black (أسود)", "White (أبيض)", "Navy Blue (كحلي)", "Sage Green (أخضر زيتي)", 
-          "Ruby Red (أحمر جوري)", "Carbon Gray (رمادي فاحم)", "Beige (بيج الرمل)", "Olive (زيتوني)"
-        ];
-        localStorage.setItem("corevia_custom_colors_v1", JSON.stringify(defaults));
-        setCustomColorsList(defaults);
-      }
+      let parsedColors = [];
+      try { if (storedColors) parsedColors = JSON.parse(storedColors); } catch(e){}
+      setCustomColorsList(parsedColors.length ? parsedColors : [
+        "Black (أسود)", "White (أبيض)", "Navy Blue (كحلي)", "Sage Green (أخضر زيتي)", 
+        "Ruby Red (أحمر جوري)", "Carbon Gray (رمادي فاحم)"
+      ]);
     }
-  }, []);
+  }, [session]);
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {
@@ -279,7 +369,11 @@ export default function App() {
   };
 
   // Onboarding Complete Callback
-  const handleOnboardingComplete = (newProfile: BusinessProfile) => {
+  const handleOnboardingComplete = async (newProfile: BusinessProfile) => {
+    if (session && session.user_id && session.company_id) {
+      await saveOnboardingCompletionInCloud(session.user_id, session.company_id, session.email, newProfile);
+    }
+
     localStorage.setItem("corevia_profile_v1", JSON.stringify(newProfile));
     initializeDatabase(true); // Initializing clean ERP workspace
     
@@ -304,25 +398,34 @@ export default function App() {
     localStorage.setItem("corevia_custom_colors_v1", JSON.stringify(defaults));
     setCustomColorsList(defaults);
 
+    // Initial silent synchronization of the empty tables structure to the tenant's database partition
+    if (session && session.company_id) {
+      pushFullTenantData(session.company_id, session.email).catch(err => {
+        console.warn("Initial multi-tenant sync warning (ignorable if tables not present yet):", err);
+      });
+    }
+
     triggerToast(
       newProfile.defaultLanguage === "ar" 
-        ? "مرحباً بك في Corevia! تم تهيئة مساحة العمل بنجاح." 
-        : "Welcome to Corevia! Workspace initialized successfully.",
+        ? "مرحباً بك في Corevia! تم تهيئة مساحة العمل وحفظها سحابياً بنجاح." 
+        : "Welcome to Corevia! Workspace initialized and backed up to cloud successfully.",
       "success"
     );
   };
 
   // Safe logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.error("Supabase signOut error:", err);
+      }
+    }
     localStorage.removeItem("corevia_session_v1");
     localStorage.removeItem("corevia_user_session_v1"); // KEYS.SESSION
-    setSession({
-      username: "",
-      email: "",
-      isRegistered: false,
-      isApproved: false,
-      isSuspended: false
-    });
+    setSession(null);
+    setProfile(null);
     setActiveTab("dashboard");
     triggerToast(lang === "ar" ? "تم تسجيل الخروج بنجاح." : "Logged out successfully.", "success");
   };
@@ -381,6 +484,11 @@ export default function App() {
     setSubInventory(getSubInventory());
     setReturnInventory(getReturnInventory());
 
+    // Auto synchronise order edits directly to the Supabase cloud partition
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "orders", newOrders);
+    }
+
     // Instant Google Sheets Bidirectional Outbound Push
     try {
       const syncSett = getSyncSettings();
@@ -417,6 +525,10 @@ export default function App() {
     saveProducts(newProducts);
     // Automatic stockpiles feedback
     setBasicInventory(getBasicInventory());
+
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "products", newProducts);
+    }
   };
 
   const saveSuppliersAndPersist = (newSuppliers: Supplier[]) => {
@@ -426,6 +538,10 @@ export default function App() {
     }
     setSuppliers(newSuppliers);
     saveSuppliers(newSuppliers);
+
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "suppliers", newSuppliers);
+    }
   };
 
   const saveInvoicesAndPersist = (newInvoices: SupplierInvoice[]) => {
@@ -462,6 +578,10 @@ export default function App() {
 
     setWorkers(newWorkers);
     saveWorkers(newWorkers);
+
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "workers", newWorkers);
+    }
   };
 
   const saveExpensesAndPersist = (newExpenses: Expense[]) => {
@@ -471,11 +591,19 @@ export default function App() {
     }
     setExpenses(newExpenses);
     localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(newExpenses));
+
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "expenses", newExpenses);
+    }
   };
 
   const saveProfileAndPersist = (newProf: BusinessProfile) => {
     setProfile(newProf);
     saveBusinessProfile(newProf);
+
+    if (session && session.user_id && session.company_id) {
+      saveOnboardingCompletionInCloud(session.user_id, session.company_id, session.email, newProf);
+    }
   };
 
   const saveCustomColorsAndPersist = (newColors: string[]) => {
@@ -629,6 +757,30 @@ export default function App() {
     // For demo simplicity, clear them temporarily
     triggerToast("تم تحييد الإشعارات السريعة الميدانية.");
   };
+
+  // Render premium cloud sync indicator during authentication and tenant pull cycles
+  if (isSyncingOnAuth) {
+    const isRtl = lang === "ar";
+    return (
+      <div className="fixed inset-0 bg-[#09090b] flex flex-col items-center justify-center z-[9999] p-4 transition-colors" id="cloud_sync_overlay">
+        <div className="flex flex-col items-center max-w-sm text-center gap-6">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center shadow-2xl animate-spin">
+            <Loader2 className="w-8 h-8 text-indigo-400" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-white text-lg font-bold tracking-tight font-sans">
+              {isRtl ? "تأصيل حساب الإدارة السحابية" : "Synchronizing Cloud SaaS Workspace"}
+            </h3>
+            <p className="text-slate-400 text-xs font-sans max-w-xs leading-normal">
+              {isRtl 
+                ? "جاري تحضير واستيراد البيانات المعزولة وتأكيد الهوية..."
+                : "Downloading and parsing secure multi-tenant datasets..."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If user is not logged in / approved / or is suspended, render the Auth gateway
   if (!session || !session.isRegistered || !session.isApproved || session.isSuspended) {

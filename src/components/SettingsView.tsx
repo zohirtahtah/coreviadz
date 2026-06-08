@@ -520,9 +520,30 @@ export default function SettingsView({
     const rawSql = `-- Corevia ERP Database SQL Schema for Supabase
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
+-- 0. SaaS Tenancy and Users linking
+create table if not exists corevia_companies (
+  id text primary key,
+  name text not null,
+  business_type text,
+  owner_name text,
+  phone text,
+  email text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_saas_users (
+  user_id text primary key,
+  company_id text references corevia_companies(id) on delete set null,
+  email text not null,
+  username text,
+  has_completed_onboarding boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 -- 1. Create table for Business PROFILE
 create table if not exists corevia_profile (
-  id text primary key default 'primary-profile',
+  id text primary key,
+  company_id text default null,
   business_name text not null,
   business_type text,
   currency text default 'DZD',
@@ -540,6 +561,7 @@ create table if not exists corevia_profile (
 -- 2. Create table for Products
 create table if not exists corevia_products (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   wholesale_cost_price numeric not null,
   wholesale_percentage numeric,
@@ -556,6 +578,7 @@ create table if not exists corevia_products (
 -- 3. Create table for Orders
 create table if not exists corevia_orders (
   id text primary key,
+  company_id text default 'cop_default',
   date text not null,
   customer_name text not null,
   phone text not null,
@@ -585,6 +608,7 @@ create table if not exists corevia_orders (
 -- 4. Create table for Suppliers
 create table if not exists corevia_suppliers (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   phone text,
   address text,
@@ -596,6 +620,7 @@ create table if not exists corevia_suppliers (
 -- 5. Create table for Fixed and Variable Expenses
 create table if not exists corevia_expenses (
   id text primary key,
+  company_id text default 'cop_default',
   type text not null, -- 'fixed', 'variable', 'ads'
   name text,
   amount numeric,
@@ -614,6 +639,7 @@ create table if not exists corevia_expenses (
 -- 6. Create table for Workers and Salaries
 create table if not exists corevia_workers (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   code text,
   phone text,
@@ -628,6 +654,7 @@ create table if not exists corevia_workers (
 
 create table if not exists corevia_salary_sheets (
   id text primary key,
+  company_id text default 'cop_default',
   worker_id text not null,
   worker_name text,
   month_year text,
@@ -1323,9 +1350,30 @@ create table if not exists corevia_salary_sheets (
 {`-- Corevia ERP Database SQL Schema for Supabase
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
+-- 0. SaaS Tenancy and Users linking
+create table if not exists corevia_companies (
+  id text primary key,
+  name text not null,
+  business_type text,
+  owner_name text,
+  phone text,
+  email text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_saas_users (
+  user_id text primary key,
+  company_id text references corevia_companies(id) on delete set null,
+  email text not null,
+  username text,
+  has_completed_onboarding boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 -- 1. Create table for Business PROFILE
 create table if not exists corevia_profile (
-  id text primary key default 'primary-profile',
+  id text primary key,
+  company_id text default null,
   business_name text not null,
   business_type text,
   currency text default 'DZD',
@@ -1343,6 +1391,7 @@ create table if not exists corevia_profile (
 -- 2. Create table for Products
 create table if not exists corevia_products (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   wholesale_cost_price numeric not null,
   wholesale_percentage numeric,
@@ -1359,6 +1408,7 @@ create table if not exists corevia_products (
 -- 3. Create table for Orders
 create table if not exists corevia_orders (
   id text primary key,
+  company_id text default 'cop_default',
   date text not null,
   customer_name text not null,
   phone text not null,
@@ -1388,6 +1438,7 @@ create table if not exists corevia_orders (
 -- 4. Create table for Suppliers
 create table if not exists corevia_suppliers (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   phone text,
   address text,
@@ -1399,6 +1450,7 @@ create table if not exists corevia_suppliers (
 -- 5. Create table for Fixed and Variable Expenses
 create table if not exists corevia_expenses (
   id text primary key,
+  company_id text default 'cop_default',
   type text not null, -- 'fixed', 'variable', 'ads'
   name text,
   amount numeric,
@@ -1417,6 +1469,7 @@ create table if not exists corevia_expenses (
 -- 6. Create table for Workers and Salaries
 create table if not exists corevia_workers (
   id text primary key,
+  company_id text default 'cop_default',
   name text not null,
   code text,
   phone text,
@@ -1431,6 +1484,7 @@ create table if not exists corevia_workers (
 
 create table if not exists corevia_salary_sheets (
   id text primary key,
+  company_id text default 'cop_default',
   worker_id text not null,
   worker_name text,
   month_year text,

@@ -38,6 +38,8 @@ export interface UserSession {
   isRegistered: boolean;
   isApproved: boolean;
   isSuspended: boolean;
+  user_id?: string;
+  company_id?: string;
 }
 
 export interface OrderItem {

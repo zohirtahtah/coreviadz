@@ -95,7 +95,9 @@ export default function Auth({
           email: emailInput,
           isRegistered: true,
           isApproved: true,
-          isSuspended: false
+          isSuspended: false,
+          user_id: sessionUser?.id,
+          company_id: sessionUser ? `cop_${sessionUser.id.substring(0, 15)}` : undefined
         };
         
         onAuthSuccess(activeSession);
@@ -110,7 +112,9 @@ export default function Auth({
             email: emailInput,
             isRegistered: true,
             isApproved: true,
-            isSuspended: false
+            isSuspended: false,
+            user_id: "usr_mock",
+            company_id: "cop_mock"
           };
           onAuthSuccess(fallbackSession);
           onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح (وضع المحاكاة المتصل بنظام التخزين المحلي)!" : "Logged in successfully (Simulated mode)!", "success");
@@ -151,7 +155,9 @@ export default function Auth({
           email: emailInput,
           isRegistered: true,
           isApproved: true,
-          isSuspended: false
+          isSuspended: false,
+          user_id: data.user?.id,
+          company_id: data.user ? `cop_${data.user.id.substring(0, 15)}` : undefined
         };
 
         if (data.session) {
@@ -175,7 +181,9 @@ export default function Auth({
           email: emailInput,
           isRegistered: true,
           isApproved: true,
-          isSuspended: false
+          isSuspended: false,
+          user_id: "usr_mock",
+          company_id: "cop_mock"
         };
         onAuthSuccess(sessionRecord);
         onTriggerNotification(isRtl ? "تم تسجيل الحساب بنجاح (وضع المحاكاة!)" : "Registered successfully (Simulated mode!)", "success");
