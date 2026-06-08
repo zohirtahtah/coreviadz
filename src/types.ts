@@ -41,6 +41,9 @@ export interface UserSession {
   user_id?: string;
   company_id?: string;
   role?: string;
+  allowedPages?: string[];
+  jobTitle?: string;
+  isReadOnly?: boolean;
 }
 
 export interface OrderItem {

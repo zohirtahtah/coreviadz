@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield
+  Shield, History
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -99,6 +99,8 @@ export default function Sidebar({
     { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: true },
     { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: true },
     { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: true },
+    { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
+    { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
     { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
   ];
@@ -110,6 +112,16 @@ export default function Sidebar({
         ...baseNavItems
       ]
     : baseNavItems;
+
+  const isAllowed = (tabId: string) => {
+    if (isSuperAdmin) return true;
+    if (session?.role === "employee") {
+      return !!session.allowedPages?.includes(tabId);
+    }
+    return true;
+  };
+
+  const navItemsFiltered = navItems.filter(item => isAllowed(item.id));
 
   const handleNavClick = (tabId: string, isRestricted: boolean) => {
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
@@ -199,7 +211,7 @@ export default function Sidebar({
 
           {/* Navigation Links */}
           <nav className="space-y-1 flex-1 overflow-y-auto max-h-[calc(100vh-220px)] pr-1" id="sidebar_navigation_links">
-            {navItems.map((item) => {
+            {navItemsFiltered.map((item) => {
               const IconComp = item.icon;
               const isItemUnlocked = !item.isRestricted || !isLocked || unlockedTabs.includes(item.id);
               const isActive = activeTab === item.id;
@@ -395,26 +407,36 @@ export default function Sidebar({
 
       {/* MOBILE BOTTOM NAVIGATION */}
       <nav className="fixed bottom-0 left-0 right-0 h-14 bg-[#09090b]/90 backdrop-blur-md border-t border-[#27272a] flex items-center justify-around px-2 z-40 md:hidden" id="mobile_subnavigation">
-        <button onClick={() => handleNavClick("dashboard", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "dashboard" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-          <LayoutDashboard className="w-4 h-4" />
-          <span>{lang === "ar" ? "الرئيسية" : "Home"}</span>
-        </button>
-        <button onClick={() => handleNavClick("orders", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "orders" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-          <ShoppingCart className="w-4 h-4" />
-          <span>{lang === "ar" ? "الطلبيات" : "Orders"}</span>
-        </button>
-        <button onClick={() => handleNavClick("inventory", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "inventory" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-          <Package className="w-4 h-4" />
-          <span>{lang === "ar" ? "المخزون" : "Stock"}</span>
-        </button>
-        <button onClick={() => handleNavClick("profit", true)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "profit" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-          <LandmarkIcon className="w-4 h-4" />
-          <span>{lang === "ar" ? "الأرباح" : "Finance"}</span>
-        </button>
-        <button onClick={() => handleNavClick("settings", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-          <Settings className="w-4 h-4" />
-          <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
-        </button>
+        {isAllowed("dashboard") && (
+          <button onClick={() => handleNavClick("dashboard", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "dashboard" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+            <LayoutDashboard className="w-4 h-4" />
+            <span>{lang === "ar" ? "الرئيسية" : "Home"}</span>
+          </button>
+        )}
+        {isAllowed("orders") && (
+          <button onClick={() => handleNavClick("orders", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "orders" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+            <ShoppingCart className="w-4 h-4" />
+            <span>{lang === "ar" ? "الطلبيات" : "Orders"}</span>
+          </button>
+        )}
+        {isAllowed("inventory") && (
+          <button onClick={() => handleNavClick("inventory", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "inventory" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+            <Package className="w-4 h-4" />
+            <span>{lang === "ar" ? "المخزون" : "Stock"}</span>
+          </button>
+        )}
+        {isAllowed("profit") && (
+          <button onClick={() => handleNavClick("profit", true)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "profit" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+            <LandmarkIcon className="w-4 h-4" />
+            <span>{lang === "ar" ? "الأرباح" : "Finance"}</span>
+          </button>
+        )}
+        {isAllowed("settings") && (
+          <button onClick={() => handleNavClick("settings", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
+            <Settings className="w-4 h-4" />
+            <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
+          </button>
+        )}
       </nav>
 
       {/* OVERLAY CUSTOM PASSCODE PAD */}

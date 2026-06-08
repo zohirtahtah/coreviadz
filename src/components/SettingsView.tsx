@@ -12,6 +12,7 @@ import {
   Server, Sparkles, Key, AlertCircle
 } from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
+import UsersPermissionsView from "./UsersPermissionsView";
 import { supabase, isSupabaseConfigured } from "../supabaseClient";
 import { pushFullTenantData, pullMultiTenantData } from "../supabaseSync";
 import {
@@ -35,6 +36,7 @@ interface SettingsViewProps {
   onTriggerNotification: (msg: string) => void;
   onTriggerRefreshOrders?: () => void;
   session?: any;
+  seatsLimit?: number;
 }
 
 export default function SettingsView({
@@ -45,7 +47,8 @@ export default function SettingsView({
   onSaveCustomColors,
   onTriggerNotification,
   onTriggerRefreshOrders,
-  session
+  session,
+  seatsLimit
 }: SettingsViewProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -707,7 +710,7 @@ create table if not exists corevia_salary_sheets (
   };
 
   // Sub-tabs active page indicator
-  const [activePage, setActivePage] = useState<"company" | "control" | "integrations">("company");
+  const [activePage, setActivePage] = useState<"company" | "control" | "integrations" | "users">("company");
 
   // Logo file upload handler
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -909,6 +912,16 @@ create table if not exists corevia_salary_sheets (
           }`}
         >
           {activeTabsText.integrations}
+        </button>
+        <button
+          onClick={() => setActivePage("users")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+            activePage === "users"
+              ? "border-rose-500 text-rose-400"
+              : "border-transparent text-slate-450 hover:text-slate-200"
+          }`}
+        >
+          {lang === "ar" ? "👥 المستخدمين والصلاحيات" : "👥 Users & Permissions"}
         </button>
       </div>
 
@@ -1597,6 +1610,17 @@ create table if not exists corevia_salary_sheets (
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {activePage === "users" && (
+        <div className="bounce-in">
+          <UsersPermissionsView
+            lang={lang}
+            session={session}
+            onTriggerNotification={onTriggerNotification}
+            seatsLimit={seatsLimit}
+          />
         </div>
       )}
 

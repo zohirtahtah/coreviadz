@@ -34,6 +34,9 @@ import YearlyView from "./components/YearlyView";
 import TrashView from "./components/TrashView";
 import SettingsView from "./components/SettingsView";
 import SuperAdminView from "./components/SuperAdminView";
+import UsersPermissionsView from "./components/UsersPermissionsView";
+import ActivityLogView from "./components/ActivityLogView";
+import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
   getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
@@ -417,6 +420,21 @@ export default function App() {
 
   // Safe logout
   const handleLogout = async () => {
+    if (session) {
+      try {
+        await logActivity({
+          companyId: session.company_id,
+          userName: session.username,
+          userId: session.user_id,
+          jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+          actionType: "Logout",
+          pageName: "Authentication",
+          affectedRecord: `User logged out`
+        });
+      } catch (err) {
+        // ignore
+      }
+    }
     if (supabase) {
       try {
         await supabase.auth.signOut();
@@ -478,6 +496,46 @@ export default function App() {
       triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط. يرجى تجديد أو ترقية باقة اشتراكك." : "Sorry, this account is Read-Only. Please upgrade or renew your subscription.", "info");
       return;
     }
+
+    // Log Activity for Orders modification
+    try {
+      const oldOrders = getOrders();
+      if (newOrders.length > oldOrders.length) {
+        const added = newOrders.find(n => !oldOrders.some(o => o.id === n.id));
+        if (session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Create Order",
+            pageName: "Orders",
+            affectedRecord: `Order ID: ${added?.id || "Bulk"}`
+          });
+        }
+      } else if (newOrders.length === oldOrders.length) {
+        const changed = newOrders.find(n => {
+          const old = oldOrders.find(o => o.id === n.id);
+          return old && JSON.stringify(old) !== JSON.stringify(n);
+        });
+        if (changed && session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Update Order",
+            pageName: "Orders",
+            affectedRecord: `Order ID: ${changed.id}, Customer: ${changed.customerName}`,
+            previousValue: JSON.stringify(oldOrders.find(o => o.id === changed.id)),
+            newValue: JSON.stringify(changed)
+          });
+        }
+      }
+    } catch(err) {
+      console.warn("Activity log order modification error:", err);
+    }
+
     setOrders(newOrders);
     saveOrders(newOrders);
 
@@ -523,6 +581,46 @@ export default function App() {
       triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
       return;
     }
+
+    // Log Activity for products modifications
+    try {
+      const oldProducts = getProducts();
+      if (newProducts.length > oldProducts.length) {
+        const added = newProducts.find(n => !oldProducts.some(p => p.id === n.id));
+        if (session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Create Product",
+            pageName: "Products",
+            affectedRecord: `Product Name: ${added?.name || "Bulk"}`
+          });
+        }
+      } else if (newProducts.length === oldProducts.length) {
+        const changed = newProducts.find(n => {
+          const old = oldProducts.find(p => p.id === n.id);
+          return old && JSON.stringify(old) !== JSON.stringify(n);
+        });
+        if (changed && session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Update Product",
+            pageName: "Products",
+            affectedRecord: `Product Name: ${changed.name}`,
+            previousValue: JSON.stringify(oldProducts.find(p => p.id === changed.id)),
+            newValue: JSON.stringify(changed)
+          });
+        }
+      }
+    } catch(err) {
+      console.warn("Product activity logging warning:", err);
+    }
+
     setProducts(newProducts);
     saveProducts(newProducts);
     // Automatic stockpiles feedback
@@ -551,6 +649,46 @@ export default function App() {
       triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
       return;
     }
+
+    // Log Activity for Invoice uploads/mutations
+    try {
+      const oldInvoices = getSupplierInvoices();
+      if (newInvoices.length > oldInvoices.length) {
+        const added = newInvoices.find(n => !oldInvoices.some(i => i.id === n.id));
+        if (session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Create Invoice",
+            pageName: "Suppliers",
+            affectedRecord: `Invoice Ref: ${added?.id || "Bulk"}`
+          });
+        }
+      } else if (newInvoices.length === oldInvoices.length) {
+        const changed = newInvoices.find(n => {
+          const old = oldInvoices.find(i => i.id === n.id);
+          return old && JSON.stringify(old) !== JSON.stringify(n);
+        });
+        if (changed && session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Update Invoice",
+            pageName: "Suppliers",
+            affectedRecord: `Invoice ID: ${changed.id}, Supplier: ${changed.supplierName}`,
+            previousValue: JSON.stringify(oldInvoices.find(i => i.id === changed.id)),
+            newValue: JSON.stringify(changed)
+          });
+        }
+      }
+    } catch(err) {
+      console.warn("Invoice activity logging warning:", err);
+    }
+
     setInvoices(newInvoices);
     saveSupplierInvoices(newInvoices);
     
@@ -591,6 +729,46 @@ export default function App() {
       triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
       return;
     }
+
+    // Log Activity for Expense creation/modification
+    try {
+      const oldExpenses = expenses;
+      if (newExpenses.length > oldExpenses.length) {
+        const added = newExpenses.find(n => !oldExpenses.some(x => x.id === n.id));
+        if (session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Create Expense",
+            pageName: "Expenses",
+            affectedRecord: `Expense: ${added?.title || added?.type || "Unknown"}`
+          });
+        }
+      } else if (newExpenses.length === oldExpenses.length) {
+        const changed = newExpenses.find(n => {
+          const old = oldExpenses.find(x => x.id === n.id);
+          return old && JSON.stringify(old) !== JSON.stringify(n);
+        });
+        if (changed && session) {
+          logActivity({
+            companyId: session.company_id,
+            userName: session.username,
+            userId: session.user_id,
+            jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+            actionType: "Update Expense",
+            pageName: "Expenses",
+            affectedRecord: `Expense: ${changed.title || changed.type}`,
+            previousValue: JSON.stringify(oldExpenses.find(x => x.id === changed.id)),
+            newValue: JSON.stringify(changed)
+          });
+        }
+      }
+    } catch(err) {
+      console.warn("Expense activity logging warning:", err);
+    }
+
     setExpenses(newExpenses);
     localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(newExpenses));
 
@@ -615,6 +793,18 @@ export default function App() {
 
   // SOFT DELETION WRAPPING FOR 5-SECOND UNDO IMPLEMENTATION
   const handleSoftDeleteOrder = (orderId: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete Order",
+        pageName: "Orders",
+        affectedRecord: `Order ID: ${orderId}`
+      }).catch(() => {});
+    }
+
     deleteOrderSoft(orderId);
     setOrders(getOrders());
     setBasicInventory(getBasicInventory());
@@ -636,6 +826,18 @@ export default function App() {
   };
 
   const handleSoftDeleteProduct = (pid: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete Product",
+        pageName: "Products",
+        affectedRecord: `Product ID: ${pid}`
+      }).catch(() => {});
+    }
+
     deleteProductSoft(pid);
     setProducts(getProducts());
     setBasicInventory(getBasicInventory());
@@ -655,6 +857,18 @@ export default function App() {
   };
 
   const handleSoftDeleteInvoice = (invId: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete Invoice",
+        pageName: "Suppliers",
+        affectedRecord: `Invoice ID: ${invId}`
+      }).catch(() => {});
+    }
+
     deleteInvoiceSoft(invId);
     setInvoices(getSupplierInvoices());
     setBasicInventory(getBasicInventory());
@@ -674,6 +888,18 @@ export default function App() {
   };
 
   const handleSoftDeleteWorker = (wId: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete User",
+        pageName: "Workers",
+        affectedRecord: `Worker ID: ${wId}`
+      }).catch(() => {});
+    }
+
     deleteWorkerSoft(wId);
     setWorkers(getWorkers());
     
@@ -691,6 +917,18 @@ export default function App() {
   };
 
   const handleSoftDeleteExpense = (expId: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete Expense",
+        pageName: "Expenses",
+        affectedRecord: `Expense ID: ${expId}`
+      }).catch(() => {});
+    }
+
     const updated = expenses.filter(x => x.id !== expId);
     saveExpensesAndPersist(updated);
     triggerToast("تم إلغاء بند الصرف المالي بنجاح.", "info");
@@ -1107,6 +1345,20 @@ export default function App() {
     );
   }
 
+  const logInventoryAdjustment = (type: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Inventory Adjustments",
+        pageName: "Inventory",
+        affectedRecord: `Stock adjusted: ${type}`
+      }).catch((e) => console.warn("Log stock error:", e));
+    }
+  };
+
   return (
     <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"}`} id="applet_main_scaffold">
       
@@ -1164,9 +1416,9 @@ export default function App() {
             basicInventory={basicInventory}
             subInventory={subInventory}
             returnInventory={returnInventory}
-            onSaveBasic={(arr) => { setBasicInventory(arr); saveBasicInventory(arr); }}
-            onSaveSub={(arr) => { setSubInventory(arr); saveSubInventory(arr); }}
-            onSaveReturn={(arr) => { setReturnInventory(arr); saveReturnInventory(arr); }}
+            onSaveBasic={(arr) => { setBasicInventory(arr); saveBasicInventory(arr); logInventoryAdjustment("Basic Stock"); }}
+            onSaveSub={(arr) => { setSubInventory(arr); saveSubInventory(arr); logInventoryAdjustment("Sub Stock"); }}
+            onSaveReturn={(arr) => { setReturnInventory(arr); saveReturnInventory(arr); logInventoryAdjustment("Returned Stock"); }}
             products={products}
             lang={lang}
             onSoftDeleteProduct={handleSoftDeleteProduct}
@@ -1270,6 +1522,24 @@ export default function App() {
             onTriggerNotification={triggerToast}
             onTriggerRefreshOrders={() => setOrders(getOrders())}
             session={session}
+            seatsLimit={seatsLimit}
+          />
+        )}
+
+        {activeTab === "users-permissions" && (
+          <UsersPermissionsView
+            lang={lang}
+            session={session}
+            onTriggerNotification={triggerToast}
+            seatsLimit={seatsLimit}
+          />
+        )}
+
+        {activeTab === "activity-log" && (
+          <ActivityLogView
+            lang={lang}
+            session={session}
+            onTriggerNotification={triggerToast}
           />
         )}
 

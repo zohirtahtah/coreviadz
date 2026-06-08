@@ -1,0 +1,672 @@
+import React, { useState, useEffect } from "react";
+import { 
+  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X, 
+  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck
+} from "lucide-react";
+import { LanguageType } from "../types";
+import { translations } from "../translations";
+import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
+import { logActivity } from "../activityLogService";
+
+interface UsersPermissionsViewProps {
+  lang: LanguageType;
+  session: any;
+  onTriggerNotification: (msg: string) => void;
+  seatsLimit?: number;
+}
+
+export default function UsersPermissionsView({
+  lang,
+  session,
+  onTriggerNotification,
+  seatsLimit = 5
+}: UsersPermissionsViewProps) {
+  const isRtl = lang === "ar";
+  const companyId = session?.company_id || "cop_default";
+
+  // State Management
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Modal / Form States
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+
+  // Form Fields
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"Active" | "Read Only" | "Suspended">("Active");
+  const [assignedResponsibilities, setAssignedResponsibilities] = useState("");
+  const [selectedPages, setSelectedPages] = useState<string[]>(["dashboard"]);
+  
+  // UI States
+  const [showPasswordRaw, setShowPasswordRaw] = useState(false);
+  const [passRevealId, setPassRevealId] = useState<string | null>(null);
+
+  // Available Pages list (all 13 specified in product specification)
+  const availablePagesList = [
+    { id: "dashboard", labelEn: "Dashboard", labelAr: "لوحة التحكم الرئيسية" },
+    { id: "orders", labelEn: "Orders", labelAr: "الطلبيات والمبيعات" },
+    { id: "suppliers", labelEn: "Customers", labelAr: "الموردين والزبائن (العملاء)" },
+    { id: "inventory", labelEn: "Inventory", labelAr: "إدارة المخزون الذكية" },
+    { id: "products", labelEn: "Products", labelAr: "إدارة المنتجات والموديلات" },
+    { id: "returns", labelEn: "Returns", labelAr: "مخزون المرتجعات والإرجاع" },
+    { id: "invoices", labelEn: "Invoices", labelAr: "الفواتير والمشتريات" },
+    { id: "expenses", labelEn: "Expenses", labelAr: "سجل المصاريف والإعلانات" },
+    { id: "workers", labelEn: "Workers & Payrolls", labelAr: "الموظفين والعمال والرواتب" },
+    { id: "profit", labelEn: "Reports (Profit)", labelAr: "ملخص الأرباح والمالية" },
+    { id: "activity-log", labelEn: "Activity Log", labelAr: "سجل عمليات الشركة" },
+    { id: "settings", labelEn: "Settings", labelAr: "إعدادات النظام وعلامة الألوان" },
+    { id: "users-permissions", labelEn: "Users & Permissions", labelAr: "إدارة المستخدمين والصلاحيات" },
+  ];
+
+  // Load Employees on Mount and Session changes
+  const loadEmployeesData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await getEmployees(companyId);
+      // Ensure we exclude owner or super admin accounts from the seats count list if not created as employees
+      setEmployees(data);
+    } catch (e) {
+      console.error("Error loading employees", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEmployeesData();
+  }, [companyId]);
+
+  // Total seats counted: 1 Owner + number of created employee accounts
+  const totalSeatsCountUsed = 1 + employees.length;
+
+  const handleOpenCreateModal = () => {
+    if (totalSeatsCountUsed >= seatsLimit) {
+      onTriggerNotification(
+        isRtl 
+          ? "⚠️ لقد وصلت إلى الحد الأقصى لعدد المستخدمين المسموح به في اشتراكك."
+          : "⚠️ You have reached the maximum number of users allowed in your subscription."
+      );
+      return;
+    }
+    
+    setEditingEmployee(null);
+    setFullName("");
+    setPhone("");
+    setEmail("");
+    setJobTitle("");
+    setPassword(Math.floor(100000 + Math.random() * 900000).toString()); // Pre-fill with clean random password
+    setStatus("Active");
+    setAssignedResponsibilities("");
+    setSelectedPages(["dashboard"]);
+    setShowPasswordRaw(true);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (emp: Employee) => {
+    setEditingEmployee(emp);
+    setFullName(emp.fullName);
+    setPhone(emp.phone);
+    setEmail(emp.email || "");
+    setJobTitle(emp.jobTitle);
+    setPassword(emp.password || "");
+    setStatus(emp.status);
+    setAssignedResponsibilities(emp.assignedResponsibilities || "");
+    setSelectedPages(emp.allowedPages || ["dashboard"]);
+    setShowPasswordRaw(false);
+    setIsModalOpen(true);
+  };
+
+  const togglePageSelection = (pid: string) => {
+    if (selectedPages.includes(pid)) {
+      setSelectedPages(selectedPages.filter(x => x !== pid));
+    } else {
+      setSelectedPages([...selectedPages, pid]);
+    }
+  };
+
+  const handleDeleteEmployeeItem = async (emp: Employee) => {
+    const confirmMsg = isRtl
+      ? `هل أنت متأكد تماماً من حذف حساب الموظف "${emp.fullName}" بشكل نهائي؟`
+      : `Are you completely sure you want to permanently delete the account of employee "${emp.fullName}"?`;
+    
+    if (window.confirm(confirmMsg)) {
+      setIsLoading(true);
+      const success = await deleteEmployee(emp.id, companyId);
+      if (success) {
+        onTriggerNotification(
+          isRtl 
+            ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح`
+            : `✅ Successfully deleted employee (${emp.fullName})`
+        );
+        
+        // Log delete activity
+        await logActivity({
+          companyId,
+          userName: session?.username || "Owner",
+          userId: session?.user_id || "owner_id",
+          jobTitle: session?.role === "admin" ? "Company Owner" : session?.jobTitle || "Employee",
+          actionType: "Delete User",
+          pageName: "Users & Permissions",
+          affectedRecord: `User: ${emp.fullName} (${emp.jobTitle})`,
+          previousValue: JSON.stringify(emp),
+          newValue: ""
+        });
+
+        loadEmployeesData();
+      } else {
+        onTriggerNotification(isRtl ? "❌ فشل حذف الموظف من قاعدة البيانات" : "❌ Failed to delete employee");
+      }
+      setIsLoading(false);
+    }
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim() || !phone.trim() || !password.trim()) {
+      onTriggerNotification(isRtl ? "⚠️ يرجى ملء جميع الحقول الإلزامية." : "⚠️ Please fill all required fields.");
+      return;
+    }
+
+    setIsLoading(true);
+    
+    const isNew = !editingEmployee;
+    const employeeId = editingEmployee ? editingEmployee.id : `emp-${Date.now()}`;
+    
+    // Check if phone or email already registered by another employee in the company
+    const duplicate = employees.find(
+      x => x.id !== employeeId && 
+      (x.phone.trim() === phone.trim() || (email && x.email && x.email.toLowerCase().trim() === email.toLowerCase().trim()))
+    );
+
+    if (duplicate) {
+      onTriggerNotification(
+        isRtl 
+          ? "❌ رقم الهاتف أو البريد الإلكتروني مسجل بالفعل لموظف آخر."
+          : "❌ The phone number or email is already registered to another employee."
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    const payload: Employee = {
+      id: employeeId,
+      companyId,
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+      email: email.trim() || undefined,
+      jobTitle: jobTitle.trim() || "موظف",
+      password: password.trim(),
+      allowedPages: selectedPages,
+      assignedResponsibilities: assignedResponsibilities.trim() || undefined,
+      status,
+      lastActivity: editingEmployee?.lastActivity,
+      createdAt: editingEmployee?.createdAt || new Date().toISOString()
+    };
+
+    const success = await saveEmployee(payload);
+    if (success) {
+      onTriggerNotification(
+        isRtl
+          ? `✅ تم ${isNew ? "إنشاء" : "تحديث"} حساب الموظف (${fullName}) بنجاح`
+          : `✅ Successfully ${isNew ? "created" : "updated"} employee account (${fullName})`
+      );
+
+      // Log specific activities
+      const actionType = isNew ? "Create User" : "Update User";
+      const affectedRecord = `User: ${fullName} (${jobTitle})`;
+      
+      // Check status changes to log "Suspend User" or "Reactivate User" specifically
+      let logAction = actionType;
+      if (!isNew && editingEmployee.status !== status) {
+        logAction = status === "Suspended" ? "Suspend User" : "Reactivate User";
+      }
+
+      await logActivity({
+        companyId,
+        userName: session?.username || "Owner",
+        userId: session?.user_id || "owner_id",
+        jobTitle: session?.role === "admin" ? "Company Owner" : session?.jobTitle || "Employee",
+        actionType: logAction,
+        pageName: "Users & Permissions",
+        affectedRecord,
+        previousValue: editingEmployee ? JSON.stringify(editingEmployee) : "",
+        newValue: JSON.stringify(payload)
+      });
+
+      setIsModalOpen(false);
+      loadEmployeesData();
+    } else {
+      onTriggerNotification(isRtl ? "❌ فشل حفظ تفاصيل الحساب" : "❌ Failed to save account details");
+    }
+    
+    setIsLoading(false);
+  };
+
+  return (
+    <div className="space-y-4" id="users_and_permissions_section">
+      
+      {/* Top action layout */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#0c0c0e] p-4 rounded-xl border border-[#1f1f23]">
+        <div className={isRtl ? "text-right" : "text-left"}>
+          <h2 className="text-sm font-bold text-white flex items-center gap-2 justify-end">
+            <span>👥 {isRtl ? "إدارة شؤون الموظفين والصلاحيات" : "Employee Workspace & Access Gates"}</span>
+          </h2>
+          <p className="text-[10px] text-slate-400 mt-1">
+            {isRtl 
+              ? "تفويض صلاحيات معينة لكل موظف، تتبع نشاطاتهم الأخيرة، وإدارة ملفاتهم السرية."
+              : "Delegate secure per-page authorization grids, track live sessions, and manage background data details."}
+          </p>
+        </div>
+
+        {/* Seat Tracker Display Widget */}
+        <div className="flex items-center gap-3 bg-[#121214] border border-[#27272a] px-3.5 py-2 rounded-xl">
+          <div className="text-right">
+            <span className="text-[9px] text-slate-450 block uppercase font-bold tracking-wider">
+              {isRtl ? "مؤشر مقاعد الاشتراك" : "SUBSCRIPTION SEATS TRACKER"}
+            </span>
+            <div className="flex items-center gap-1.5 justify-end">
+              <span className={`h-2 w-2 rounded-full ${totalSeatsCountUsed >= seatsLimit ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`} />
+              <span className="text-xs font-black text-white">
+                {totalSeatsCountUsed} / {seatsLimit} {isRtl ? "حسابات مستخدمة" : "seats occupied"}
+              </span>
+            </div>
+          </div>
+          
+          <button
+            onClick={handleOpenCreateModal}
+            className="p-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg flex items-center gap-1.5 text-[11px] font-bold transition-all active:scale-[0.98] cursor-pointer"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>{isRtl ? "إضافة موظف جديد" : "Create New User"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Employees Table Grid */}
+      {isLoading && employees.length === 0 ? (
+        <div className="text-center py-12 bg-[#09090b] rounded-xl border border-[#27272a]">
+          <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto mb-3" />
+          <p className="text-xs text-slate-400">{isRtl ? "جاري تحميل وتزامن قائمة الموظفين..." : "Loading employee accounts roster..."}</p>
+        </div>
+      ) : employees.length === 0 ? (
+        <div className="text-center py-16 bg-[#09090b] rounded-xl border border-[#27272a] p-6 space-y-3">
+          <Users className="w-12 h-12 text-slate-600 mx-auto" />
+          <h3 className="text-sm font-bold text-white">{isRtl ? "لا يوجد موظفون مقيدون حالياً" : "No employee accounts declared"}</h3>
+          <p className="text-xs text-slate-450 max-w-sm mx-auto">
+            {isRtl 
+              ? "لم تقم بتسجيل أي موظف لشركتك بعد. اضغط على الزر بالأعلى لمنحهم تراخيص ERP للعمل."
+              : "Your corporate account does not have any employees listed. Create one above to grant customized secure login gateways."}
+          </p>
+          <button
+            onClick={handleOpenCreateModal}
+            className="mx-auto px-4 py-2 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+          >
+            {isRtl ? "إضافة أول موظف الآن" : "Add Your First Employee"}
+          </button>
+        </div>
+      ) : (
+        <div className="bg-[#09090b] rounded-xl border border-[#27272a] overflow-hidden">
+          <div className="p-3 border-b border-[#27272a] bg-[#0c0c0e] flex justify-between items-center">
+            <span className="text-[10px] text-slate-400 font-bold">
+              {employees.length} {isRtl ? "موظفين نشطين / مسجلين" : "Active employees listed"}
+            </span>
+
+            {/* Quick reload */}
+            <button 
+              onClick={loadEmployeesData} 
+              className="p-1 hover:bg-[#1a1a1e] rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-right border-collapse" style={{ direction: isRtl ? "rtl" : "ltr" }}>
+              <thead>
+                <tr className="border-b border-[#27272a] text-slate-400 bg-slate-950/40">
+                  <th className="p-3 font-semibold text-center">{isRtl ? "الموظف" : "Employee"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "المنصب / اللقب" : "Job Title"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "بيانات الدخول" : "Auth Credentials"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "الحالة" : "Status"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "الصفحات المرخصة" : "Pages Allowed"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "النشاط الأخير" : "Last Active Time"}</th>
+                  <th className="p-3 font-semibold text-center">{isRtl ? "التحكم" : "Actions"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((emp) => {
+                  const hasEmail = !!emp.email;
+                  return (
+                    <tr key={emp.id} className="border-b border-[#1f1f23] hover:bg-white/[0.01] transition-colors">
+                      {/* Name Card */}
+                      <td className="p-3 font-bold text-white text-center">
+                        <div className="flex flex-col items-center">
+                          <span>{emp.fullName}</span>
+                          <span className="text-[9px] text-slate-400 font-normal">Created: {new Date(emp.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </td>
+
+                      {/* Job Title */}
+                      <td className="p-3 text-slate-200 text-center">
+                        <span className="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-900/30 rounded-full font-semibold text-[10px]">
+                          {emp.jobTitle}
+                        </span>
+                      </td>
+
+                      {/* Credentials */}
+                      <td className="p-3 text-center space-y-1">
+                        <div className="text-slate-300 font-mono text-[11px]">
+                          📱 {emp.phone}
+                        </div>
+                        {hasEmail && (
+                          <div className="text-slate-400 text-[10px] font-mono">
+                            ✉️ {emp.email}
+                          </div>
+                        )}
+                        
+                        {/* Reveal Password Hook */}
+                        <div className="flex items-center justify-center gap-1 text-[10px]">
+                          <span className="text-slate-500">{isRtl ? "كلمة المرور:" : "Password:"}</span>
+                          <span className="font-mono text-slate-200 font-bold bg-[#141416] px-1.5 py-0.5 rounded border border-[#27272a]">
+                            {passRevealId === emp.id ? emp.password : "••••••"}
+                          </span>
+                          <button
+                            onClick={() => setPassRevealId(passRevealId === emp.id ? null : emp.id)}
+                            className="text-slate-400 hover:text-white p-0.5"
+                          >
+                            {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* Status badge */}
+                      <td className="p-3 text-center">
+                        {emp.status === "Active" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-900/40 rounded-full text-[10px] font-bold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>{isRtl ? "نشط" : "Active"}</span>
+                          </span>
+                        ) : emp.status === "Read Only" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-950 text-amber-400 border border-amber-900/40 rounded-full text-[10px] font-bold">
+                            <span>{isRtl ? "عرض وقراءة فقط" : "Read Only"}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-950 text-rose-400 border border-rose-900/40 rounded-full text-[10px] font-bold animate-pulse">
+                            <span>{isRtl ? "موقوف" : "Suspended"}</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Permissions List counts */}
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-300 font-bold rounded-lg font-mono">
+                          {emp.allowedPages?.length || 0} / 13 {isRtl ? "صفحات" : "pages"}
+                        </span>
+                      </td>
+
+                      {/* Last seen */}
+                      <td className="p-3 text-center text-slate-400 font-semibold font-mono text-[10px]">
+                        {emp.lastActivity ? (
+                          <div className="flex flex-col items-center">
+                            <span className="text-white">⏱️ {emp.lastActivity}</span>
+                          </div>
+                        ) : (
+                          <span>{isRtl ? "-- لم ينشط بعد --" : "-- Haven't logged in yet --"}</span>
+                        )}
+                      </td>
+
+                      {/* Controls */}
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenEditModal(emp)}
+                            className="p-1.5 bg-[#141416] hover:bg-slate-800 border border-[#27272a] text-amber-500 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                            title={isRtl ? "تعديل الصلاحيات وكلمة المرور" : "Edit Permissions & Settings"}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <button
+                            onClick={() => handleDeleteEmployeeItem(emp)}
+                            className="p-1.5 bg-[#141416] hover:bg-rose-950/40 border border-[#27272a] text-rose-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+                            title={isRtl ? "حذف الموظف نهائياً" : "Delete Roster Account"}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIDENTIAL RESPONSIBILITIES OWNER EXPANSE */}
+      <div className="bg-[#09090b] border border-indigo-500/10 p-5 rounded-xl space-y-3">
+        <h4 className="text-xs font-black text-white flex items-center gap-2 justify-end">
+          <span className="text-amber-500">🔒</span>
+          <span>{isRtl ? "التزامات ومهام الموظفين (خاص بالمالك فقط)" : "Confidential Employee Duties & Responsibilities"}</span>
+        </h4>
+        <p className="text-[10px] text-slate-450 mt-1 lines-relaxed">
+          {isRtl 
+            ? "المهام والتعليمات التي تكتبها لكل موظف عند تعديل حسابه هي سرية تماماً، ومخزنة سحابياً بشكل مؤمن، ولا تظهر مطلقاً في واجهة الموظفين عند تسجيل دخولهم."
+            : "Any custom operational instructions or private responsibilities written inside employee forms are stored securely with end-to-end owner isolation. They are completely invisible to employees."}
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+          {employees.map(emp => (
+            <div key={emp.id} className="p-3.5 bg-[#121214] rounded-lg border border-[#27272a] text-right space-y-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-[10.5px] font-bold text-white">{emp.fullName}</span>
+                <span className="text-[9px] text-indigo-400 font-semibold px-2 py-0.5 bg-indigo-950 rounded border border-indigo-900/30">{emp.jobTitle}</span>
+              </div>
+              <p className="text-[10.5px] text-slate-400 italic bg-[#09090b] p-2 rounded border border-[#1f1f23] max-h-24 overflow-y-auto whitespace-pre-line text-right">
+                {emp.assignedResponsibilities || (isRtl ? "لا توجد التزامات مسجلة لهذا الموظف بعد." : "No explicit duties logged.")}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* MODAL WINDOW FOR CREATE / EDIT EMPLOYEE */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[999] animate-fade-in text-right">
+          <div className="w-full max-w-lg bg-[#121214] border border-[#27272a] shadow-2xl rounded-2xl p-6 relative overflow-hidden" id="employee_modal_wrapper">
+            
+            {/* Elegant gradient accent */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-rose-500 to-indigo-600" />
+            
+            <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-4">
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 hover:bg-[#1c1c1e] text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              
+              <h3 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
+                <span>{editingEmployee ? (isRtl ? `تعديل صلاحيات: ${fullName}` : `Edit Account: ${fullName}`) : (isRtl ? "إنشاء حساب موظف جديد" : "Create New Employee Account")}</span>
+                <span>👤</span>
+              </h3>
+            </div>
+
+            <form onSubmit={handleFormSubmit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+              
+              {/* Basic input fields */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                
+                {/* Full Name */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الاسم الكامل للموظف *" : "Full Name *"}</label>
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder={isRtl ? "توفيق العلمي..." : "e.g., John Doe..."}
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Job Title */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "المنصب أو المسمى الوظيفي *" : "Job Title *"}</label>
+                  <input
+                    type="text"
+                    required
+                    value={jobTitle}
+                    onChange={(e) => setJobTitle(e.target.value)}
+                    placeholder={isRtl ? "مدير مبيعات، مسؤول دليفري..." : "e.g., Sales Manager..."}
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "رقم الهاتف للاتصال والولوج *" : "Phone Number (Login Key) *"}</label>
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="0540000000"
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Email (Optional) */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "البريد الإلكتروني (اختياري)" : "Email (Optional Login Key)"}</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@corevia.dz"
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Password input */}
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordRaw(!showPasswordRaw)}
+                      className="text-[10px] text-slate-400 hover:text-white"
+                    >
+                      {showPasswordRaw ? (isRtl ? "إخفاء" : "Hide") : (isRtl ? "إظهار" : "Show")}
+                    </button>
+                    <label className="block text-slate-400 font-bold">{isRtl ? "رمز المرور للولوج *" : "Secret Password *"}</label>
+                  </div>
+                  <input
+                    type={showPasswordRaw ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Account Status Selection */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "حالة الحساب الميداني *" : "Account Status *"}</label>
+                  <select
+                    value={status}
+                    onChange={(e: any) => setStatus(e.target.value)}
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs pr-7 text-right"
+                  >
+                    <option value="Active">{isRtl ? "نشط - Active" : "Active"}</option>
+                    <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
+                    <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Page Licensing Checklist (13 checkboxes grid layout) */}
+              <div className="space-y-2 border-t border-[#27272a] pt-3 text-xs">
+                <span className="block text-slate-350 font-bold mb-1">
+                  🔒 {isRtl ? "منح تراخيص تصفح الصفحات (الصلاحيات المخصصة):" : "Assign Page Authorization Licences:"}
+                </span>
+                <p className="text-[10px] text-slate-450 leading-relaxed mb-2">
+                  {isRtl 
+                    ? "اختر الصفحات المحددة التي يحق لهذا الحساب دخولها والتعديل فيها. أي صفحة غير محددة سيتم إخفاؤها وحظرها تماماً."
+                    : "Tick specific pages this credential profile can access. Pages not checked are stripped from their layout."}
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-[#09090b] p-3 rounded-xl border border-[#27272a] max-h-48 overflow-y-auto">
+                  {availablePagesList.map((tab) => {
+                    const isChecked = selectedPages.includes(tab.id);
+                    return (
+                      <label 
+                        key={tab.id}
+                        className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer ${
+                          isChecked 
+                            ? "bg-rose-500/5 border-rose-500/40 text-rose-300" 
+                            : "bg-[#040406] border-[#1d1d20] text-slate-400 hover:border-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => togglePageSelection(tab.id)}
+                          className="w-3.5 h-3.5 accent-rose-500 cursor-pointer hidden"
+                        />
+                        <span className="text-[10.5px]">
+                          {isChecked ? "🟢" : "⚫"}
+                        </span>
+                        <span className="font-semibold text-right text-[11px]">
+                          {isRtl ? tab.labelAr : tab.labelEn}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Private owner instructions area */}
+              <div className="space-y-1.5 border-t border-[#27272a] pt-3 text-xs">
+                <label className="block text-slate-400 font-bold">
+                  📝 {isRtl ? "التعليمات والتزامات هذا الموظف (خاص بالمالك فقط):" : "Confidential Employee Duties & Instructions (Owner Only):"}
+                </label>
+                <textarea
+                  value={assignedResponsibilities}
+                  onChange={(e) => setAssignedResponsibilities(e.target.value)}
+                  placeholder={isRtl ? "اكتب هنا مهام هذا الحساب، السقف الأقصى للتخفيض المسموح به، أو أي ملاحظات داخلية سرية تخص المالك..." : "Describe private duties, maximum discounts authorized, or confidentiality guidelines associated with this employee..."}
+                  rows={2}
+                  className="w-full bg-[#09090b] border border-[#27272a] p-2 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650 resize-y"
+                />
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex items-center gap-3 border-t border-[#27272a] pt-4 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 py-2 bg-[#1c1c1e] hover:bg-[#27272a] border border-[#27272a] text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  {isRtl ? "إلغاء وتراجع" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-rose-600/10 transition-all active:scale-[0.99] cursor-pointer"
+                >
+                  {isLoading ? (isRtl ? "جاري الحفظ..." : "Saving...") : (isRtl ? "تأكيد واستصدار الحساب" : "Confirm and Deploy Roster")}
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
