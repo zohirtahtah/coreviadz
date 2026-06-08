@@ -59,6 +59,7 @@ export default function Sidebar({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [deniedTabModal, setDeniedTabModal] = useState<{ id: string; label: string } | null>(null);
 
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
@@ -122,10 +123,20 @@ export default function Sidebar({
     return true;
   };
 
-  const navItemsFiltered = navItems.filter(item => isAllowed(item.id));
+  const navItemsFiltered = navItems;
 
   const handleNavClick = (tabId: string, isRestricted: boolean) => {
     setIsMobileOpen(false);
+    
+    // Dynamic Employee Permission Guard
+    if (!isAllowed(tabId)) {
+      setDeniedTabModal({
+        id: tabId,
+        label: navItems.find(n => n.id === tabId)?.label || tabId
+      });
+      return;
+    }
+
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
       setShowLockScreen(tabId);
       setEnteredCode("");
@@ -229,24 +240,30 @@ export default function Sidebar({
               const IconComp = item.icon;
               const isItemUnlocked = !item.isRestricted || !isLocked || unlockedTabs.includes(item.id);
               const isActive = activeTab === item.id;
+              const allowed = isAllowed(item.id);
               
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.id, item.isRestricted)}
                   className={`w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium rounded-lg transition-all outline-none group text-right ${
-                    isActive 
-                      ? "bg-indigo-600/10 text-indigo-400"
-                      : "text-slate-400 hover:bg-[#18181b] hover:text-slate-200"
+                    !allowed
+                      ? "text-slate-600 dark:text-slate-600 hover:text-slate-500 cursor-not-allowed opacity-55"
+                      : isActive 
+                        ? "bg-indigo-600/10 text-indigo-400"
+                        : "text-slate-450 hover:bg-[#18181b] hover:text-slate-200"
                   }`}
+                  style={!allowed ? { color: "#52525b" } : undefined}
                 >
                   <div className="flex items-center gap-3">
-                    <IconComp className={`w-4 h-4 transition-colors ${isActive ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+                    <IconComp className={`w-4 h-4 transition-colors ${!allowed ? "text-slate-600" : isActive ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
                     <span>{item.label}</span>
                   </div>
-                  {item.isRestricted && !isItemUnlocked && (
+                  {!allowed ? (
+                    <Shield className="w-3.5 h-3.5 text-slate-600" />
+                  ) : item.isRestricted && !isItemUnlocked ? (
                     <Lock className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
-                  )}
+                  ) : null}
                 </button>
               );
             })}
@@ -429,36 +446,48 @@ export default function Sidebar({
 
       {/* MOBILE BOTTOM NAVIGATION */}
       <nav className="fixed bottom-0 left-0 right-0 h-14 bg-[#09090b]/90 backdrop-blur-md border-t border-[#27272a] flex items-center justify-around px-2 z-40 md:hidden" id="mobile_subnavigation">
-        {isAllowed("dashboard") && (
-          <button onClick={() => handleNavClick("dashboard", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "dashboard" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-            <LayoutDashboard className="w-4 h-4" />
-            <span>{lang === "ar" ? "الرئيسية" : "Home"}</span>
-          </button>
-        )}
-        {isAllowed("orders") && (
-          <button onClick={() => handleNavClick("orders", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "orders" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-            <ShoppingCart className="w-4 h-4" />
-            <span>{lang === "ar" ? "الطلبيات" : "Orders"}</span>
-          </button>
-        )}
-        {isAllowed("inventory") && (
-          <button onClick={() => handleNavClick("inventory", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "inventory" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-            <Package className="w-4 h-4" />
-            <span>{lang === "ar" ? "المخزون" : "Stock"}</span>
-          </button>
-        )}
-        {isAllowed("profit") && (
-          <button onClick={() => handleNavClick("profit", true)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "profit" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-            <LandmarkIcon className="w-4 h-4" />
-            <span>{lang === "ar" ? "الأرباح" : "Finance"}</span>
-          </button>
-        )}
-        {isAllowed("settings") && (
-          <button onClick={() => handleNavClick("settings", false)} className={`flex flex-col items-center gap-1 text-[10px] ${activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400"}`}>
-            <Settings className="w-4 h-4" />
-            <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
-          </button>
-        )}
+        {(() => {
+          const renderBottomButton = (tabId: string, icon: any, labelAr: string, labelEn: string, isRestricted: boolean) => {
+            const allowed = isAllowed(tabId);
+            const IconComponent = icon;
+            const label = lang === "ar" ? labelAr : labelEn;
+            const isActive = activeTab === tabId;
+            
+            return (
+              <button 
+                key={tabId}
+                onClick={() => {
+                  if (!allowed) {
+                    setDeniedTabModal({ id: tabId, label });
+                  } else {
+                    handleNavClick(tabId, isRestricted);
+                  }
+                }}
+                className={`flex flex-col items-center gap-1 text-[10px] ${
+                  !allowed 
+                    ? "text-slate-600 opacity-50 cursor-not-allowed" 
+                    : isActive 
+                      ? "text-indigo-400 font-bold" 
+                      : "text-slate-400"
+                }`}
+                style={!allowed ? { color: "#52525b" } : undefined}
+              >
+                <IconComponent className="w-4 h-4" />
+                <span>{label}</span>
+              </button>
+            );
+          };
+
+          return (
+            <>
+              {renderBottomButton("dashboard", LayoutDashboard, "الرئيسية", "Home", false)}
+              {renderBottomButton("orders", ShoppingCart, "الطلبيات", "Orders", false)}
+              {renderBottomButton("inventory", Package, "المخزون", "Stock", false)}
+              {renderBottomButton("profit", LandmarkIcon, "الأرباح", "Finance", true)}
+              {renderBottomButton("settings", Settings, "الإعدادات", "Settings", false)}
+            </>
+          );
+        })()}
       </nav>
 
       {/* OVERLAY CUSTOM PASSCODE PAD */}
@@ -520,6 +549,50 @@ export default function Sidebar({
                 className="w-14 h-14 rounded-full bg-indigo-650 hover:bg-indigo-600 text-xs font-bold text-white transition-all flex items-center justify-center mx-auto shadow-md"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ACCESS DENIED ALERT MODAL */}
+      {deniedTabModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" id="restricted_page_denied_modal">
+          <div className="w-full max-w-sm bg-[#09090b] border border-[#27272a] shadow-2xl rounded-2xl p-6 relative overflow-hidden text-center" id="denied_card_container">
+            <div className="absolute top-3 right-3">
+              <button onClick={() => setDeniedTabModal(null)} className="text-slate-400 hover:text-white text-sm font-semibold p-1 cursor-pointer">✕</button>
+            </div>
+
+            <div className="mx-auto w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center mb-4">
+              <Shield className="w-6 h-6 text-rose-500 animate-pulse" />
+            </div>
+
+            <h2 className="text-base font-bold text-white mb-2">
+              {lang === "ar" ? "الصفحة غير متاحة" : lang === "fr" ? "Page non disponible" : "Page Unavailable"}
+            </h2>
+            
+            <p className="text-slate-300 text-xs my-4 leading-relaxed px-2 text-right dir-rtl">
+              {lang === "ar" ? (
+                <>
+                  لا يمكن الدخول إلى هذه الصفحة <strong>({deniedTabModal.label})</strong>. هذه الصفحة غير متاحة في هذا الحساب، يرجى التواصل مع المدير لمنحك الوصول إليها.
+                </>
+              ) : lang === "fr" ? (
+                <>
+                  Vous ne pouvez pas accéder à cette page <strong>({deniedTabModal.label})</strong>. Cette page n'est pas disponible pour ce compte. Veuillez contacter le responsable pour obtenir l'accès.
+                </>
+              ) : (
+                <>
+                  You cannot access this page <strong>({deniedTabModal.label})</strong>. This page is not available for this account. Please contact the manager to grant you access.
+                </>
+              )}
+            </p>
+
+            <div className="mt-6 flex justify-center">
+              <button
+                onClick={() => setDeniedTabModal(null)}
+                className="px-6 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer"
+              >
+                {lang === "ar" ? "حسناً، فهمت" : lang === "fr" ? "D'accord" : "Okay, Got it"}
               </button>
             </div>
           </div>
