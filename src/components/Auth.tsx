@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Lock, Unlock, Mail, User, Eye, EyeOff, Globe, Sun, Moon, Check, 
   AlertCircle, ShieldAlert, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, KeyRound
@@ -51,6 +51,23 @@ export default function Auth({
   // Pending Session State to mock Waiting List
   const [pendingSession, setPendingSession] = useState<UserSession | null>(null);
 
+  // Auto pre-fill from query parameters for worker quick access links
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
+      const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
+      if (urlEmail) {
+        setEmailInput(decodeURIComponent(urlEmail));
+      }
+      if (urlPass) {
+        setPasswordInput(decodeURIComponent(urlPass));
+      }
+    } catch (e) {
+      console.warn("Error prefilling auth credentials:", e);
+    }
+  }, []);
+
   // Toggle Theme
   const handleToggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light");
@@ -78,16 +95,21 @@ export default function Auth({
       // 1. Search employee records first (to override normal account lookup if they are an employee)
       const cachedEmployees = getLocalEmployees();
       let matchingEmployee: any = cachedEmployees.find(
-        emp => emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() && emp.password === passwordInput
+        emp => (
+          (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
+           emp.phone?.trim() === emailInput.trim()) &&
+          emp.password === passwordInput
+        )
       );
 
       // If we are online, query credentials from Supabase
       if (!matchingEmployee && supabase) {
         try {
+          // Look up user by both email and phone fields
           const { data: dbEmps } = await supabase
             .from("corevia_company_users")
             .select("*")
-            .eq("email", emailInput.trim());
+            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()}`);
           
           if (dbEmps && dbEmps.length > 0) {
             const dbMatch = dbEmps.find(e => e.password === passwordInput);

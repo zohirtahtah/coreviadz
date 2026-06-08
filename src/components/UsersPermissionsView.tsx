@@ -45,6 +45,26 @@ export default function UsersPermissionsView({
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
   const [passRevealId, setPassRevealId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyLink = (emp: Employee) => {
+    try {
+      const loginKey = emp.email || emp.phone;
+      const url = `${window.location.origin}/?email=${encodeURIComponent(loginKey)}&pass=${encodeURIComponent(emp.password || "")}`;
+      navigator.clipboard.writeText(url);
+      setCopiedId(emp.id);
+      onTriggerNotification(
+        isRtl 
+          ? `📋 تم نسخ رابط الدخول المباشر الخاص بـ (${emp.fullName})! يمكنك إرساله له الآن.` 
+          : `📋 Pre-filled login link for (${emp.fullName}) copied to clipboard!`
+      );
+      setTimeout(() => {
+        setCopiedId(null);
+      }, 3000);
+    } catch (err) {
+      console.warn("Failed to copy link:", err);
+    }
+  };
 
   // Available Pages list (all 13 specified in product specification)
   const availablePagesList = [
@@ -382,6 +402,21 @@ export default function UsersPermissionsView({
                             {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                           </button>
                         </div>
+
+                        {/* Direct shareable login link button */}
+                        <div className="pt-1 select-none">
+                          <button
+                            onClick={() => handleCopyLink(emp)}
+                            className={`px-2 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer inline-flex items-center gap-1 ${
+                              copiedId === emp.id 
+                                ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-450" 
+                                : "bg-[#161618] hover:bg-indigo-950/40 border-[#27272a] hover:border-indigo-500/40 text-indigo-400 hover:text-indigo-300"
+                            }`}
+                            title={isRtl ? "نسخ رابط تسجيل دخول تلقائي ببيانات الموظف" : "Copy pre-filled login URL"}
+                          >
+                            <span>{copiedId === emp.id ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied URL") : (isRtl ? "📋 نسخ رابط الدخول" : "📋 Copy Login Link")}</span>
+                          </button>
+                        </div>
                       </td>
 
                       {/* Status badge */}
@@ -586,6 +621,64 @@ export default function UsersPermissionsView({
                     <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
                     <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Shareable login URL generator inside the Modal */}
+              <div className="bg-slate-950/60 border border-[#27272a] p-3 rounded-xl flex items-center justify-between gap-3 text-xs my-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const loginKey = email.trim() || phone.trim();
+                    if (!password.trim()) {
+                      onTriggerNotification(
+                        isRtl 
+                          ? "⚠️ يرجى ملء كلمة المرور أولاً." 
+                          : "⚠️ Please fill in a password first."
+                      );
+                      return;
+                    }
+                    if (!phone.trim()) {
+                      onTriggerNotification(
+                        isRtl 
+                          ? "⚠️ يرجى كتابة الهاتف أولاً (كمفتاح دخول الأساسي)." 
+                          : "⚠️ Please enter the phone number first."
+                      );
+                      return;
+                    }
+                    try {
+                      const url = `${window.location.origin}/?email=${encodeURIComponent(loginKey)}&pass=${encodeURIComponent(password.trim())}`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedId("modal-copied");
+                      onTriggerNotification(
+                        isRtl 
+                          ? `📋 تم نسخ رابط الولوج المباشر الخاص بـ (${fullName || "الموظف"}) بنجاح!` 
+                          : `📋 Shareable login link for (${fullName || "Employee"}) copied to clipboard!`
+                      );
+                      setTimeout(() => {
+                        setCopiedId(null);
+                      }, 3000);
+                    } catch (err) {
+                      console.warn("Failed to copy modal link:", err);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer select-none shrink-0 ${
+                    copiedId === "modal-copied" 
+                      ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-400" 
+                      : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-indigo-400 hover:text-indigo-300"
+                  }`}
+                >
+                  {copiedId === "modal-copied" ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied Link") : (isRtl ? "📋 نسخ الرابط" : "📋 Copy Link")}
+                </button>
+                <div className="text-right flex-1 select-none">
+                  <span className="block font-bold text-white text-[11px]">
+                    {isRtl ? "رابط تسجيل دخول مباشر للموظف" : "Pre-filled Login Link"}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-tight">
+                    {isRtl 
+                      ? "رابط دخول سريع ومملوء مسبقاً ببيانات الموظف ليرسله له المالك لتخطي كتابة البيانات." 
+                      : "Pre-filled convenience URL that auto-fills email and password fields on click."}
+                  </span>
                 </div>
               </div>
 
