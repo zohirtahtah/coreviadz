@@ -85,47 +85,6 @@ export default function Auth({
         });
 
         if (error) {
-          // Automatic administration account creator:
-          // If login fails with these credentials (meaning the user doesn't exist yet on their newly created project)
-          // we instantly create/sign-up this user and log them in automatically to make it work seamlessly!
-          if (
-            emailInput.toLowerCase().trim() === "coreviadz@gmail.com" &&
-            passwordInput === "zohir1904tahtah" &&
-            (error.message.includes("Invalid login credentials") || error.message.includes("does not exist") || error.message.includes("Email not confirmed"))
-          ) {
-            onTriggerNotification(
-              isRtl ? "جاري إنشاء حساب الأدمن والربط الذكي بقاعدة البيانات..." : "Creating admin account and linking to database...",
-              "info"
-            );
-
-            const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-              email: emailInput,
-              password: passwordInput,
-              options: {
-                data: {
-                  full_name: "Adel Corevia",
-                }
-              }
-            });
-
-            if (signUpError) throw signUpError;
-
-            const activeSession: UserSession = {
-              username: "Adel Corevia",
-              email: emailInput.toLowerCase().trim(),
-              isRegistered: true,
-              isApproved: true,
-              isSuspended: false
-            };
-            onAuthSuccess(activeSession);
-            onTriggerNotification(
-              isRtl ? "مرحباً بك! تم إنشاء حساب الأدمن وتسجيل الدخول بنجاح!" : "Welcome! Admin account created and logged in successfully!",
-              "success"
-            );
-            setIsSubmitting(false);
-            return;
-          }
-
           throw error;
         }
 
@@ -255,106 +214,6 @@ export default function Auth({
     }
   };
 
-  // Mock bypass approval action for demonstration speed and ease of testing
-  const handleBypassApproval = () => {
-    if (pendingSession) {
-      const approved = { ...pendingSession, isApproved: true };
-      onAuthSuccess(approved);
-      onTriggerNotification(isRtl ? "تمت الموافقة الفورية على حسابك بنجاح!" : "Immediate approval granted!", "success");
-    } else {
-      // Direct demo account bypass
-      const directSession: UserSession = {
-        username: "Adel Corevia",
-        email: "coreviadz@gmail.com",
-        isRegistered: true,
-        isApproved: true,
-        isSuspended: false
-      };
-      onAuthSuccess(directSession);
-      onTriggerNotification(isRtl ? "تم تخطي الموافقة والدخول التجريبي كمسؤول." : "Approval bypassed, logged in as admin.", "success");
-    }
-  };
-
-  // Mock toggle suspension bypass
-  const handleBypassSuspension = () => {
-    const activeSession: UserSession = {
-      username: "Unblocked User",
-      email: "unblocked@corevia.dz",
-      isRegistered: true,
-      isApproved: true,
-      isSuspended: false
-    };
-    onAuthSuccess(activeSession);
-    onTriggerNotification(isRtl ? "تم فك تجميد القفل والدخول التجريبي." : "Account unblocked, logged in.", "success");
-  };
-
-  // Quick seed direct login with real database integration attempt
-  const handleQuickDemoLogin = async () => {
-    setEmailInput("coreviadz@gmail.com");
-    setPasswordInput("zohir1904tahtah");
-    setIsSubmitting(true);
-    
-    try {
-      if (!supabase) throw new Error("Supabase is not configured.");
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: "coreviadz@gmail.com",
-        password: "zohir1904tahtah",
-      });
-
-      if (error) {
-        // Automatically create if missing
-        onTriggerNotification(isRtl ? "جاري تهيئة وإنشاء حساب الأدمن للموقع تلقائياً..." : "Initializing and creating the admin account automatically...", "info");
-        
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: "coreviadz@gmail.com",
-          password: "zohir1904tahtah",
-          options: {
-            data: {
-              full_name: "Adel Corevia",
-            }
-          }
-        });
-
-        if (signUpError) throw signUpError;
-
-        const demoSession: UserSession = {
-          username: "Adel Corevia",
-          email: "coreviadz@gmail.com",
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false
-        };
-        onAuthSuccess(demoSession);
-        onTriggerNotification(isRtl ? "مرحباً بك! تم إنشاء حساب الأدمن وتسجيل الدخول بنجاح!" : "Welcome! Admin account created and logged in successfully!", "success");
-        return;
-      }
-
-      const demoSession: UserSession = {
-        username: data.user?.user_metadata?.full_name || "Adel Corevia",
-        email: "coreviadz@gmail.com",
-        isRegistered: true,
-        isApproved: true,
-        isSuspended: false
-      };
-      onAuthSuccess(demoSession);
-      onTriggerNotification(isRtl ? "مرحباً بك! تم تسجيل الدخول كمسؤول للمنصة." : "Welcome! Logged in as platform Admin.", "success");
-    } catch (err: any) {
-      console.error("Quick login error:", err);
-      // Fallback
-      const demoSession: UserSession = {
-        username: "Adel Corevia",
-        email: "coreviadz@gmail.com",
-        isRegistered: true,
-        isApproved: true,
-        isSuspended: false
-      };
-      onAuthSuccess(demoSession);
-      onTriggerNotification(isRtl ? "مرحباً بك! تم تسجيل الدخول كمسؤول للمنصة (وضع تجريبي)." : "Welcome! Logged in as platform Admin (Simulated).", "success");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   return (
     <div className={`min-h-screen flex flex-col justify-between p-4 bg-[#09090b] dark:bg-[#09090b] transition-colors relative ${isRtl ? "rtl text-right" : "ltr text-left"}`} id="auth_view_viewport">
@@ -577,26 +436,6 @@ export default function Auth({
                   </>
                 )}
               </button>
-
-              {/* DEMO BYPASS DECK */}
-              <div className="border-t border-[#27272a]/60 pt-4 mt-6">
-                <span className="text-[9px] text-slate-500 uppercase tracking-widest block text-center mb-3 font-semibold">
-                  {isRtl ? "⚡ بوابات تجريبية سريعة كمسؤول" : "⚡ QUICK PLATFORM BYPASS / DEMO MODE"}
-                </span>
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleQuickDemoLogin}
-                    className="w-full bg-[#1c1c1e] hover:bg-[#252529] text-slate-350 hover:text-white border border-[#27272a] hover:border-indigo-500/30 text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer active:scale-[0.99] group/demo"
-                  >
-                    <div className="relative flex items-center justify-center">
-                      <CheckCircle className="w-4 h-4 text-emerald-500 transition-transform duration-300 group-hover/demo:scale-110" />
-                      <span className="absolute inline-flex h-2 w-2 rounded-full bg-emerald-400 opacity-75 animate-ping -top-0.5 -right-0.5" />
-                    </div>
-                    <span>{isRtl ? "دخول فوري سريع كمسؤول للمنصة (DZD)" : "Instant Admin Platform Access (DZD)"}</span>
-                  </button>
-                </div>
-              </div>
             </form>
           )}
 
@@ -768,20 +607,6 @@ export default function Auth({
               </div>
 
               <div className="border-t border-[#27272a]/60 pt-4 space-y-2">
-                <p className="text-[10px] text-slate-500">
-                  {isRtl 
-                    ? "للتجربة السريعة الفورية كمهندس/مقيم، يمكنك استعجال الموافقة فوراً:" 
-                    : "For fast review, you can bypass this gate immediately using the simulated approval trigger:"}
-                </p>
-                
-                <button
-                  onClick={handleBypassApproval}
-                  className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 rounded-xl py-2 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>{isRtl ? "الموافقة الفورية والدخول للمنصة" : "Approve and enter instantly"}</span>
-                </button>
-
                 <button
                   onClick={() => setAuthMode("login")}
                   className="w-full bg-[#1c1c1e] hover:bg-[#27272a] text-slate-450 text-xs py-2 rounded-xl transition-all font-semibold"
@@ -809,14 +634,6 @@ export default function Auth({
               </div>
 
               <div className="border-t border-[#27272a]/60 pt-4 space-y-2">
-                <button
-                  onClick={handleBypassSuspension}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-indigo-600 text-white rounded-xl py-2.5 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Unlock className="w-4 h-4" />
-                  <span>{isRtl ? "إلغاء الحظر وتفعيل الدخول تجريبياً" : "Unfreeze & login to dashboard"}</span>
-                </button>
-
                 <button
                   onClick={() => setAuthMode("login")}
                   className="w-full bg-[#1c1c1e] hover:bg-[#27272a] text-slate-400 text-xs py-2 rounded-xl transition-all font-semibold"

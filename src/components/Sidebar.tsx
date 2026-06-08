@@ -62,7 +62,7 @@ export default function Sidebar({
 
   // Read local storage to check for Super Admin session
   const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
-  const isSuperAdmin = sessionStored && JSON.parse(sessionStored).email?.toLowerCase() === "coreviadz@gmail.com";
+  const isSuperAdmin = false;
 
   const baseNavItems = [
     { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: false },

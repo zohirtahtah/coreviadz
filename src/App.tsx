@@ -45,8 +45,6 @@ import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, K
 // AUTOMATIC SaaS TENANCY BINDING & SIGNUP ROUTING AGENT
 // =========================================================================
 export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: string) => {
-  if (email.toLowerCase().trim() === "coreviadz@gmail.com") return; // Super admin console bypasses
-
   const stored = localStorage.getItem("corevia_saas_companies_v1");
   let list: SaaSCompany[] = [];
   try {
@@ -233,46 +231,8 @@ export default function App() {
       if (parsedExpenses && Array.isArray(parsedExpenses)) {
         setExpenses(parsedExpenses);
       } else {
-        const seededExpenses: Expense[] = [
-          {
-            id: "exp-1",
-            title: "إيجار المحل الورشة",
-            type: "fixed",
-            amount: 25000,
-            date: "2026-05-01",
-            createdAt: "2026-05-01T10:00:00Z"
-          },
-          {
-            id: "exp-2",
-            title: "اشتراك إنترنت فايبر",
-            type: "fixed",
-            amount: 4000,
-            date: "2026-05-05",
-            createdAt: "2026-05-05T12:00:00Z"
-          },
-          {
-            id: "exp-3",
-            title: "أكياس تغليف الطلبات شحن",
-            type: "variable",
-            amount: 8500,
-            date: "2026-05-12",
-            createdAt: "2026-05-12T14:00:00Z"
-          },
-          {
-            id: "exp-4",
-            title: "Facebook Winter Sponsor",
-            type: "ads",
-            amount: 33000,
-            date: "2026-05-10",
-            isUSD: true,
-            usdAmount: 150,
-            exchangeRate: 220,
-            notes: "حملة فيس بوك لملابس الشتاء",
-            createdAt: "2026-05-10T16:00:00Z"
-          }
-        ];
-        localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(seededExpenses));
-        setExpenses(seededExpenses);
+        localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify([]));
+        setExpenses([]);
       }
 
       // Load custom colors with robust parsing safety
@@ -321,7 +281,7 @@ export default function App() {
   // Onboarding Complete Callback
   const handleOnboardingComplete = (newProfile: BusinessProfile) => {
     localStorage.setItem("corevia_profile_v1", JSON.stringify(newProfile));
-    initializeDatabase(true); // Seeding realistic Algeria ERP data
+    initializeDatabase(true); // Initializing clean ERP workspace
     
     // Sync states
     setProfile(newProfile);
@@ -344,7 +304,12 @@ export default function App() {
     localStorage.setItem("corevia_custom_colors_v1", JSON.stringify(defaults));
     setCustomColorsList(defaults);
 
-    triggerToast("مرحباً بك في Corevia! تم إشعال المنصة وتلقيم الحساب التجريبية بنجاح.");
+    triggerToast(
+      newProfile.defaultLanguage === "ar" 
+        ? "مرحباً بك في Corevia! تم تهيئة مساحة العمل بنجاح." 
+        : "Welcome to Corevia! Workspace initialized successfully.",
+      "success"
+    );
   };
 
   // Safe logout

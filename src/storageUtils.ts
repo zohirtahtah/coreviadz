@@ -10,6 +10,109 @@ import {
 } from "./types";
 import { defaultWilayas } from "./translations";
 
+// ============================================================================
+// HARD DATA ISOLATION: BULLETPROOF AUTOMATIC MULTI-TENANT LOCALSTORAGE ROUTER
+// ============================================================================
+function getActiveTenantSuffix(): string {
+  try {
+    const nativeGetItem = Storage.prototype.getItem;
+    const sessionStr = nativeGetItem.call(window.localStorage, "corevia_session_v1");
+    if (sessionStr) {
+      const parsed = JSON.parse(sessionStr);
+      if (parsed && parsed.email) {
+        return "_" + parsed.email.toLowerCase().trim().replace(/[^a-z0-9]/g, "_");
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return "";
+}
+
+function resolveTenantKey(key: string): string {
+  const globalKeys = [
+    "corevia_session_v1",
+    "corevia_user_session_v1",
+    "corevia_saas_companies_v1",
+    "corevia_saas_activity_logs_v1",
+    "corevia_saas_security_config_v1",
+    "corevia_clean_slate_marker_v16",
+    "corevia_clean_slate_marker_v15"
+  ];
+
+  if (globalKeys.includes(key) || key.startsWith("corevia_clean_slate_") || key.startsWith("supabase.auth.")) {
+    return key;
+  }
+
+  const suffix = getActiveTenantSuffix();
+  if (suffix) {
+    return `${key}${suffix}`;
+  }
+  return key;
+}
+
+try {
+  const nativeGetItem = Storage.prototype.getItem;
+  const nativeSetItem = Storage.prototype.setItem;
+  const nativeRemoveItem = Storage.prototype.removeItem;
+  const nativeClear = Storage.prototype.clear;
+
+  Storage.prototype.getItem = function(key: string): string | null {
+    if (this === window.localStorage) {
+      return nativeGetItem.call(this, resolveTenantKey(key));
+    }
+    return nativeGetItem.call(this, key);
+  };
+
+  Storage.prototype.setItem = function(key: string, value: string): void {
+    if (this === window.localStorage) {
+      nativeSetItem.call(this, resolveTenantKey(key), value);
+    } else {
+      nativeSetItem.call(this, key, value);
+    }
+  };
+
+  Storage.prototype.removeItem = function(key: string): void {
+    if (this === window.localStorage) {
+      nativeRemoveItem.call(this, resolveTenantKey(key));
+    } else {
+      nativeRemoveItem.call(this, key);
+    }
+  };
+
+  Storage.prototype.clear = function(): void {
+    if (this === window.localStorage) {
+      const suffix = getActiveTenantSuffix();
+      const allKeys: string[] = [];
+      for (let i = 0; i < this.length; i++) {
+        const key = this.key(i);
+        if (key) {
+          allKeys.push(key);
+        }
+      }
+
+      if (suffix) {
+        const keysToRemove = allKeys.filter(k => k.endsWith(suffix));
+        keysToRemove.forEach(k => nativeRemoveItem.call(this, k));
+      } else {
+        const globalKeys = [
+          "corevia_session_v1",
+          "corevia_user_session_v1",
+          "corevia_saas_companies_v1",
+          "corevia_saas_activity_logs_v1",
+          "corevia_saas_security_config_v1"
+        ];
+        const keysToRemove = allKeys.filter(k => !globalKeys.includes(k) && !k.startsWith("supabase.auth."));
+        keysToRemove.forEach(k => nativeRemoveItem.call(this, k));
+      }
+    } else {
+      nativeClear.call(this);
+    }
+  };
+} catch (e) {
+  console.error("Failed to patch Storage prototype:", e);
+}
+
 // Initial Demo Seed Data
 const demoOwnerProfile: BusinessProfile = {
   businessName: "Corevia",
