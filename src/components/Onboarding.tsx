@@ -471,13 +471,36 @@ export default function Onboarding({ onComplete, lang, setLang, theme, setTheme,
           {step > 1 ? (
             <button
               onClick={handleBack}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-650 text-slate-200 text-xs font-semibold transition-all hover:scale-[1.02]"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-100/10 text-slate-250 text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer"
             >
               {isRtl ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
               <span>السابق</span>
             </button>
           ) : (
-            <div />
+            <button
+              onClick={() => {
+                const defaultProfile: BusinessProfile = {
+                  businessName: "Corevia Enterprise",
+                  businessType: "متجر فعلي + تجارة إلكترونية",
+                  experienceYears: "من سنة إلى 3 سنوات",
+                  logoUrl: undefined,
+                  estimatedOrders: "50 - 200",
+                  estimatedWorkers: "1 - 5",
+                  currency: "DZD",
+                  defaultLanguage: lang,
+                  preferredTheme: theme,
+                  country: "Algeria",
+                  ownerName: session?.username || "Owner",
+                  phone: "",
+                  email: session?.email || "owner@corevia.com",
+                  address: ""
+                };
+                onComplete(defaultProfile);
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-rose-500/10 text-rose-400 hover:text-rose-300 border border-slate-700/40 text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer"
+            >
+              <span>{isRtl ? "تخطي / إلغاء" : "Skip / Cancel"}</span>
+            </button>
           )}
 
           <button
