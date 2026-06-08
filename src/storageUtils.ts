@@ -426,7 +426,7 @@ const KEYS = {
   STOCK_MOVEMENTS: "corevia_stock_movements_v1"
 };
 
-export function initializeDatabase(forceReset = false): void {
+export function initializeDatabase(forceReset = false, customProfile?: BusinessProfile): void {
   const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v16";
   const hasCleaned = localStorage.getItem(CLEAN_SLATE_MARKER);
   if (!hasCleaned || forceReset) {
@@ -439,8 +439,8 @@ export function initializeDatabase(forceReset = false): void {
   const hasProfile = localStorage.getItem(KEYS.PROFILE);
   if (hasProfile && !forceReset) return;
 
-  // Set default empty profile info (when first loaded or reset)
-  const emptyOwnerProfile: BusinessProfile = {
+  // Set default empty profile info (when first loaded or reset), or use custom profile
+  const emptyOwnerProfile: BusinessProfile = customProfile || {
     businessName: "",
     businessType: "",
     experienceYears: "",

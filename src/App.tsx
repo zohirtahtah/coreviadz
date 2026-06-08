@@ -380,7 +380,7 @@ export default function App() {
     }
 
     localStorage.setItem("corevia_profile_v1", JSON.stringify(newProfile));
-    initializeDatabase(true); // Initializing clean ERP workspace
+    initializeDatabase(true, newProfile); // Initializing clean ERP workspace with user-provided settings
     
     // Sync states
     setProfile(newProfile);
