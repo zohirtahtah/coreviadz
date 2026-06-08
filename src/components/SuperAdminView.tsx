@@ -10,6 +10,9 @@ interface SuperAdminViewProps {
   lang: LanguageType;
   onTriggerNotification: (msg: string, type: "success" | "info") => void;
   onLogout: () => void;
+  session: any;
+  profile: any;
+  onCleanSlate: () => Promise<void>;
 }
 
 // Subscription pricing structures
@@ -200,7 +203,14 @@ const DEFAULT_LOGS: SaaSActivityLog[] = [
   }
 ];
 
-export default function SuperAdminView({ lang, onTriggerNotification, onLogout }: SuperAdminViewProps) {
+export default function SuperAdminView({
+  lang,
+  onTriggerNotification,
+  onLogout,
+  session,
+  profile,
+  onCleanSlate
+}: SuperAdminViewProps) {
   const isRtl = lang === "ar";
 
   // State Persistency
@@ -239,7 +249,7 @@ export default function SuperAdminView({ lang, onTriggerNotification, onLogout }
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security">("directory");
+  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug">("directory");
 
   // Selection state for drill-down action of device list or editing
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
@@ -716,6 +726,15 @@ export default function SuperAdminView({ lang, onTriggerNotification, onLogout }
             >
               <Shield className="w-3.5 h-3.5" />
               <span>{isRtl ? "الأمان وحالات الدخول" : "Security Gateway"}</span>
+            </button>
+            <button
+              onClick={() => setActiveSubTab("debug")}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "debug" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              <span>{isRtl ? "فحص المشاكل (Debug)" : "Debug Panel"}</span>
             </button>
           </div>
 
@@ -1211,6 +1230,136 @@ export default function SuperAdminView({ lang, onTriggerNotification, onLogout }
 
           </div>
 
+        </div>
+      )}
+
+      {/* TAB IV: DIAGNOSTIC & DEBUG PANEL */}
+      {activeSubTab === "debug" && (
+        <div className="space-y-6" id="super_admin_tab_debug">
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-6 text-right">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-[#27272a]">
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-500 animate-pulse" />
+                  <span>{isRtl ? "صفحة تجارب الأداء وفحص المشاكل (SaaS Diagnostic Center)" : "SaaS Diagnostic and Sandbox Environment"}</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  {isRtl ? "متاح فقط لأصحاب الصلاحية لمالك المنصة لفحص سلامة اتصالات الجلسة وقاعدة البيانات السحابية." : "Confidential orchestrator panel to audit session state and clear test ledger tables."}
+                </p>
+              </div>
+            </div>
+
+            {/* Diagnostic Session Table */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Card I: Identity State */}
+              <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                <h4 className="text-xs font-extrabold text-white flex items-center gap-2">
+                  <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{isRtl ? "بيانات الهوية والاتصال السحابية" : "Cloud Security Profile"}</span>
+                </h4>
+                
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "معرف المستخدم (User ID)" : "User ID"}</span>
+                    <span className="text-white select-all">{session?.user_id || "N/A"}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "البريد الإلكتروني (Email)" : "Auth Email"}</span>
+                    <span className="text-white select-all">{session?.email || "N/A"}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "معرف الشركة (Company ID)" : "Company ID"}</span>
+                    <span className="text-white select-all">{session?.company_id || "N/A"}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[11px] pb-0.5">
+                    <span className="text-slate-400">{isRtl ? "الصلاحية (Access Role)" : "Role"}</span>
+                    <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[10px] font-extrabold">{session?.role || "super_admin"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card II: Onboarding & Subscription State */}
+              <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                <h4 className="text-xs font-extrabold text-white flex items-center gap-2">
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isRtl ? "حالة مساحة العمل والمقاعد" : "Tenant Operations Ledger"}</span>
+                </h4>
+                
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "تفعيل البريد الإلكتروني" : "Email Verified"}</span>
+                    <span className="text-emerald-400 font-bold">✓ {isRtl ? "مؤكد" : "Verified"}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "تهيئة Onboarding" : "Completed Onboarding"}</span>
+                    <span className={profile && profile.businessName ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                      {profile && profile.businessName ? (isRtl ? "مكتمل (True)" : "Yes") : (isRtl ? "غير مكتمل (False)" : "No")}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[11px] border-b border-slate-800/40 pb-1.5">
+                    <span className="text-slate-400">{isRtl ? "اسم المؤسسة النشطة" : "Active Business Name"}</span>
+                    <span className="text-white font-sans">{profile?.businessName || "N/A"}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[11px] pb-0.5">
+                    <span className="text-slate-400">{isRtl ? "الجلسة الزمنية النشطة" : "Active Session"}</span>
+                    <span className="text-slate-400">{new Date().toLocaleTimeString()} Algerian Time</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Clean Slate & Reset Sandbox Section */}
+            <div className="p-5 bg-rose-950/10 border border-rose-500/20 rounded-xl space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5 animate-pulse" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-black text-white">{isRtl ? "تصفير وتنظيف بيئة العمل (Clean Slate / Reset Sandbox)" : "Dangerous: Purge Sandbox Environment"}</h4>
+                  <p className="text-[10px] text-slate-400 leading-normal">
+                    {isRtl 
+                      ? "يتيح هذا الإجراء حذف كل البيانات التجريبية لحسابات الأدمن والشركات والعمليات لكي تصبح البيئة نظيفة تماماً. سيقوم بتصفير Onboarding لـ false وحذف الملف الشخصي وكل الجداول السحابية لتعود لنقطة البداية."
+                      : "Permanently delete all product catalogs, orders, invoices, worker indices, and purge cloud tables. Resets onboarding status to trigger initial setup flow on refresh."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const confirmMsg = isRtl 
+                      ? "🚨 تحذير أمني هام!\n\nهل أنت متأكد من رغبتك في تصفير وحذف جميع البيانات والملفات والشركات من السحابة وجهازك والبدء من جديد؟ لا يمكن التراجع عن هذا الإجراء."
+                      : "🚨 WARNING!\n\nAre you sure you want to completely erase the client and tenant database schemas, reset onboarding state and start fresh? This is irreversible.";
+                    
+                    if (window.confirm(confirmMsg)) {
+                      try {
+                        onTriggerNotification(isRtl ? "جاري تصفير وتنظيف بيئة وتجربة العمل..." : "Initiate sandbox clean slate sweep...", "info");
+                        await onCleanSlate();
+                        onTriggerNotification(isRtl ? "✅ تم تصفير بيئة العمل بنجاح! جاري التحديث..." : "✅ Sandbox cleared successfully! Reloading...", "success");
+                        setTimeout(() => {
+                          window.location.reload();
+                        }, 1500);
+                      } catch (err: any) {
+                        onTriggerNotification(`Error: ${err.message || err}`, "info");
+                      }
+                    }
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer"
+                >
+                  {isRtl ? "تصفير وحذف بيئة العمل" : "Execute Clean Slate Sweep"}
+                </button>
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
 

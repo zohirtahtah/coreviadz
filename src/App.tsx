@@ -46,7 +46,8 @@ import {
   saveOnboardingCompletionInCloud, 
   pushSingleDatasetToCloud, 
   pullMultiTenantData, 
-  pushFullTenantData 
+  pushFullTenantData,
+  cleanSlateResetSandbox
 } from "./supabaseSync";
 
 // =========================================================================
@@ -228,7 +229,8 @@ export default function App() {
         isApproved: true,
         isSuspended: false,
         user_id: userMeta.userId,
-        company_id: userMeta.companyId
+        company_id: userMeta.companyId,
+        role: userMeta.role
       };
 
       // Auto provision company details in local tenant log
@@ -1265,6 +1267,7 @@ export default function App() {
             onSaveCustomColors={saveCustomColorsAndPersist}
             onTriggerNotification={triggerToast}
             onTriggerRefreshOrders={() => setOrders(getOrders())}
+            session={session}
           />
         )}
 
@@ -1273,6 +1276,13 @@ export default function App() {
             lang={lang}
             onTriggerNotification={triggerToast}
             onLogout={handleLogout}
+            session={session}
+            profile={profile}
+            onCleanSlate={async () => {
+              if (session && session.user_id && session.company_id) {
+                await cleanSlateResetSandbox(session.user_id, session.company_id, session.email);
+              }
+            }}
           />
         )}
 

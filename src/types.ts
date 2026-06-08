@@ -40,6 +40,7 @@ export interface UserSession {
   isSuspended: boolean;
   user_id?: string;
   company_id?: string;
+  role?: string;
 }
 
 export interface OrderItem {

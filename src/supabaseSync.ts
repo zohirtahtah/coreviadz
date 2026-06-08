@@ -15,6 +15,7 @@ export interface SaasUserMeta {
   hasCompletedOnboarding: boolean;
   email: string;
   username: string;
+  role: string;
 }
 
 // Ensure safe conversion of values to standard types
@@ -32,18 +33,27 @@ export async function fetchUserSaaSMeta(
   email: string, 
   fallbackName: string
 ): Promise<SaasUserMeta> {
+  const cleanEmail = email.toLowerCase().trim();
+  const defaultCompanyId = `cop_${userId.substring(0, 15)}`;
+  
+  // Decide if this email is a super admin
+  const isSuperAdminEmail = 
+    cleanEmail === "coreviadz@gmail.com" || 
+    cleanEmail === "admin@corevia.com" ||
+    ((import.meta as any).env?.VITE_SUPER_ADMIN_EMAIL === cleanEmail);
+
+  const initialRole = isSuperAdminEmail ? "super_admin" : "admin";
+
   if (!supabase) {
     return {
       userId,
       companyId: `cop_${email.replace(/[^a-zA-Z0-9]/g, "_")}`,
       hasCompletedOnboarding: localStorage.getItem("corevia_completed_onboarding") === "true",
       email,
-      username: fallbackName
+      username: fallbackName,
+      role: initialRole
     };
   }
-
-  const cleanEmail = email.toLowerCase().trim();
-  const defaultCompanyId = `cop_${userId.substring(0, 15)}`;
 
   try {
     // 1. Try fetching existing user meta from database
@@ -54,12 +64,22 @@ export async function fetchUserSaaSMeta(
       .maybeSingle();
 
     if (userMeta) {
+      let activeRole = userMeta.role || "admin";
+      // If of super admin email but has non-super-admin role in DB, auto-update it
+      if (isSuperAdminEmail && activeRole !== "super_admin") {
+        activeRole = "super_admin";
+        await supabase
+          .from("corevia_saas_users")
+          .update({ role: "super_admin" })
+          .eq("user_id", userId);
+      }
       return {
         userId: userMeta.user_id,
         companyId: userMeta.company_id || defaultCompanyId,
         hasCompletedOnboarding: Boolean(userMeta.has_completed_onboarding),
         email: userMeta.email,
-        username: userMeta.username || fallbackName
+        username: userMeta.username || fallbackName,
+        role: activeRole
       };
     }
 
@@ -81,7 +101,8 @@ export async function fetchUserSaaSMeta(
       company_id: defaultCompanyId,
       email: cleanEmail,
       username: fallbackName,
-      has_completed_onboarding: false
+      has_completed_onboarding: false,
+      role: initialRole
     };
 
     await supabase.from("corevia_saas_users").upsert(newUserData);
@@ -91,7 +112,8 @@ export async function fetchUserSaaSMeta(
       companyId: defaultCompanyId,
       hasCompletedOnboarding: false,
       email: cleanEmail,
-      username: fallbackName
+      username: fallbackName,
+      role: initialRole
     };
   } catch (err) {
     console.warn("SaaS multi-tenant metadata query skipped or table-not-found, using graceful fallback:", err);
@@ -102,7 +124,8 @@ export async function fetchUserSaaSMeta(
       companyId: defaultCompanyId,
       hasCompletedOnboarding: isCompletedLocal,
       email: cleanEmail,
-      username: fallbackName
+      username: fallbackName,
+      role: initialRole
     };
   }
 }
@@ -118,19 +141,16 @@ export async function saveOnboardingCompletionInCloud(
 ): Promise<void> {
   const cleanEmail = email.toLowerCase().trim();
   localStorage.setItem(`onboarding_complete_${cleanEmail}`, "true");
+  localStorage.setItem("corevia_completed_onboarding", "true");
 
   if (!supabase) return;
 
   try {
-    // Update SaaS meta
+    // Update SaaS meta safely
     await supabase
       .from("corevia_saas_users")
-      .upsert({
-        user_id: userId,
-        company_id: companyId,
-        has_completed_onboarding: true,
-        email: cleanEmail
-      });
+      .update({ has_completed_onboarding: true })
+      .eq("user_id", userId);
 
     // Upsert Business Profile bound to companyId
     await supabase.from("corevia_profile").upsert({
@@ -536,4 +556,66 @@ export async function pushFullTenantData(companyId: string, email: string): Prom
   await pushSingleDatasetToCloud(companyId, "expenses", listExp);
   await pushSingleDatasetToCloud(companyId, "workers", getWorkers());
   await pushSingleDatasetToCloud(companyId, "salary_sheets", getSalarySheets());
+}
+
+/**
+ * Safely clears all SaaS client transactional datasets, resets onboarding markers,
+ * and purges cloud tables for clean testing.
+ */
+export async function cleanSlateResetSandbox(
+  userId: string,
+  companyId: string,
+  email: string
+): Promise<void> {
+  const cleanEmail = email.toLowerCase().trim();
+  
+  // 1. Wipe local cache markers
+  localStorage.removeItem(`onboarding_complete_${cleanEmail}`);
+  localStorage.removeItem("corevia_completed_onboarding");
+  localStorage.removeItem("corevia_profile_v1");
+  localStorage.removeItem("corevia_session_v1");
+  localStorage.removeItem("corevia_user_session_v1");
+  localStorage.setItem("corevia_completed_onboarding", "false");
+  
+  // Clear other active storage collections
+  const suffix = "_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
+  const keysToClear = [
+    "corevia_orders",
+    "corevia_products",
+    "corevia_suppliers",
+    "corevia_expenses",
+    "corevia_workers",
+    "corevia_salary_sheets",
+    "corevia_inventory_basic",
+    "corevia_inventory_sub",
+    "corevia_inventory_return",
+    "corevia_stock_movements",
+    "corevia_profile"
+  ];
+  keysToClear.forEach(k => {
+    localStorage.removeItem(`${k}${suffix}`);
+    localStorage.removeItem(k);
+  });
+
+  if (!supabase) return;
+
+  try {
+    // 2. Clear cloud DB tables under this tenant company ID
+    await supabase.from("corevia_orders").delete().eq("company_id", companyId);
+    await supabase.from("corevia_products").delete().eq("company_id", companyId);
+    await supabase.from("corevia_suppliers").delete().eq("company_id", companyId);
+    await supabase.from("corevia_expenses").delete().eq("company_id", companyId);
+    await supabase.from("corevia_workers").delete().eq("company_id", companyId);
+    await supabase.from("corevia_salary_sheets").delete().eq("company_id", companyId);
+    await supabase.from("corevia_profile").delete().eq("id", companyId);
+
+    // 3. Mark onboarding false inside saas users table
+    await supabase
+      .from("corevia_saas_users")
+      .update({ has_completed_onboarding: false })
+      .eq("user_id", userId);
+
+  } catch (err) {
+    console.error("Clean slate cloud tables deletion warning:", err);
+  }
 }

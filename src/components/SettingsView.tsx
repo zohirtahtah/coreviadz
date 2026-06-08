@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
 import { supabase, isSupabaseConfigured } from "../supabaseClient";
+import { pushFullTenantData, pullMultiTenantData } from "../supabaseSync";
 import {
   getOrders, saveOrders,
   getProducts, saveProducts,
@@ -33,6 +34,7 @@ interface SettingsViewProps {
   onSaveCustomColors: (arr: string[]) => void;
   onTriggerNotification: (msg: string) => void;
   onTriggerRefreshOrders?: () => void;
+  session?: any;
 }
 
 export default function SettingsView({
@@ -42,7 +44,8 @@ export default function SettingsView({
   customColorsList,
   onSaveCustomColors,
   onTriggerNotification,
-  onTriggerRefreshOrders
+  onTriggerRefreshOrders,
+  session
 }: SettingsViewProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -127,6 +130,17 @@ export default function SettingsView({
     setIsSyncingToSupabase(true);
     setDbTestResult(null);
     try {
+      const companyId = session?.company_id || "cop_default";
+      const email = session?.email || "unknown@corevia.com";
+
+      onTriggerNotification(lang === "ar" ? "جاري مزامنة ورفع جميع البيانات والملفات السحابية..." : "Uploading multi-tenant secure sandbox state onto cloud...");
+      await pushFullTenantData(companyId, email);
+
+      onTriggerNotification(lang === "ar" ? "✅ تمت مزامنة جميع البيانات ورفعها بنجاح إلى قاعدة Supabase!" : "✅ Successfully backed up & synchronized all datasets with Supabase Cloud Postgres.");
+      setDbTestResult("CONNECTED_AND_SYNCED");
+      setIsSyncingToSupabase(false);
+      return;
+
       const orders = getOrders();
       const products = getProducts();
       const suppliers = getSuppliers();
@@ -334,6 +348,22 @@ export default function SettingsView({
     setDbTestResult(null);
 
     try {
+      const companyId = session?.company_id || "cop_default";
+      onTriggerNotification(lang === "ar" ? "جاري تنزيل وهيكلة البيانات المعزولة سحابياً..." : "Downloading multi-tenant cloud schemas...");
+      const success = await pullMultiTenantData(companyId);
+
+      if (success) {
+        onTriggerNotification(lang === "ar" ? "✅ تم جلب وتنزيل قاعدة بيانات السحابة بالكامل بنجاح للمتصفح!" : "✅ Data synchronized successfully. Pulled all tables clean from Supabase cloud.");
+        setDbTestResult("CONNECTED_AND_PULLED");
+        if (onTriggerRefreshOrders) {
+          onTriggerRefreshOrders();
+        }
+      } else {
+        throw new Error("Failed to pull database data");
+      }
+      setIsPullingFromSupabase(false);
+      return;
+
       // 1. Fetch Profile
       const { data: profileData } = await supabase.from("corevia_profile").select("*").eq("id", "primary-profile").single();
       if (profileData) {
