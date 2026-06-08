@@ -926,6 +926,7 @@ export default function App() {
           setLang={setLang}
           theme={theme}
           setTheme={setTheme}
+          session={session}
         />
       </div>
     );

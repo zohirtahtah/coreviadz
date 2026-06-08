@@ -441,16 +441,16 @@ export function initializeDatabase(forceReset = false): void {
 
   // Set default empty profile info (when first loaded or reset)
   const emptyOwnerProfile: BusinessProfile = {
-    businessName: "المؤسسة السحابية",
-    businessType: "تجارة إلكترونية",
-    experienceYears: "سنة واحدة",
+    businessName: "",
+    businessType: "",
+    experienceYears: "",
     estimatedOrders: "0",
     estimatedWorkers: "0",
     currency: "DZD",
     defaultLanguage: "ar",
     preferredTheme: "dark",
     country: "Algeria",
-    ownerName: "المدير",
+    ownerName: "",
     phone: "",
     email: "",
     address: "",

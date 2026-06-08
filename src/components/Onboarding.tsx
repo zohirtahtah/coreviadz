@@ -19,9 +19,10 @@ interface OnboardingProps {
   setLang: (l: LanguageType) => void;
   theme: ThemeType;
   setTheme: (t: ThemeType) => void;
+  session?: any;
 }
 
-export default function Onboarding({ onComplete, lang, setLang, theme, setTheme }: OnboardingProps) {
+export default function Onboarding({ onComplete, lang, setLang, theme, setTheme, session }: OnboardingProps) {
   const t = translations[lang];
   const [step, setStep] = useState(1);
   
@@ -37,10 +38,18 @@ export default function Onboarding({ onComplete, lang, setLang, theme, setTheme 
   const [country, setCountry] = useState<"Algeria" | "France" | "Morocco" | "Other">("Algeria");
   
   // Custom Identity Details
-  const [ownerName, setOwnerName] = useState("");
+  const [ownerName, setOwnerName] = useState(session?.username || "");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(session?.email || "");
   const [address, setAddress] = useState("");
+
+  // Keep synced if session loads asynchronously
+  React.useEffect(() => {
+    if (session) {
+      if (!ownerName && session.username) setOwnerName(session.username);
+      if (!email && session.email) setEmail(session.email);
+    }
+  }, [session]);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -51,16 +51,16 @@ export default function SettingsView({
   const isRtl = lang === "ar";
 
   // State variables synchronized with user props
-  const [bName, setBName] = useState(profile.businessName);
-  const [bEmail, setBEmail] = useState(profile.email);
-  const [bPhone, setBPhone] = useState(profile.phone || "0555 12 34 56");
-  const [bCurrency, setBCurrency] = useState(profile.currency);
+  const [bName, setBName] = useState(profile.businessName || "");
+  const [bEmail, setBEmail] = useState(profile.email || "");
+  const [bPhone, setBPhone] = useState(profile.phone || "");
+  const [bCurrency, setBCurrency] = useState(profile.currency || "DZD");
   const [bCountry, setBCountry] = useState<"Algeria" | "France" | "Morocco" | "Other">(profile.country || "Algeria");
-  const [bRegistry, setBRegistry] = useState(profile.commercialRegistry || "16/00-0982736B20");
-  const [bAddress, setBAddress] = useState(profile.address || "مقر الشركة - الجزائر العاصمة");
-  const [bRC1, setBRC1] = useState(profile.rc1 || "16/00-0987654B20");
-  const [bRC2, setBRC2] = useState(profile.rc2 || "20B0987654");
-  const [bNIF, setBNIF] = useState(profile.nif || "002016098765432");
+  const [bRegistry, setBRegistry] = useState(profile.commercialRegistry || "");
+  const [bAddress, setBAddress] = useState(profile.address || "");
+  const [bRC1, setBRC1] = useState(profile.rc1 || "");
+  const [bRC2, setBRC2] = useState(profile.rc2 || "");
+  const [bNIF, setBNIF] = useState(profile.nif || "");
   const [bLogoUrl, setBLogoUrl] = useState<string | undefined>(profile.logoUrl);
   
   // Security
@@ -956,7 +956,8 @@ create table if not exists corevia_salary_sheets (
                     type="text"
                     value={bPhone}
                     onChange={(e) => setBPhone(e.target.value)}
-                    className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none font-mono text-xs ${isRtl ? "text-right" : "text-left"}`}
+                    placeholder="+213 550 12 34 56"
+                    className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none placeholder-slate-500 font-mono text-xs ${isRtl ? "text-right" : "text-left"}`}
                   />
                 </div>
 
@@ -1003,7 +1004,8 @@ create table if not exists corevia_salary_sheets (
                     type="text"
                     value={bRegistry}
                     onChange={(e) => setBRegistry(e.target.value)}
-                    className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-[#27272a] ${isRtl ? "text-right" : "text-left"}`}
+                    placeholder="16/00-0982736B20"
+                    className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-[#27272a] placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                   />
                 </div>
               </div>
@@ -1057,7 +1059,8 @@ create table if not exists corevia_salary_sheets (
                       required
                       value={bPhone}
                       onChange={(e) => setBPhone(e.target.value)}
-                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 font-mono text-xs ${isRtl ? "text-right" : "text-left"}`}
+                      placeholder="+213 550 12 34 56"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 font-mono text-xs placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
 
@@ -1069,7 +1072,8 @@ create table if not exists corevia_salary_sheets (
                       required
                       value={bAddress}
                       onChange={(e) => setBAddress(e.target.value)}
-                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs ${isRtl ? "text-right" : "text-left"}`}
+                      placeholder="Didouche Mourad, Alger"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
                 </div>
@@ -1082,7 +1086,8 @@ create table if not exists corevia_salary_sheets (
                       type="text"
                       value={bRC1}
                       onChange={(e) => setBRC1(e.target.value)}
-                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 ${isRtl ? "text-right" : "text-left"}`}
+                      placeholder="16/00-0987654B20"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
 
@@ -1093,7 +1098,8 @@ create table if not exists corevia_salary_sheets (
                       type="text"
                       value={bRC2}
                       onChange={(e) => setBRC2(e.target.value)}
-                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 ${isRtl ? "text-right" : "text-left"}`}
+                      placeholder="20B0987654"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
 
@@ -1104,7 +1110,8 @@ create table if not exists corevia_salary_sheets (
                       type="text"
                       value={bNIF}
                       onChange={(e) => setBNIF(e.target.value)}
-                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 ${isRtl ? "text-right" : "text-left"}`}
+                      placeholder="002016098765432"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
                 </div>

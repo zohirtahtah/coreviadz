@@ -86,13 +86,24 @@ export async function fetchUserSaaSMeta(
     // 2. Provision new tenant elements (Company + SaaS User Record)
     const companyName = `${fallbackName || cleanEmail.split("@")[0]} Trading`;
     
-    // Attempt Company Insert
+    // Attempt Company Insert in corevia_companies
     await supabase.from("corevia_companies").upsert({
       id: defaultCompanyId,
       name: companyName,
       business_type: "تجارة إلكترونية",
       owner_name: fallbackName,
       email: cleanEmail
+    });
+
+    // Attempt Company Insert in companies table
+    await supabase.from("companies").upsert({
+      id: defaultCompanyId,
+      owner_id: userId,
+      company_name: companyName,
+      main_store_name: "",
+      email: cleanEmail,
+      phone: "",
+      address: ""
     });
 
     // Attempt SaaS User Record Insert
@@ -151,6 +162,27 @@ export async function saveOnboardingCompletionInCloud(
       .from("corevia_saas_users")
       .update({ has_completed_onboarding: true })
       .eq("user_id", userId);
+
+    // Update companies table
+    await supabase.from("companies").upsert({
+      id: companyId,
+      owner_id: userId,
+      company_name: profile.businessName,
+      main_store_name: "",
+      email: profile.email || cleanEmail,
+      phone: profile.phone || "",
+      address: profile.address || ""
+    });
+
+    // Update corevia_companies table
+    await supabase.from("corevia_companies").upsert({
+      id: companyId,
+      name: profile.businessName,
+      business_type: profile.businessType,
+      owner_name: profile.ownerName || "Owner",
+      phone: profile.phone || "",
+      email: profile.email || cleanEmail
+    });
 
     // Upsert Business Profile bound to companyId
     await supabase.from("corevia_profile").upsert({

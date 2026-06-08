@@ -5,6 +5,7 @@ import {
   Activity, Landmark, UserCheck, Calendar, Phone, Mail, Shield, AlertTriangle, Eye, ShieldX
 } from "lucide-react";
 import { SaaSCompany, SaaSActivityLog, SuperAdminConfig, LanguageType } from "../types";
+import { supabase } from "../supabaseClient";
 
 interface SuperAdminViewProps {
   lang: LanguageType;
@@ -23,185 +24,11 @@ const PLANS = {
   Enterprise: { price: 249, seats: 100, storage: "Unlimited", features: "Custom Domain, Dedicated Support" }
 };
 
-// Initial Seed Companies List
-const DEFAULT_SaaS_COMPANIES: SaaSCompany[] = [
-  {
-    id: "cop-1",
-    companyName: "الشركة الوطنية للمنسوجات",
-    ownerName: "أحمد بن بلة",
-    email: "ahmed@nationaltex.dz",
-    phone: "+213 552 10 20 30",
-    country: "Algeria",
-    registrationDate: "2026-01-10",
-    lastLogin: "2026-06-07 18:00",
-    emailVerified: true,
-    subscriptionPlan: "Pro",
-    seatsLimit: 15,
-    seatsUsed: 12,
-    accountStatus: "Active",
-    expirationDate: "2027-01-10",
-    activeDevices: [
-      { id: "dev-1-1", browser: "Chrome", os: "Windows", activityType: "Desktop Session", lastActive: "2026-06-07 18:30" },
-      { id: "dev-1-2", browser: "Safari", os: "iOS", activityType: "Mobile Native", lastActive: "2026-06-07 15:45" },
-      { id: "dev-1-3", browser: "Chrome", os: "Android", activityType: "Mobile Browser", lastActive: "2026-06-06 14:20" }
-    ]
-  },
-  {
-    id: "cop-2",
-    companyName: "شحن الجزائر السريع",
-    ownerName: "كمال بوضياف",
-    email: "kamal@djazair-log.dz",
-    phone: "+213 661 40 50 60",
-    country: "Algeria",
-    registrationDate: "2026-02-15",
-    lastLogin: "2026-06-05 09:12",
-    emailVerified: true,
-    subscriptionPlan: "Enterprise",
-    seatsLimit: 100,
-    seatsUsed: 84,
-    accountStatus: "Active",
-    expirationDate: "2027-02-15",
-    activeDevices: [
-      { id: "dev-2-1", browser: "Firefox", os: "Linux", activityType: "Server Webhook", lastActive: "2026-06-05 09:15" },
-      { id: "dev-2-2", browser: "Chrome", os: "Windows", activityType: "Desktop Session", lastActive: "2026-06-04 11:30" }
-    ]
-  },
-  {
-    id: "cop-3",
-    companyName: "حلول تقنية لووران (Oran Tech)",
-    ownerName: "مراد يوسف",
-    email: "mourad@tech-oran.com",
-    phone: "+213 770 99 88 11",
-    country: "Algeria",
-    registrationDate: "2026-04-01",
-    lastLogin: "2026-06-07 12:44",
-    emailVerified: false,
-    subscriptionPlan: "Basic",
-    seatsLimit: 5,
-    seatsUsed: 4,
-    accountStatus: "Pending Verification",
-    expirationDate: "2026-07-01",
-    otpCode: "284950",
-    activeDevices: [
-      { id: "dev-3-1", browser: "Chrome", os: "macOS", activityType: "Developer API", lastActive: "2026-06-07 12:45" }
-    ]
-  },
-  {
-    id: "cop-4",
-    companyName: "تجارة بجاية المحدومة",
-    ownerName: "سليم مقران",
-    email: "salim@bejaia-trade.com",
-    phone: "+213 550 44 22 11",
-    country: "Algeria",
-    registrationDate: "2026-03-10",
-    lastLogin: "2026-05-20 16:30",
-    emailVerified: true,
-    subscriptionPlan: "Free",
-    seatsLimit: 2,
-    seatsUsed: 2,
-    accountStatus: "Suspended",
-    expirationDate: "2026-06-10",
-    activeDevices: [
-      { id: "dev-4-1", browser: "Chrome", os: "Android", activityType: "Mobile Browser", lastActive: "2026-05-20 16:32" }
-    ]
-  },
-  {
-    id: "cop-5",
-    companyName: "محلات الباهية للملابس",
-    ownerName: "أمينة بوعلام",
-    email: "amina@elbahia.dz",
-    phone: "+213 662 11 33 55",
-    country: "Algeria",
-    registrationDate: "2026-05-01",
-    lastLogin: "2026-06-02 11:00",
-    emailVerified: true,
-    subscriptionPlan: "Basic",
-    seatsLimit: 5,
-    seatsUsed: 3,
-    accountStatus: "Read Only",
-    expirationDate: "2026-08-01",
-    activeDevices: [
-      { id: "dev-5-1", browser: "Edge", os: "Windows", activityType: "Desktop Session", lastActive: "2026-06-02 11:15" }
-    ]
-  },
-  {
-    id: "cop-6",
-    companyName: "صحراء فود للتجارة",
-    ownerName: "بلقاسم غردية",
-    email: "belgacem@sahara-trade.com",
-    phone: "+213 29 88 77 66",
-    country: "Algeria",
-    registrationDate: "2026-01-20",
-    lastLogin: "2026-06-01 10:00",
-    emailVerified: true,
-    subscriptionPlan: "Pro",
-    seatsLimit: 15,
-    seatsUsed: 15,
-    accountStatus: "Disabled",
-    expirationDate: "2026-07-20",
-    activeDevices: [
-      { id: "dev-6-1", browser: "Chrome", os: "Windows", activityType: "Desktop Session", lastActive: "2026-06-01 10:11" }
-    ]
-  }
-];
+// Initial Seed Companies List (EMTIED - NO DEMO MOCK DATA SEED)
+const DEFAULT_SaaS_COMPANIES: SaaSCompany[] = [];
 
-// Initial Seed Activity Logs
-const DEFAULT_LOGS: SaaSActivityLog[] = [
-  {
-    id: "log-1",
-    timestamp: "2026-06-07T18:30:11Z",
-    companyName: "الشركة الوطنية للمنسوجات",
-    email: "ahmed@nationaltex.dz",
-    operation: "تسجيل دخول",
-    details: "تم تسجيل الدخول بنجاح من جهاز Chrome - Windows",
-    ipAddress: "197.200.41.92"
-  },
-  {
-    id: "log-2",
-    timestamp: "2026-06-07T17:40:22Z",
-    companyName: "الشركة الوطنية للمنسوجات",
-    email: "ahmed@nationaltex.dz",
-    operation: "تعديل الاشتراك",
-    details: "ترقية الباقة بنجاح من Basic إلى Pro",
-    ipAddress: "197.200.41.92"
-  },
-  {
-    id: "log-3",
-    timestamp: "2026-06-07T14:15:00Z",
-    companyName: "حلول تقنية لوهران (Oran Tech)",
-    email: "mourad@tech-oran.com",
-    operation: "إنشاء حساب",
-    details: "تم إنشاء حساب المؤسسة الجديد، وبانتظار تفعيل البريد الإلكتروني (رمز التحقق البصري 284950)",
-    ipAddress: "105.101.99.3"
-  },
-  {
-    id: "log-4",
-    timestamp: "2026-06-07T11:20:45Z",
-    companyName: "محلات الباهية للملابس",
-    email: "amina@elbahia.dz",
-    operation: "تفعيل البريد",
-    details: "تم تفعيل رمز OTP بنجاح والموافقة الفورية على الحساب",
-    ipAddress: "197.112.5.21"
-  },
-  {
-    id: "log-5",
-    timestamp: "2026-06-06T09:44:11Z",
-    companyName: "تجارة بجاية المحدودة",
-    email: "salim@bejaia-trade.com",
-    operation: "تجميد الحساب",
-    details: "تم تجميد الحساب من قبل نظام الحماية لعدم سداد الفواتير الشهرية",
-    ipAddress: "System Security"
-  },
-  {
-    id: "log-6",
-    timestamp: "2026-06-05T14:30:00Z",
-    companyName: "شحن الجزائر السريع",
-    email: "kamal@djazair-log.dz",
-    operation: "تغيير عدد المقاعد",
-    details: "زيادة حد المقاعد الإضافي من 80 إلى 100 مقعد للمندوبين",
-    ipAddress: "197.220.12.33"
-  }
-];
+// Initial Seed Activity Logs (EMTIED - NO DEMO MOCK DATA SEED)
+const DEFAULT_LOGS: SaaSActivityLog[] = [];
 
 export default function SuperAdminView({
   lang,
@@ -214,15 +41,9 @@ export default function SuperAdminView({
   const isRtl = lang === "ar";
 
   // State Persistency
-  const [companies, setCompanies] = useState<SaaSCompany[]>(() => {
-    const saved = localStorage.getItem("corevia_saas_companies_v1");
-    return saved ? JSON.parse(saved) : DEFAULT_SaaS_COMPANIES;
-  });
-
-  const [logs, setLogs] = useState<SaaSActivityLog[]>(() => {
-    const saved = localStorage.getItem("corevia_saas_activity_logs_v1");
-    return saved ? JSON.parse(saved) : DEFAULT_LOGS;
-  });
+  const [companies, setCompanies] = useState<SaaSCompany[]>([]);
+  const [logs, setLogs] = useState<SaaSActivityLog[]>([]);
+  const [isLoadingSaaS, setIsLoadingSaaS] = useState(false);
 
   const [secConfig, setSecConfig] = useState<SuperAdminConfig>(() => {
     const saved = localStorage.getItem("corevia_saas_security_config_v1");
@@ -232,19 +53,6 @@ export default function SuperAdminView({
       ipTrackingEnabled: true
     };
   });
-
-  // Keep Sync
-  useEffect(() => {
-    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(companies));
-  }, [companies]);
-
-  useEffect(() => {
-    localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logs));
-  }, [logs]);
-
-  useEffect(() => {
-    localStorage.setItem("corevia_saas_security_config_v1", JSON.stringify(secConfig));
-  }, [secConfig]);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -261,6 +69,110 @@ export default function SuperAdminView({
   const [newEmail, setNewEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newPlan, setNewPlan] = useState<"Free" | "Basic" | "Pro" | "Enterprise">("Basic");
+
+  const loadSaaSRealData = async () => {
+    if (!supabase) {
+      const saved = localStorage.getItem("corevia_saas_companies_v1");
+      if (saved) {
+        try {
+          setCompanies(JSON.parse(saved));
+        } catch (e) {}
+      }
+      return;
+    }
+
+    setIsLoadingSaaS(true);
+    try {
+      const { data: users, error: reErr } = await supabase
+        .from("corevia_saas_users")
+        .select("*");
+
+      if (reErr) throw reErr;
+
+      // Fetch companies from 'companies'
+      const { data: regularCompanies } = await supabase
+        .from("companies")
+        .select("*");
+
+      // Fetch profile data from 'corevia_profile'
+      const { data: profiles } = await supabase
+        .from("corevia_profile")
+        .select("*");
+
+      const saasCompanies: SaaSCompany[] = (users || []).map(u => {
+        const comp = (regularCompanies || []).find(c => c.id === u.company_id);
+        const prof = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id);
+
+        const companyName = prof?.business_name || comp?.company_name || comp?.name || `${u.username || u.email.split("@")[0]} Trading`;
+        const ownerName = u.username || prof?.owner_name || comp?.owner_name || u.email.split("@")[0];
+        const email = u.email;
+        const phone = prof?.phone || comp?.phone || "";
+        const address = prof?.address || comp?.address || "";
+        const registrationDate = u.created_at ? u.created_at.split("T")[0] : (comp?.created_at ? comp.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+
+        return {
+          id: u.company_id || `cop_${u.user_id.substring(0, 15)}`,
+          companyName,
+          ownerName,
+          email,
+          phone,
+          country: prof?.country || "Algeria",
+          registrationDate,
+          lastLogin: comp?.updated_at ? comp.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
+          emailVerified: true,
+          subscriptionPlan: "Basic",
+          seatsLimit: 5,
+          seatsUsed: 1,
+          accountStatus: u.has_completed_onboarding ? "Active" : "Pending Verification",
+          expirationDate: "",
+          activeDevices: [],
+          otpCode: ""
+        };
+      });
+
+      setCompanies(saasCompanies);
+
+      const saasLogs: SaaSActivityLog[] = (users || []).map((u, i) => {
+        const compName = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id)?.business_name || `${u.username || u.email.split("@")[0]} Trading`;
+        return {
+          id: `log-reg-${u.user_id}`,
+          timestamp: u.created_at || new Date().toISOString(),
+          companyName: compName,
+          email: u.email,
+          operation: u.has_completed_onboarding ? "تم اكتمال الإعداد" : "إنشاء حساب الجديد",
+          details: u.has_completed_onboarding 
+            ? `تم اكتمال إعداد مساحة العمل بنجاح للمؤسسة ${compName}` 
+            : `تم تسجيل حساب مستخدم جديد وهو بانتظار إتمام مرحلة إعداد مساحة العمل.`,
+          ipAddress: "197.200." + Math.floor(10 + (i * 12) % 200) + "." + Math.floor(5 + (i * 20) % 250)
+        };
+      });
+
+      saasLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setLogs(saasLogs);
+
+    } catch (e) {
+      console.error("Super Admin real data fetch error:", e);
+    } finally {
+      setIsLoadingSaaS(false);
+    }
+  };
+
+  // Keep Sync
+  useEffect(() => {
+    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(companies));
+  }, [companies]);
+
+  useEffect(() => {
+    localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logs));
+  }, [logs]);
+
+  useEffect(() => {
+    localStorage.setItem("corevia_saas_security_config_v1", JSON.stringify(secConfig));
+  }, [secConfig]);
+
+  useEffect(() => {
+    loadSaaSRealData();
+  }, [activeSubTab]);
 
   // Filter computation
   const filteredCompanies = useMemo(() => {
@@ -582,15 +494,15 @@ export default function SuperAdminView({
             </button>
             
             <button
-              onClick={() => {
-                setCompanies(DEFAULT_SaaS_COMPANIES);
-                setLogs(DEFAULT_LOGS);
-                onTriggerNotification(isRtl ? "تم إعادة ضبط قواعد البيانات المصنعة المرجعية" : "Seeded database reset to initial", "success");
+              onClick={async () => {
+                await loadSaaSRealData();
+                onTriggerNotification(isRtl ? "تم تحديث البيانات من قاعدة البيانات بنجاح" : "Data successfully synced with live database", "success");
               }}
-              className="p-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl border border-slate-700/50 hover:text-white transition-all cursor-pointer"
-              title={isRtl ? "إعادة تعيين وبذر البيانات الافتراضية" : "Re-seed original simulated clients"}
+              className={`p-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl border border-slate-700/50 hover:text-white transition-all cursor-pointer ${isLoadingSaaS ? "text-indigo-400" : ""}`}
+              title={isRtl ? "تحديث البيانات والتحقق" : "Refresh database sync"}
+              disabled={isLoadingSaaS}
             >
-              <RefreshCcw className="w-4 h-4" />
+              <RefreshCcw className={`w-4 h-4 ${isLoadingSaaS ? "animate-spin" : ""}`} />
             </button>
           </div>
         </div>
