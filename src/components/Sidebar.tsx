@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History
+  Shield, History, Menu, X
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -58,6 +58,7 @@ export default function Sidebar({
   const [errorMsg, setErrorMsg] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
@@ -124,6 +125,7 @@ export default function Sidebar({
   const navItemsFiltered = navItems.filter(item => isAllowed(item.id));
 
   const handleNavClick = (tabId: string, isRestricted: boolean) => {
+    setIsMobileOpen(false);
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
       setShowLockScreen(tabId);
       setEnteredCode("");
@@ -188,8 +190,20 @@ export default function Sidebar({
 
   return (
     <>
+      {/* Backdrop overlay for mobile screen drawer */}
+      {isMobileOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-35 md:hidden transition-opacity"
+          onClick={() => setIsMobileOpen(false)}
+        />
+      )}
+
       {/* SIDEBAR MAINCONTAINER */}
-      <aside className={`w-64 max-h-screen bg-[#09090b] border-[#27272a] flex flex-col justify-between p-4 z-40 fixed top-0 bottom-0 ${isRtl ? "right-0 border-l" : "left-0 border-r"} hidden md:flex`} id="desktop_sidebar">
+      <aside className={`w-64 max-h-screen bg-[#09090b] border-[#27272a] flex flex-col justify-between p-4 z-40 fixed top-0 bottom-0 transition-transform duration-300 ease-in-out ${
+        isRtl 
+          ? `right-0 border-l ${isMobileOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}` 
+          : `left-0 border-r ${isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`
+      }`} id="desktop_sidebar">
         <div className="space-y-6 flex flex-col" id="sidebar_main_section">
           
           {/* Brand Info with Profile Avatar & Logo */}
@@ -265,6 +279,14 @@ export default function Sidebar({
       }`} id="global_topbar">
         {/* Brand visual (on left for LTR, right for RTL) */}
         <div className="flex items-center gap-3" id="topbar_left">
+          <button
+            onClick={() => setIsMobileOpen(!isMobileOpen)}
+            className="p-2 md:hidden bg-[#18181b] hover:bg-[#27272a] text-slate-300 hover:text-white rounded-xl border border-[#27272a] cursor-pointer focus:outline-none flex items-center justify-center transition-all"
+            title={lang === "ar" ? "القائمة" : "Menu"}
+          >
+            {isMobileOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
+
           <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white md:hidden animate-pulse">
             {profile.businessName ? profile.businessName.charAt(0).toUpperCase() : "C"}
           </div>
