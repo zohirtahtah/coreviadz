@@ -342,3 +342,14 @@ export interface SuperAdminConfig {
   ipTrackingEnabled: boolean;
 }
 
+export interface ChatMessage {
+  id: string;
+  companyId: string;
+  senderId: string;
+  senderName: string;
+  senderJobTitle: string;
+  content: string;
+  voiceUrl?: string;
+  createdAt: string;
+}
+

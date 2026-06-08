@@ -3,8 +3,10 @@ import { Worker, LanguageType, Order, Expense } from "../types";
 import { 
   Users, Plus, Calendar, Search, Trash2, Printer, Edit2, 
   X, Check, DollarSign, Clock, Phone, AlertCircle, CheckCircle2, Trash, 
-  ChevronLeft, Sparkles, TrendingUp, TrendingDown, Undo2, Award, FileText
+  ChevronLeft, Sparkles, TrendingUp, TrendingDown, Undo2, Award, FileText,
+  XCircle
 } from "lucide-react";
+import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
 
 interface WorkersViewProps {
   workers: Worker[];
@@ -119,6 +121,202 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
   const [showYearlySummary, setShowYearlySummary] = useState(false);
   const [lastDeletedWorker, setLastDeletedWorker] = useState<any | null>(null);
+
+  // Employee approval workflow states
+  const [showEmployeeFilings, setShowEmployeeFilings] = useState(false);
+  const [employeeSubmissions, setEmployeeSubmissions] = useState<any[]>([]);
+  const [editingSubId, setEditingSubId] = useState<string | null>(null);
+  const [editSubAmount, setEditSubAmount] = useState<number>(0);
+
+  // Load all submissions for this company
+  const loadAllSubmissions = async () => {
+    try {
+      let companyIdValue = "";
+      const stored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+      if (stored) {
+        companyIdValue = JSON.parse(stored).company_id || "";
+      }
+      if (companyIdValue) {
+        const data = await getSubmissions(companyIdValue);
+        setEmployeeSubmissions(data);
+      }
+    } catch (err) {
+      console.warn("Failed loading company employee self-filings:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadAllSubmissions();
+  }, [showEmployeeFilings]);
+
+  // Core Submission Approval
+  const handleApproveSubmissionInWorkersList = (sub: any, adjustedAmount?: number) => {
+    const finalAmount = adjustedAmount !== undefined ? adjustedAmount : sub.amount;
+
+    // Resolve date parts
+    const subDate = new Date(sub.date);
+    const subMonth = isNaN(subDate.getTime()) ? monthFilter : subDate.getMonth();
+    const subYear = isNaN(subDate.getTime()) ? yearFilter : subDate.getFullYear();
+
+    // 1. Copy the current workers list
+    const listCopy = [...workers];
+
+    // 2. Find matching monthly worker record
+    let worker = listCopy.find(w => 
+      ((w as any).month === subMonth && (w as any).year === subYear) &&
+      (w.id === sub.employeeId || w.name.toLowerCase().trim() === sub.employeeName.toLowerCase().trim())
+    );
+
+    if (!worker) {
+      // Find standard base roster record for this worker
+      const baseObj = listCopy.find(w => w.id === sub.employeeId || w.name.toLowerCase().trim() === sub.employeeName.toLowerCase().trim());
+      if (baseObj) {
+        // Build new monthly clones
+        const dates = fillDates(subMonth, subYear);
+        const newId = `work-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        worker = {
+          ...baseObj,
+          id: newId,
+          month: subMonth,
+          year: subYear,
+          payPeriodStart: dates.start,
+          payPeriodEnd: dates.end,
+          overtimeHours: 0,
+          missingHours: 0,
+          absenceDays: 0,
+          expenses: [],
+          payrolls: [{
+            id: `pay-${newId}`,
+            payPeriod: `${monthNamesEn[subMonth]} ${subYear}`,
+            datePaid: "",
+            baseSalary: baseObj.baseSalary,
+            overtimeHours: 0,
+            overtimeEarned: 0,
+            bonus: 0,
+            absenceDays: 0,
+            absenceDeductions: 0,
+            cashAdvances: 0,
+            otherDeductions: 0,
+            netSalary: Math.round(baseObj.baseSalary),
+            released: false
+          }]
+        };
+        listCopy.push(worker);
+      } else {
+        // Create absolute fallback profile
+        const dates = fillDates(subMonth, subYear);
+        const newId = `work-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        worker = {
+          id: newId,
+          name: sub.employeeName,
+          code: "W-" + sub.employeeId.substring(0, 4),
+          phone: "",
+          role: "Employee",
+          baseSalary: 35000,
+          dailyHours: 8,
+          overtimeRate: 250,
+          createdAt: new Date().toISOString(),
+          month: subMonth,
+          year: subYear,
+          payPeriodStart: dates.start,
+          payPeriodEnd: dates.end,
+          overtimeHours: 0,
+          missingHours: 0,
+          absenceDays: 0,
+          expenses: [],
+          payrolls: [{
+            id: `pay-${newId}`,
+            payPeriod: `${monthNamesEn[subMonth]} ${subYear}`,
+            datePaid: "",
+            baseSalary: 35000,
+            overtimeHours: 0,
+            overtimeEarned: 0,
+            bonus: 0,
+            absenceDays: 0,
+            absenceDeductions: 0,
+            cashAdvances: 0,
+            otherDeductions: 0,
+            netSalary: 35000,
+            released: false
+          }]
+        } as any;
+        listCopy.push(worker);
+      }
+    }
+
+    // 3. Inject quantities directly into the resolved month sheet!
+    if (sub.type === "overtime") {
+      (worker as any).overtimeHours = ((worker as any).overtimeHours || 0) + finalAmount;
+    } else if (sub.type === "missing_hours") {
+      (worker as any).missingHours = ((worker as any).missingHours || 0) + finalAmount;
+    } else if (sub.type === "absence") {
+      (worker as any).absenceDays = ((worker as any).absenceDays || 0) + finalAmount;
+    } else if (sub.type === "expense") {
+      // Reimbursement expense record inside expenses list
+      (worker as any).expenses = [
+        ...((worker as any).expenses || []),
+        {
+          id: "EXP-" + Math.random().toString(36).substring(2, 7).toUpperCase(),
+          amount: finalAmount,
+          desc: sub.description,
+          date: sub.date
+        }
+      ];
+    }
+
+    // 4. Recalculate payroll netSalary for this record instantly!
+    const basePayroll = worker.payrolls[0];
+    if (basePayroll) {
+      const otWage = ((worker as any).overtimeHours || 0) * (worker.overtimeRate || 250);
+      const dw = calcDailyWage(worker.baseSalary);
+      const hw = calcHourlyWage(worker.baseSalary, worker.dailyHours || 8);
+      const absDed = ((worker as any).absenceDays || 0) * dw;
+      const misDed = ((worker as any).missingHours || 0) * hw;
+      const expDed = ((worker as any).expenses || []).reduce((sum: number, exItem: any) => sum + exItem.amount, 0);
+
+      basePayroll.overtimeHours = (worker as any).overtimeHours;
+      basePayroll.overtimeEarned = otWage;
+      basePayroll.absenceDays = (worker as any).absenceDays;
+      basePayroll.absenceDeductions = Math.round(absDed + misDed);
+      basePayroll.otherDeductions = Math.round(expDed);
+      basePayroll.netSalary = Math.max(0, Math.round(worker.baseSalary + otWage - (absDed + misDed + expDed)));
+    }
+
+    // 5. Fire saved callback to save and push to Cloud
+    onSaveWorkers(listCopy);
+
+    // 6. Update the submission status in storage/cloud
+    const updatedSub = {
+      ...sub,
+      amount: finalAmount,
+      status: "approved" as const
+    };
+    saveSubmission(updatedSub).then(() => {
+      // Reload lists
+      loadAllSubmissions();
+      onTriggerNotification(
+        isRtl 
+          ? `🟢 تم بنجاح اعتماد الطلب وضمه لحساب راتب شهر (${subMonth + 1}-${subYear})!`
+          : `🟢 Approved and compiled into paycheck details for month (${subMonth + 1}-${subYear})!`,
+        "success"
+      );
+    });
+  };
+
+  // Rejection Handler
+  const handleRejectSubmissionInWorkersList = (sub: any) => {
+    const updatedSub = {
+      ...sub,
+      status: "rejected" as const
+    };
+    saveSubmission(updatedSub).then(() => {
+      loadAllSubmissions();
+      onTriggerNotification(
+        isRtl ? "✗ تم رفض الطلب وتحديث الحالة للموظف." : "✗ Submission rejected successfully.",
+        "info"
+      );
+    });
+  };
 
   // References
   const formCache = useRef<Record<string, any>>({});
@@ -1364,6 +1562,24 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
             <FileText size={14} />
             <span>{getsLabel("الملخص السنوي", "Résumé Annuel", "Yearly Review")}</span>
           </button>
+
+          {/* Submissions Reviews Activator */}
+          <button
+            onClick={() => { setShowEmployeeFilings(!showEmployeeFilings); setShowYearlySummary(false); }}
+            className={`relative px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+              showEmployeeFilings 
+                ? "bg-rose-600 text-white hover:bg-rose-500" 
+                : "bg-zinc-900 border border-zinc-800 text-indigo-400 hover:text-indigo-300"
+            }`}
+          >
+            <CheckCircle2 size={14} />
+            <span>{getsLabel("طلبات واعتمادات الموظفين", "Approbations Salariés", "Employee Request Reviews")}</span>
+            {employeeSubmissions.filter(s => s.status === "pending").length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white animate-bounce shadow">
+                {employeeSubmissions.filter(s => s.status === "pending").length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1485,6 +1701,164 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
           />
         </div>
       </div>
+
+      {/* 3.3b لوحة طلبات واعتمادات الموظفين */}
+      {showEmployeeFilings && (
+        <div className="bg-[#09090b] rounded-2xl border border-rose-500/20 overflow-hidden shadow-2xl p-5 space-y-4 animate-fade-in mb-6" id="employee_approvals_panel" dir="rtl">
+          <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] bg-rose-500/10 text-rose-400 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                {employeeSubmissions.filter(s => s.status === "pending").length} المعلقة
+              </span>
+              <h3 className="text-sm font-black text-rose-450 flex items-center gap-1.5 justify-end">
+                <span>{getsLabel("طلبات واعتمادات الموظفين وقنوات التبليغ الذاتي", "Demandes de Salariés à Valider", "Employee Request Reviews")}</span>
+              </h3>
+            </div>
+            <button 
+              onClick={() => setShowEmployeeFilings(false)} 
+              className="p-1 hover:bg-[#18181b] text-zinc-500 hover:text-white rounded-lg transition-colors cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          {employeeSubmissions.length === 0 ? (
+            <div className="text-center py-10 text-slate-500 text-xs">
+              <p>📭 {getsLabel("لا توجد طلبات حضور أو مصاريف مقدمة من طرف الموظفين حالياً.", "Aucune demande soumise par le personnel pour le moment.", "No active employee reports registered for approval.")}</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-right border-collapse">
+                <thead>
+                  <tr className="bg-[#040406] text-zinc-400 border-b border-zinc-805 text-[11px] select-none">
+                    <th className="p-3 text-right">{getsLabel("الموظف", "Salarié", "Employee")}</th>
+                    <th className="p-3 text-right">{getsLabel("النوع", "Type", "Type")}</th>
+                    <th className="p-3 text-right">{getsLabel("الكمية المعروضة", "Quantité", "Amount")}</th>
+                    <th className="p-3 text-right">{getsLabel("البيان والمبررات", "Justification", "Justification")}</th>
+                    <th className="p-3 text-right">{getsLabel("التاريخ المعني", "Date de l'évènement", "Date")}</th>
+                    <th className="p-3 text-center">{getsLabel("الحالة", "Statut", "Status")}</th>
+                    <th className="p-3 text-center">{getsLabel("الاعتماد والإقرار", "Actions/Décision", "Approve / Reject")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-900">
+                  {employeeSubmissions.map((sub) => {
+                    const isPending = sub.status === "pending";
+                    const isEditing = editingSubId === sub.id;
+                    return (
+                      <tr key={sub.id} className="hover:bg-zinc-950/40 transition-colors">
+                        <td className="p-3 font-semibold text-white">
+                          <span className="block">{sub.employeeName}</span>
+                          <span className="text-[10px] text-zinc-500 font-mono">ID: {sub.employeeId?.substring(0, 5)}</span>
+                        </td>
+                        <td className="p-3 font-medium">
+                          {sub.type === "overtime" && <span className="text-indigo-400 font-bold">🚀 {getsLabel("عمل إضافي", "Heures Supp", "Overtime")}</span>}
+                          {sub.type === "missing_hours" && <span className="text-amber-500 font-bold">⏰ {getsLabel("ساعات ضائعة", "Heures perdues", "Lost Hours")}</span>}
+                          {sub.type === "absence" && <span className="text-rose-400 font-bold">📅 {getsLabel("غياب كامل", "Absence", "Absence")}</span>}
+                          {sub.type === "expense" && <span className="text-emerald-450 font-bold">💰 {getsLabel("تعويض مصاريف", "Remboursement", "Expense Refund")}</span>}
+                        </td>
+                        <td className="p-3 font-mono font-bold">
+                          {isEditing ? (
+                            <div className="flex items-center gap-1.5 justify-end">
+                              <input
+                                type="number"
+                                className="w-16 bg-[#18181b] border border-zinc-700 text-white rounded p-1 text-center text-xs font-mono"
+                                value={editSubAmount}
+                                onChange={(e) => setEditSubAmount(Number(e.target.value))}
+                              />
+                              <button
+                                onClick={() => {
+                                  handleApproveSubmissionInWorkersList(sub, editSubAmount);
+                                  setEditingSubId(null);
+                                }}
+                                className="p-1 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded"
+                                title="حفظ واعتماد التعديل"
+                              >
+                                <Check size={11} />
+                              </button>
+                              <button
+                                onClick={() => setEditingSubId(null)}
+                                className="p-1 bg-rose-600/20 text-rose-405 border border-rose-500/30 rounded"
+                              >
+                                <X size={11} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 justify-end">
+                              <span>
+                                {sub.amount} {sub.type === "expense" ? currencyLabel : sub.type === "absence" ? getsLabel("أيام", "jours", "days") : getsLabel("ساعة", "heures", "hrs")}
+                              </span>
+                              {isPending && (
+                                <button
+                                  onClick={() => {
+                                    setEditingSubId(sub.id);
+                                    setEditSubAmount(sub.amount);
+                                  }}
+                                  className="text-zinc-600 hover:text-white"
+                                  title="تعديل القيمة قبل الاعتماد"
+                                >
+                                  <Edit2 size={10} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-slate-405 leading-normal max-w-xs truncate" title={sub.description}>
+                          {sub.description}
+                        </td>
+                        <td className="p-3 text-zinc-300 font-mono text-[11px]">{sub.date}</td>
+                        <td className="p-3 text-center">
+                          {sub.status === "approved" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-bold text-[10px]">
+                              <CheckCircle2 size={11} />
+                              {getsLabel("معتمد ومثبت", "Validé", "Approved & Synced")}
+                            </span>
+                          )}
+                          {sub.status === "rejected" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/25 text-rose-400 font-bold text-[10px]">
+                              <XCircle size={11} />
+                              {getsLabel("مرفوض", "Refusé", "Rejected")}
+                            </span>
+                          )}
+                          {sub.status === "pending" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-550 font-bold text-[10px]">
+                              <Clock size={11} className="animate-pulse" />
+                              {getsLabel("انتظار الاعتماد", "En attente", "Reviewing")}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          {isPending ? (
+                            <div className="flex items-center gap-2 justify-center">
+                              <button
+                                onClick={() => handleApproveSubmissionInWorkersList(sub)}
+                                className="px-3 py-1.5 bg-emerald-650 hover:bg-emerald-600 border border-emerald-650/30 text-white font-extrabold rounded-lg text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <Check size={11} />
+                                <span>{getsLabel("قبول", "Accepter", "Approve")}</span>
+                              </button>
+                              <button
+                                onClick={() => handleRejectSubmissionInWorkersList(sub)}
+                                className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-950 text-rose-400 border border-rose-900/30 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <XCircle size={11} />
+                                <span>{getsLabel("رفض", "Rejeter", "Reject")}</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10.5px] text-zinc-600 font-mono">
+                              ✓ {getsLabel("معالج ومغلق", "Traité", "Closed Case")}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3.4 جدول العمال الرئيسي */}
       <div className="bg-[#09090b] rounded-2xl border border-zinc-900 overflow-hidden shadow">

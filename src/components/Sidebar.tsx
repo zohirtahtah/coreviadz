@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History, Menu, X
+  Shield, History, Menu, X, MessageSquare
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -61,6 +61,40 @@ export default function Sidebar({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [deniedTabModal, setDeniedTabModal] = useState<{ id: string; label: string } | null>(null);
 
+  // Dynamic Chat messages unread badge counter
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+    const checkUnreadMessages = async () => {
+      try {
+        let companyId = "";
+        const stored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+        if (stored) {
+          companyId = JSON.parse(stored).company_id || "";
+        }
+        if (companyId) {
+          const raw = localStorage.getItem("corevia_chat_messages_v1");
+          const msgs = raw ? JSON.parse(raw) : [];
+          const companyMsgs = msgs.filter((m: any) => m.companyId === companyId);
+          
+          const lastReadRaw = localStorage.getItem(`corevia_last_read_chat_${companyId}`);
+          const lastReadCount = lastReadRaw ? Number(lastReadRaw) : 0;
+          
+          if (companyMsgs.length > lastReadCount) {
+            setUnreadChatCount(companyMsgs.length - lastReadCount);
+          } else {
+            setUnreadChatCount(0);
+          }
+        }
+      } catch (e) {}
+    };
+
+    checkUnreadMessages();
+    const interval = setInterval(checkUnreadMessages, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
 
@@ -101,6 +135,7 @@ export default function Sidebar({
     { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: true },
     { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: true },
     { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: true },
+    { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: false },
     { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
     { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
@@ -261,6 +296,10 @@ export default function Sidebar({
                   </div>
                   {!allowed ? (
                     <Shield className="w-3.5 h-3.5 text-slate-600" />
+                  ) : item.id === "communication" && unreadChatCount > 0 && activeTab !== "communication" ? (
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white select-none shadow animate-bounce">
+                      {unreadChatCount}
+                    </span>
                   ) : item.isRestricted && !isItemUnlocked ? (
                     <Lock className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
                   ) : null}
