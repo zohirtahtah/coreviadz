@@ -29,6 +29,7 @@ interface SidebarProps {
   onLogout: () => void;
   notifications: string[];
   clearNotifications: () => void;
+  session?: any;
 }
 
 export default function Sidebar({
@@ -45,7 +46,8 @@ export default function Sidebar({
   onUnlockTab,
   onLogout,
   notifications,
-  clearNotifications
+  clearNotifications,
+  session
 }: SidebarProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -60,9 +62,32 @@ export default function Sidebar({
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
 
-  // Read local storage to check for Super Admin session
-  const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
-  const isSuperAdmin = false;
+  // Read local storage/prop to check for Super Admin session
+  let isSuperAdmin = false;
+  const currentEmail = session?.email || "";
+  if (
+    session?.role === "super_admin" || 
+    currentEmail.toLowerCase().trim() === "coreviadz@gmail.com" || 
+    currentEmail.toLowerCase().trim() === "admin@corevia.com"
+  ) {
+    isSuperAdmin = true;
+  } else {
+    try {
+      const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+      if (sessionStored) {
+        const parsed = JSON.parse(sessionStored);
+        if (
+          parsed.role === "super_admin" || 
+          parsed.email?.toLowerCase().trim() === "coreviadz@gmail.com" || 
+          parsed.email?.toLowerCase().trim() === "admin@corevia.com"
+        ) {
+          isSuperAdmin = true;
+        }
+      }
+    } catch (e) {
+      console.warn("Sidebar parse session status:", e);
+    }
+  }
 
   const baseNavItems = [
     { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: false },

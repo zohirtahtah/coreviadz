@@ -1125,6 +1125,7 @@ export default function App() {
         onLogout={handleLogout}
         notifications={dynamicAlerts}
         clearNotifications={handleClearNotifications}
+        session={session}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}
