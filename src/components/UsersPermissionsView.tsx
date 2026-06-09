@@ -7,6 +7,8 @@ import { LanguageType } from "../types";
 import { translations } from "../translations";
 import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
+import { getWorkers, saveWorkers, getOrders, saveOrders } from "../storageUtils";
+import { pushSingleDatasetToCloud } from "../supabaseSync";
 
 interface UsersPermissionsViewProps {
   lang: LanguageType;
@@ -41,6 +43,15 @@ export default function UsersPermissionsView({
   const [status, setStatus] = useState<"Active" | "Read Only" | "Suspended">("Active");
   const [assignedResponsibilities, setAssignedResponsibilities] = useState("");
   const [selectedPages, setSelectedPages] = useState<string[]>(["dashboard"]);
+  
+  // Contract / Worker Profile Sync Fields
+  const [baseSalary, setBaseSalary] = useState<number>(35000);
+  const [monthlySalary, setMonthlySalary] = useState<number>(35000);
+  const [workingHoursPerDay, setWorkingHoursPerDay] = useState<number>(8);
+  const [workingDaysPerMonth, setWorkingDaysPerMonth] = useState<number>(22);
+  const [overtimeHourRate, setOvertimeHourRate] = useState<number>(1.5);
+  const [absenceDeductionRate, setAbsenceDeductionRate] = useState<number>(1.0);
+  const [notes, setNotes] = useState<string>("");
   
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -124,6 +135,13 @@ export default function UsersPermissionsView({
     setAssignedResponsibilities("");
     setSelectedPages(["dashboard"]);
     setShowPasswordRaw(true);
+    setBaseSalary(35000);
+    setMonthlySalary(35000);
+    setWorkingHoursPerDay(8);
+    setWorkingDaysPerMonth(22);
+    setOvertimeHourRate(1.5);
+    setAbsenceDeductionRate(1.0);
+    setNotes("");
     setIsModalOpen(true);
   };
 
@@ -138,6 +156,31 @@ export default function UsersPermissionsView({
     setAssignedResponsibilities(emp.assignedResponsibilities || "");
     setSelectedPages(emp.allowedPages || ["dashboard"]);
     setShowPasswordRaw(false);
+
+    // Sync from Worker profile state
+    const allWorkers = getWorkers();
+    const match = allWorkers.find(
+      w => w.id === emp.id || 
+           (w.phone && emp.phone && w.phone.replace(/[^0-9]/g, "") === emp.phone.replace(/[^0-9]/g, "")) ||
+           w.name.toLowerCase().trim() === emp.fullName.toLowerCase().trim()
+    );
+    if (match) {
+      setBaseSalary(match.baseSalary || 35000);
+      setMonthlySalary(match.monthlySalary || match.baseSalary || 35000);
+      setWorkingHoursPerDay(match.dailyHours || 8);
+      setWorkingDaysPerMonth(match.workingDaysPerMonth || 22);
+      setOvertimeHourRate(match.overtimeRate || 1.5);
+      setAbsenceDeductionRate(match.absenceDeductionRate || 1.0);
+      setNotes(match.notes || "");
+    } else {
+      setBaseSalary(35000);
+      setMonthlySalary(35000);
+      setWorkingHoursPerDay(8);
+      setWorkingDaysPerMonth(22);
+      setOvertimeHourRate(1.5);
+      setAbsenceDeductionRate(1.0);
+      setNotes("");
+    }
     setIsModalOpen(true);
   };
 
@@ -163,6 +206,27 @@ export default function UsersPermissionsView({
             ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح`
             : `✅ Successfully deleted employee (${emp.fullName})`
         );
+
+        // Keep order history intact but update creator label
+        try {
+          const currentOrders = getOrders();
+          let changed = false;
+          const updatedOrders = currentOrders.map(order => {
+            if (order.agentName === emp.fullName) {
+              changed = true;
+              return { ...order, agentName: `${emp.fullName} (Deleted User)` };
+            }
+            return order;
+          });
+          if (changed) {
+            saveOrders(updatedOrders);
+            if (companyId) {
+              await pushSingleDatasetToCloud(companyId, "orders", updatedOrders);
+            }
+          }
+        } catch (err) {
+          console.error("Order history update error:", err);
+        }
         
         // Log delete activity
         await logActivity({
@@ -235,6 +299,46 @@ export default function UsersPermissionsView({
           ? `✅ تم ${isNew ? "إنشاء" : "تحديث"} حساب الموظف (${fullName}) بنجاح`
           : `✅ Successfully ${isNew ? "created" : "updated"} employee account (${fullName})`
       );
+
+      // Automatically create/update Worker Profile
+      try {
+        const currentWorkers = getWorkers();
+        let workerIndex = currentWorkers.findIndex(
+          w => w.id === employeeId || 
+               w.phone === phone.trim() ||
+               w.name.toLowerCase().trim() === fullName.trim().toLowerCase()
+        );
+
+        const updatedWorker = {
+          id: workerIndex !== -1 ? currentWorkers[workerIndex].id : employeeId,
+          name: fullName.trim(),
+          code: workerIndex !== -1 ? currentWorkers[workerIndex].code : `W-${Date.now().toString().slice(-4)}`,
+          phone: phone.trim(),
+          baseSalary: baseSalary,
+          monthlySalary: monthlySalary,
+          dailyHours: workingHoursPerDay,
+          workingDaysPerMonth: workingDaysPerMonth,
+          overtimeRate: overtimeHourRate,
+          absenceDeductionRate: absenceDeductionRate,
+          notes: notes.trim(),
+          role: jobTitle.trim() || "موظف",
+          payrolls: workerIndex !== -1 ? currentWorkers[workerIndex].payrolls || [] : [],
+          createdAt: workerIndex !== -1 ? currentWorkers[workerIndex].createdAt || new Date().toISOString() : new Date().toISOString()
+        };
+
+        if (workerIndex !== -1) {
+          currentWorkers[workerIndex] = updatedWorker;
+        } else {
+          currentWorkers.push(updatedWorker);
+        }
+
+        saveWorkers(currentWorkers);
+        if (companyId) {
+          await pushSingleDatasetToCloud(companyId, "workers", currentWorkers);
+        }
+      } catch (err) {
+        console.error("Worker Profile auto-sync error:", err);
+      }
 
       // Log specific activities
       const actionType = isNew ? "Create User" : "Update User";
@@ -621,6 +725,120 @@ export default function UsersPermissionsView({
                     <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
                     <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Workforce Contract & Salary Regulations */}
+              <div className="space-y-3 border-t border-[#27272a] pt-3 text-xs">
+                <span className="block text-indigo-400 font-extrabold text-[11px] uppercase tracking-wider">
+                  💼 {isRtl ? "محددات الراتب وعقد العمل والدقة والامتيازات:" : "Salary Regulations & Contractual Details:"}
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23]">
+                  {/* Base Salary */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "الراتب الأساسي (DZD) *" : "Base Salary (DZD) *"}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={baseSalary || ""}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setBaseSalary(val);
+                        // By default sync monthly salary
+                        setMonthlySalary(val);
+                      }}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Monthly Salary */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "الراتب الإجمالي المتفق عليه *" : "Contracted Monthly Salary *"}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={monthlySalary || ""}
+                      onChange={(e) => setMonthlySalary(Number(e.target.value))}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Daily hours */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "ساعات العمل اليومية *" : "Daily Working Hours *"}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={workingHoursPerDay || ""}
+                      onChange={(e) => setWorkingHoursPerDay(Number(e.target.value))}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Working days per month */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "أيام العمل الشهرية المتوقعة *" : "Expected Working Days/Month *"}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={workingDaysPerMonth || ""}
+                      onChange={(e) => setWorkingDaysPerMonth(Number(e.target.value))}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Overtime rate multiplier */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "معدل الراتب الإضافي لكل ساعة *" : "Overtime Hour Multiplier *"}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={overtimeHourRate || ""}
+                      onChange={(e) => setOvertimeHourRate(Number(e.target.value))}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Daily penalty rate */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "مضاعف خصم الغياب اليومي *" : "Daily Absence Penalty Multiplier *"}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={absenceDeductionRate || ""}
+                      onChange={(e) => setAbsenceDeductionRate(Number(e.target.value))}
+                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                    />
+                  </div>
+                </div>
+
+                {/* Internal Contract Notes */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">
+                    {isRtl ? "شروط أو ملاحظات العقد الخاصة:" : "Special Contractual/Compensation Notes:"}
+                  </label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder={isRtl ? "مثال: مبيعات الهاتف + 1% عمولة أرباح، حوافز دقة الحضور الموصى بها..." : "e.g. Phone support agent + 1% revenue share, quarterly arrival incentives..."}
+                    rows={2}
+                    className="w-full p-2 bg-[#0a0a0c] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650 resize-none"
+                  />
                 </div>
               </div>
 

@@ -36,6 +36,8 @@ import SettingsView from "./components/SettingsView";
 import SuperAdminView from "./components/SuperAdminView";
 import UsersPermissionsView from "./components/UsersPermissionsView";
 import ActivityLogView from "./components/ActivityLogView";
+import MyProfileView from "./components/MyProfileView";
+import { CommunicationView } from "./components/CommunicationView";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -1057,8 +1059,8 @@ export default function App() {
     );
   }
 
-  // If onboarding is not completed, we display Onboarding screen with the global topbar controls
-  if (!profile || !profile.businessName) {
+  // If onboarding is not completed, we display Onboarding screen with the global topbar controls (employees bypass this setup completely)
+  if ((!profile || !profile.businessName) && session?.role !== "employee") {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center p-4 bg-slate-950 dark:bg-slate-950 font-sans leading-relaxed text-right transition-colors" id="onboarding_wrapper_layout">
@@ -1553,6 +1555,21 @@ export default function App() {
             lang={lang}
             session={session}
             onTriggerNotification={triggerToast}
+          />
+        )}
+
+        {activeTab === "communication" && (
+          <CommunicationView
+            session={session}
+            lang={lang}
+            onTriggerNotification={triggerToast}
+          />
+        )}
+
+        {activeTab === "my-profile" && (
+          <MyProfileView
+            session={session}
+            lang={lang}
           />
         )}
 

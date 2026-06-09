@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History, Menu, X, MessageSquare
+  Shield, History, Menu, X, MessageSquare, UserCheck
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -153,12 +153,30 @@ export default function Sidebar({
   const isAllowed = (tabId: string) => {
     if (isSuperAdmin) return true;
     if (session?.role === "employee") {
+      // My Profile and Team communication are always allowed and available for employees
+      if (tabId === "my-profile" || tabId === "communication") return true;
       return !!session.allowedPages?.includes(tabId);
     }
     return true;
   };
 
-  const navItemsFiltered = navItems;
+  const isEmployee = session?.role === "employee";
+  const navItemsFiltered = isEmployee
+    ? [
+        { 
+          id: "my-profile", 
+          label: lang === "ar" ? "ملفي التعاقدي" : lang === "fr" ? "Mon Profil Contrat" : "My Profile / Employment Info", 
+          icon: UserCheck, 
+          isRestricted: false 
+        },
+        ...navItems.filter(item => 
+          item.id !== "settings" && 
+          item.id !== "users-permissions" && 
+          item.id !== "super-admin" && 
+          item.id !== "trash"
+        )
+      ]
+    : navItems;
 
   const handleNavClick = (tabId: string, isRestricted: boolean) => {
     setIsMobileOpen(false);
@@ -269,6 +287,19 @@ export default function Sidebar({
             </div>
           </div>
 
+          {/* Employee Identity Widget */}
+          {session?.role === "employee" && (
+            <div className={`bg-[#18181b]/60 border border-zinc-805 rounded-xl p-3 space-y-1.5 select-none ${isRtl ? "text-right" : "text-left"}`} id="employee_identity_sidebar">
+              <span className="text-[9.5px] text-indigo-400 font-extrabold uppercase tracking-wider block">
+                {lang === "ar" ? "حساب موظف" : lang === "fr" ? "Compte Employé" : "Employee Account"}
+              </span>
+              <p className="text-xs font-black text-white truncate">{session.username}</p>
+              <div className="inline-flex items-center gap-1 bg-indigo-950/40 border border-indigo-900/40 px-2 py-0.5 rounded-md text-[10px] text-indigo-300 font-bold">
+                <span>{session.jobTitle || (lang === "ar" ? "موظف" : "Employee")}</span>
+              </div>
+            </div>
+          )}
+
           {/* Navigation Links */}
           <nav className="space-y-1 flex-1 overflow-y-auto max-h-[calc(100vh-220px)] pr-1" id="sidebar_navigation_links">
             {navItemsFiltered.map((item) => {
@@ -348,6 +379,19 @@ export default function Sidebar({
           </div>
           <span className="text-white text-sm font-bold truncate max-w-[120px] sm:max-w-[200px]">{profile.businessName || "Corevia"}</span>
         </div>
+
+        {/* Global Floating Header Employee Identity Banner */}
+        {session?.role === "employee" && (
+          <div className="hidden sm:flex items-center gap-3 bg-indigo-950/45 border border-indigo-900/40 p-1.5 px-3 rounded-2xl select-none" id="header_employee_indicator">
+            <span className="text-[9.5px] text-indigo-300 font-black uppercase bg-indigo-950/60 border border-indigo-900/50 px-2 py-0.5 rounded-lg shrink-0">
+              {lang === "ar" ? "حساب موظف" : lang === "fr" ? "Compte Employé" : "Employee Account"}
+            </span>
+            <div className={`flex flex-col text-xs font-bold leading-none ${isRtl ? "text-right" : "text-left"}`}>
+              <span className="text-white text-[11px] truncate">{session.username}</span>
+              <span className="text-[10px] text-slate-400 mt-0.5 truncate">{session.jobTitle || (lang === "ar" ? "موظف" : "Employee")}</span>
+            </div>
+          </div>
+        )}
 
         {/* Right side options: language switchers, alerts and visuals */}
         <div className="flex items-center gap-2 sm:gap-2.5" id="topbar_right_instruments">

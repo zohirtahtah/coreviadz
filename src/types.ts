@@ -204,6 +204,9 @@ export interface Worker {
   monthlySalary: number;
   payrolls: WorkerPayrollPayment[];
   createdAt: string;
+  workingDaysPerMonth?: number;
+  absenceDeductionRate?: number;
+  notes?: string;
 }
 
 export interface WorkerSalarySheet {
