@@ -16,6 +16,7 @@ interface WorkersViewProps {
   onTriggerNotification: (msg: string, type?: "success" | "info" | "warning") => void;
   orders?: Order[];
   onSectionChange?: (tab: string) => void;
+  session?: any;
 }
 
 // 2.1 الدوال المساعدة العامة
@@ -93,7 +94,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   onSoftDeleteWorker,
   onTriggerNotification,
   orders = [],
-  onSectionChange
+  onSectionChange,
+  session
 }) => {
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
@@ -498,7 +500,15 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     let grandOT = 0;
     let grandDed = 0;
 
-    workers.forEach(w => {
+    let targetWorkers = workers;
+    if (session?.role === "employee") {
+      targetWorkers = workers.filter(w => 
+        w.name.toLowerCase().trim() === session.username?.toLowerCase().trim() ||
+        w.phone === session.phone
+      );
+    }
+
+    targetWorkers.forEach(w => {
       const baseSalary = w.baseSalary || 0;
       const overtimeHours = (w as any).overtimeHours || 0;
       const overtimeRate = (w as any).overtimeRate || 250;
@@ -541,15 +551,23 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
   // Group and sort ascendingly
   const displayedWorkers = useMemo(() => {
-    const uniqueCodes = Array.from(new Set(workers.map(w => w.code)));
+    let targetWorkers = workers;
+    if (session?.role === "employee") {
+      targetWorkers = workers.filter(w => 
+        w.name.toLowerCase().trim() === session.username?.toLowerCase().trim() ||
+        w.phone === session.phone
+      );
+    }
+
+    const uniqueCodes = Array.from(new Set(targetWorkers.map(w => w.code)));
     uniqueCodes.sort((a,b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
     const query = searchQuery.toLowerCase().trim();
     const list: any[] = [];
 
     uniqueCodes.forEach(code => {
-      const currentRecord = workers.find(w => w.code === code && (w as any).month === monthFilter && (w as any).year === yearFilter);
-      const fallback = workers.filter(w => w.code === code).sort((a,b) => ((b as any).year - (a as any).year) || ((b as any).month - (a as any).month))[0];
+      const currentRecord = targetWorkers.find(w => w.code === code && (w as any).month === monthFilter && (w as any).year === yearFilter);
+      const fallback = targetWorkers.filter(w => w.code === code).sort((a,b) => ((b as any).year - (a as any).year) || ((b as any).month - (a as any).month))[0];
       const record = currentRecord || fallback;
       if (!record) return;
 
@@ -562,7 +580,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     });
 
     return list;
-  }, [workers, monthFilter, yearFilter, searchQuery]);
+  }, [workers, monthFilter, yearFilter, searchQuery, session]);
 
   // Yearly aggregating summary
   const workerYearlyAverages = useMemo(() => {
@@ -1529,21 +1547,25 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => { resetForm(); setShowForm(true); }}
-            className="px-4 py-2 bg-indigo-650 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-          >
-            <Plus size={14} />
-            <span>{getsLabel("إضافة عامل", "Ajouter Salarié", "Add Worker")}</span>
-          </button>
-          
-          <button
-            onClick={() => { addNextMonth(); }}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-          >
-            <Calendar size={14} />
-            <span>{getsLabel("شهر جديد", "Nouveau Mois", "Next Month")}</span>
-          </button>
+          {session?.role !== "employee" && (
+            <>
+              <button
+                onClick={() => { resetForm(); setShowForm(true); }}
+                className="px-4 py-2 bg-indigo-650 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Plus size={14} />
+                <span>{getsLabel("إضافة عامل", "Ajouter Salarié", "Add Worker")}</span>
+              </button>
+              
+              <button
+                onClick={() => { addNextMonth(); }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Calendar size={14} />
+                <span>{getsLabel("شهر جديد", "Nouveau Mois", "Next Month")}</span>
+              </button>
+            </>
+          )}
 
           <button
             onClick={printWorkers}
@@ -1965,13 +1987,15 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                             <Printer size={13} />
                           </button>
 
-                          <button
-                            onClick={() => setDeleteConfirm(targetRecord.id)}
-                            className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-rose-950/20 rounded-lg transition-all cursor-pointer"
-                            title="حذف هذا السجل الشهري فقط"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {session?.role !== "employee" && (
+                            <button
+                              onClick={() => setDeleteConfirm(targetRecord.id)}
+                              className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-rose-950/20 rounded-lg transition-all cursor-pointer"
+                              title="حذف هذا السجل الشهري فقط"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2131,13 +2155,15 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                           >
                             <Printer size={12} />
                           </button>
-                          <button
-                            onClick={() => setDeleteConfirm(r.id)}
-                            className="p-1 text-rose-500 hover:text-white hover:bg-zinc-900 rounded cursor-pointer"
-                            title="حذف هذا السجل الشهري"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          {session?.role !== "employee" && (
+                            <button
+                              onClick={() => setDeleteConfirm(r.id)}
+                              className="p-1 text-rose-500 hover:text-white hover:bg-zinc-900 rounded cursor-pointer"
+                              title="حذف هذا السجل الشهري"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -2325,7 +2351,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                       type="number"
                       value={formBaseSalary}
                       onChange={(e) => setFormBaseSalary(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                      className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none font-mono"
+                      className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={session?.role === "employee"}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
@@ -2334,7 +2361,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                       type="number"
                       value={formDailyHours}
                       onChange={(e) => setFormDailyHours(Math.max(1, parseInt(e.target.value, 10) || 8))}
-                      className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none font-mono"
+                      className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={session?.role === "employee"}
                     />
                   </div>
                 </div>
@@ -2396,8 +2424,9 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                         placeholder="اكتب أجر الساعة هنا"
                         value={formOvertimeRate}
                         onChange={(e) => setFormOvertimeRate(Math.max(0, parseInt(e.target.value, 10) || 250))}
-                        className="w-full bg-[#040406] text-center border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none"
+                        className="w-full bg-[#040406] text-center border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                         title="عائد كل ساعة إضافية بالدينار"
+                        disabled={session?.role === "employee"}
                       />
                     </div>
                   </div>

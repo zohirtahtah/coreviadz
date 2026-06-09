@@ -393,7 +393,7 @@ export default function UsersPermissionsView({
           email: email.trim() || undefined,
           username: username.trim(),
           password: password.trim(),
-          loginUrl: `${window.location.origin}/`
+          loginUrl: `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`
         });
       } else {
         setIsModalOpen(false);

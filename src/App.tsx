@@ -1600,6 +1600,7 @@ export default function App() {
             onTriggerNotification={triggerToast}
             orders={orders}
             onSectionChange={setActiveTab}
+            session={session}
           />
         )}
 
