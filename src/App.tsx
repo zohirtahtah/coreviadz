@@ -322,36 +322,68 @@ export default function App() {
     }
   }, []);
 
-  // 2. Local database loader triggered whenever active tenant session resolves
-  useEffect(() => {
+  // Helper to load localized database and configuration records from local cache
+  const loadStateFromLocal = () => {
     const profObj = getBusinessProfile();
     if (profObj && profObj.businessName) {
       setProfile(profObj);
       setLangState(profObj.defaultLanguage || "ar");
       setTheme(profObj.preferredTheme || "dark");
+    }
+    
+    setOrders(getOrders());
+    setProducts(getProducts());
+    setBasicInventory(getBasicInventory());
+    setSubInventory(getSubInventory());
+    setReturnInventory(getReturnInventory());
+    setSuppliers(getSuppliers());
+    setInvoices(getSupplierInvoices());
+    setWorkers(getWorkers());
+    setTrashItems(getTrashItems());
+
+    const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
+    let parsedExpenses = [];
+    try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
+    setExpenses(parsedExpenses);
+
+    const storedColors = localStorage.getItem("corevia_custom_colors_v1");
+    let parsedColors = [];
+    try { if (storedColors) parsedColors = JSON.parse(storedColors); } catch(e){}
+    setCustomColorsList(parsedColors.length ? parsedColors : [
+      "Black (أسود)", "White (أبيض)", "Navy Blue (كحلي)", "Sage Green (أخضر زيتي)", 
+      "Ruby Red (أحمر جوري)", "Carbon Gray (رمادي فاحم)"
+    ]);
+  };
+
+  // 2. Local database loader triggered whenever active tenant session resolves
+  useEffect(() => {
+    // 1. Instantly load offline database cache so the app is immediately interactive for the user
+    loadStateFromLocal();
+
+    // 2. Hydrate from Cloud in background if there's an active SaaS company session
+    if (session?.company_id && supabase) {
+      const profObj = getBusinessProfile();
+      const hasPreExistingData = !!(profObj && profObj.businessName);
       
-      setOrders(getOrders());
-      setProducts(getProducts());
-      setBasicInventory(getBasicInventory());
-      setSubInventory(getSubInventory());
-      setReturnInventory(getReturnInventory());
-      setSuppliers(getSuppliers());
-      setInvoices(getSupplierInvoices());
-      setWorkers(getWorkers());
-      setTrashItems(getTrashItems());
+      // Only show full screen loader if we have no local cache at all
+      if (!hasPreExistingData) {
+        setIsSyncingOnAuth(true);
+      }
 
-      const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
-      let parsedExpenses = [];
-      try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
-      setExpenses(parsedExpenses);
-
-      const storedColors = localStorage.getItem("corevia_custom_colors_v1");
-      let parsedColors = [];
-      try { if (storedColors) parsedColors = JSON.parse(storedColors); } catch(e){}
-      setCustomColorsList(parsedColors.length ? parsedColors : [
-        "Black (أسود)", "White (أبيض)", "Navy Blue (كحلي)", "Sage Green (أخضر زيتي)", 
-        "Ruby Red (أحمر جوري)", "Carbon Gray (رمادي فاحم)"
-      ]);
+      pullMultiTenantData(session.company_id)
+        .then((success) => {
+          if (success) {
+            console.log("Successfully hydrated multi-tenant workspace from the cloud.");
+            // Hot reload the active records to React state
+            loadStateFromLocal();
+          }
+        })
+        .catch((e) => {
+          console.warn("Could not sync cloud records on login:", e);
+        })
+        .finally(() => {
+          setIsSyncingOnAuth(false);
+        });
     }
   }, [session]);
 
@@ -1448,6 +1480,18 @@ export default function App() {
     }
   };
 
+  const activeProfile = profile || {
+    businessName: "Corevia",
+    businessType: "تجارة إلكترونية",
+    currency: "DZD",
+    country: "Algeria",
+    passcode: "1234",
+    ownerName: "",
+    phone: "",
+    email: "",
+    address: ""
+  };
+
   return (
     <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"}`} id="applet_main_scaffold">
       
@@ -1459,8 +1503,8 @@ export default function App() {
         setLang={setLang}
         theme={theme}
         toggleTheme={handleToggleTheme}
-        profile={profile}
-        passcode={profile.passcode || "1234"}
+        profile={activeProfile}
+        passcode={activeProfile.passcode || "1234"}
         isLocked={isLocked}
         unlockedTabs={unlockedTabs}
         onUnlockTab={(tab) => setUnlockedTabs(prev => [...prev, tab])}
@@ -1493,8 +1537,8 @@ export default function App() {
             subInventory={subInventory}
             returnInventory={returnInventory}
             lang={lang}
-            businessName={profile.businessName}
-            profile={profile}
+            businessName={activeProfile.businessName}
+            profile={activeProfile}
             onSoftDelete={handleSoftDeleteOrder}
             onTriggerNotification={triggerToast}
           />

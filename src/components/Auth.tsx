@@ -568,15 +568,17 @@ export default function Auth({
           {authMode === "login" && (
             <form onSubmit={handleSubmit} className="space-y-4" id="login_form">
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">{t.email}</label>
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "البريد الإلكتروني أو الهاتف أو اسم المستخدم" : "Email, Phone, or Username"}
+                </label>
                 <div className="relative">
                   <Mail className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="name@company.dz"
+                    placeholder={isRtl ? "البريد الإلكتروني أو الهاتف أو اسم المستخدم" : "Email, Phone, or Username"}
                     className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
                       isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
                     }`}
