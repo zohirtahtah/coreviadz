@@ -1918,6 +1918,14 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                       <td className="p-4">
                         <div className="font-bold text-white text-xs">{w.name}</div>
                         <div className="text-[10px] text-indigo-400">{w.role || "Sales Handler"}</div>
+                        {targetRecord.createdBy && (
+                          <div className="text-[8.5px] text-zinc-500 mt-1 flex flex-wrap items-center gap-1" dir="rtl">
+                            <span className="inline-flex items-center gap-0.5 bg-zinc-900 border border-zinc-800/80 px-1 py-0.2 rounded text-[8.5px] font-mono text-zinc-400">
+                              👤 {targetRecord.createdBy.split(" (")[0]}
+                            </span>
+                            <span>{lang === "ar" ? "أُنشئ:" : "Created:"} {targetRecord.createdDate}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <span className="bg-zinc-800 text-zinc-300 font-medium font-mono px-2.5 py-1 rounded text-[10px]">

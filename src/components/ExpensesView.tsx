@@ -1388,7 +1388,14 @@ export default function ExpensesView({
                         </button>
                       </td>
                       <td className="px-3.5 py-2.5 text-zinc-400 font-mono text-[10px]">{item.date || "غير محدد / تراكمي"}</td>
-                      <td className="px-3.5 py-2.5 font-bold text-white">{item.name}</td>
+                      <td className="px-3.5 py-2.5 font-bold text-white">
+                        <div>{item.name}</div>
+                        {item.createdBy && (
+                          <div className="text-[8.5px] text-zinc-500 font-normal mt-0.5 flex items-center gap-1">
+                            👤 {item.createdBy.split(" (")[0]}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3.5 py-2.5 font-mono text-[13px] text-orange-400 font-black">{item.amount.toLocaleString()} دج</td>
                     </tr>
                   ))
@@ -1530,7 +1537,14 @@ export default function ExpensesView({
                         </button>
                       </td>
                       <td className="px-3.5 py-2.5 text-zinc-400 font-mono text-[10px]">{item.date}</td>
-                      <td className="px-3.5 py-2.5 font-bold text-white">{item.name}</td>
+                      <td className="px-3.5 py-2.5 font-bold text-white">
+                        <div>{item.name}</div>
+                        {item.createdBy && (
+                          <div className="text-[8.5px] text-zinc-500 font-normal mt-0.5 flex items-center gap-1">
+                            👤 {item.createdBy.split(" (")[0]}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3.5 py-2.5 font-mono text-[13px] text-blue-400 font-black">{item.amount.toLocaleString()} دج</td>
                     </tr>
                   ))

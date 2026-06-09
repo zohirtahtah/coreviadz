@@ -1368,6 +1368,23 @@ export default function ProductsView({
                       </div>
                     </div>
 
+                    {p.createdBy && (
+                      <div className="text-[8.5px] text-zinc-500 mt-2 border-t border-[#27272a]/30 pt-2 leading-normal space-y-1" dir="rtl">
+                        <div className="flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1 bg-[#040406] text-zinc-400 border border-[#27272a] px-1.5 py-0.5 rounded text-[8.5px] font-mono">
+                            👤 {p.createdBy.split(" (")[0]}
+                          </span>
+                          <span>{lang === "ar" ? "بتاريخ:" : "Date:"} {p.createdDate || p.createdAt?.split("T")[0]} {p.createdTime || ""}</span>
+                        </div>
+                        {p.updatedBy && (p.updatedBy !== p.createdBy || p.updatedDate !== p.createdDate) && (
+                          <div className="flex items-center justify-between text-indigo-400/80 pt-1 border-t border-[#27272a]/20">
+                            <span>{lang === "ar" ? "آخر تعديل بواسطة:" : "Last edit by:"} {p.updatedBy.split(" (")[0]}</span>
+                            <span>{p.updatedDate} {p.updatedTime}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   </div>
 
                   {/* Operational actions */}
