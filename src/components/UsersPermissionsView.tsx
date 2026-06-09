@@ -53,6 +53,24 @@ export default function UsersPermissionsView({
   const [absenceDeductionRate, setAbsenceDeductionRate] = useState<number>(1.0);
   const [notes, setNotes] = useState<string>("");
   
+  const [username, setUsername] = useState("");
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    fullName: string;
+    email?: string;
+    username: string;
+    password?: string;
+    loginUrl: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!editingEmployee && fullName) {
+      const slug = fullName.toLowerCase().trim()
+        .replace(/\s+/g, ".")
+        .replace(/[^a-z0-9.]/g, "");
+      setUsername(slug);
+    }
+  }, [fullName, editingEmployee]);
+
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
   const [passRevealId, setPassRevealId] = useState<string | null>(null);
@@ -129,6 +147,7 @@ export default function UsersPermissionsView({
     setFullName("");
     setPhone("");
     setEmail("");
+    setUsername("");
     setJobTitle("");
     setPassword(Math.floor(100000 + Math.random() * 900000).toString()); // Pre-fill with clean random password
     setStatus("Active");
@@ -150,6 +169,7 @@ export default function UsersPermissionsView({
     setFullName(emp.fullName);
     setPhone(emp.phone);
     setEmail(emp.email || "");
+    setUsername(emp.username || "");
     setJobTitle(emp.jobTitle);
     setPassword(emp.password || "");
     setStatus(emp.status);
@@ -251,7 +271,7 @@ export default function UsersPermissionsView({
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim() || !phone.trim() || !password.trim()) {
+    if (!fullName.trim() || !phone.trim() || !password.trim() || !username.trim()) {
       onTriggerNotification(isRtl ? "⚠️ يرجى ملء جميع الحقول الإلزامية." : "⚠️ Please fill all required fields.");
       return;
     }
@@ -261,17 +281,21 @@ export default function UsersPermissionsView({
     const isNew = !editingEmployee;
     const employeeId = editingEmployee ? editingEmployee.id : `emp-${Date.now()}`;
     
-    // Check if phone or email already registered by another employee in the company
+    // Check if phone, email, or username already registered by another employee in the company
     const duplicate = employees.find(
       x => x.id !== employeeId && 
-      (x.phone.trim() === phone.trim() || (email && x.email && x.email.toLowerCase().trim() === email.toLowerCase().trim()))
+      (
+        x.phone.trim() === phone.trim() || 
+        (email && x.email && x.email.toLowerCase().trim() === email.toLowerCase().trim()) ||
+        (username && x.username && x.username.toLowerCase().trim() === username.toLowerCase().trim())
+      )
     );
 
     if (duplicate) {
       onTriggerNotification(
         isRtl 
-          ? "❌ رقم الهاتف أو البريد الإلكتروني مسجل بالفعل لموظف آخر."
-          : "❌ The phone number or email is already registered to another employee."
+          ? "❌ رقم الهاتف أو البريد الإلكتروني أو اسم المستخدم مسجل بالفعل لموظف آخر."
+          : "❌ The phone, email, or username is already registered to another employee."
       );
       setIsLoading(false);
       return;
@@ -283,6 +307,7 @@ export default function UsersPermissionsView({
       fullName: fullName.trim(),
       phone: phone.trim(),
       email: email.trim() || undefined,
+      username: username.trim(),
       jobTitle: jobTitle.trim() || "موظف",
       password: password.trim(),
       allowedPages: selectedPages,
@@ -362,8 +387,18 @@ export default function UsersPermissionsView({
         newValue: JSON.stringify(payload)
       });
 
-      setIsModalOpen(false);
-      loadEmployeesData();
+      if (isNew) {
+        setCreatedCredentials({
+          fullName: fullName.trim(),
+          email: email.trim() || undefined,
+          username: username.trim(),
+          password: password.trim(),
+          loginUrl: `${window.location.origin}/`
+        });
+      } else {
+        setIsModalOpen(false);
+        loadEmployeesData();
+      }
     } else {
       onTriggerNotification(isRtl ? "❌ فشل حفظ تفاصيل الحساب" : "❌ Failed to save account details");
     }
@@ -490,6 +525,11 @@ export default function UsersPermissionsView({
                         {hasEmail && (
                           <div className="text-slate-400 text-[10px] font-mono">
                             ✉️ {emp.email}
+                          </div>
+                        )}
+                        {emp.username && (
+                          <div className="text-emerald-400 font-mono text-[10px] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 inline-block my-1 font-bold">
+                            👤 {emp.username}
                           </div>
                         )}
                         
@@ -622,21 +662,113 @@ export default function UsersPermissionsView({
             {/* Elegant gradient accent */}
             <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-rose-500 to-indigo-600" />
             
-            <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-4">
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 hover:bg-[#1c1c1e] text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-              
-              <h3 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
-                <span>{editingEmployee ? (isRtl ? `تعديل صلاحيات: ${fullName}` : `Edit Account: ${fullName}`) : (isRtl ? "إنشاء حساب موظف جديد" : "Create New Employee Account")}</span>
-                <span>👤</span>
-              </h3>
-            </div>
+            {createdCredentials ? (
+              <div className="space-y-4 py-2" dir="rtl">
+                <div className="flex justify-center mb-4">
+                  <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center">
+                    <Check className="w-6 h-6" />
+                  </div>
+                </div>
+                
+                <h3 className="text-base font-black text-slate-100 text-center mb-1">
+                  {isRtl ? "🎉 تم إنشاء حساب الموظف بنجاح!" : "🎉 Account Created Successfully!"}
+                </h3>
+                <p className="text-slate-400 text-xs text-center mb-4 leading-relaxed">
+                  {isRtl 
+                    ? "تم إعداد الحساب وربطه بنجاح بالشركة سحابياً. انسخ بيانات الدخول وأرسلها للموظف."
+                    : "The account was created and securely synchronized to the cloud. Share these credentials with the employee."}
+                </p>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+                <div className="space-y-3 bg-slate-950/65 border border-[#27272a] p-4 rounded-xl text-xs selection:bg-emerald-900 text-right">
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "اسم الموظف" : "Employee Name"}
+                    </span>
+                    <span className="text-slate-200 font-bold block text-right">{createdCredentials.fullName}</span>
+                  </div>
+
+                  {createdCredentials.email && (
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                        {isRtl ? "البريد الإلكتروني" : "Email Address"}
+                      </span>
+                      <span className="text-slate-200 font-mono font-medium block text-right">{createdCredentials.email}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "اسم المستخدم (Username)" : "Username"}
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold block text-right">{createdCredentials.username}</span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "رقم المرور" : "Password"}
+                    </span>
+                    <span className="text-rose-400 font-mono font-bold block select-all bg-slate-900 border border-slate-800/60 p-1 px-2 rounded-md inline-block mr-auto" dir="ltr">
+                      {createdCredentials.password}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "رابط تسجيل الدخول" : "Login URL"}
+                    </span>
+                    <span className="text-blue-400 font-mono text-[10.5px] block select-all break-all bg-slate-900 border border-slate-800/60 p-1 px-2 rounded-md" dir="ltr">
+                      {createdCredentials.loginUrl}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    onClick={() => {
+                      const copyText = `
+اسم الموظف: ${createdCredentials.fullName}
+${createdCredentials.email ? `البريد الإلكتروني: ${createdCredentials.email}` : ""}
+اسم المستخدم: ${createdCredentials.username}
+كلمة المرور: ${createdCredentials.password}
+رابط الدخول: ${createdCredentials.loginUrl}
+                      `.trim();
+                      navigator.clipboard.writeText(copyText);
+                      onTriggerNotification(isRtl ? "📋 تم نسخ بيانات الاعتماد كلياً!" : "📋 All login credentials copied to clipboard!");
+                    }}
+                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <span>📋</span>
+                    <span>{isRtl ? "نسخ البيانات الفورية" : "Copy Credentials"}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCreatedCredentials(null);
+                      setIsModalOpen(false);
+                      loadEmployeesData();
+                    }}
+                    className="py-1.5 px-4 bg-[#1c1c1e] hover:bg-[#27272a] border border-[#27272a] text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    {isRtl ? "إغلاق" : "Close"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-4">
+                  <button 
+                    onClick={() => setIsModalOpen(false)}
+                    className="p-1 hover:bg-[#1c1c1e] text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  
+                  <h3 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
+                    <span>{editingEmployee ? (isRtl ? `تعديل صلاحيات: ${fullName}` : `Edit Account: ${fullName}`) : (isRtl ? "إنشاء حساب موظف جديد" : "Create New Employee Account")}</span>
+                    <span>👤</span>
+                  </h3>
+                </div>
+
+                <form onSubmit={handleFormSubmit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
               
               {/* Basic input fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
@@ -677,6 +809,19 @@ export default function UsersPermissionsView({
                     onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
                     placeholder="0540000000"
                     className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
+                </div>
+
+                {/* Username */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "اسم المستخدم للولوج (Username) *" : "Username (Login Key) *"}</label>
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""))}
+                    placeholder="mohamed.orders"
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-emerald-400 font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
                   />
                 </div>
 
@@ -974,6 +1119,8 @@ export default function UsersPermissionsView({
               </div>
 
             </form>
+          </>
+        )}
           </div>
         </div>
       )}

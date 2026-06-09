@@ -6,6 +6,7 @@ export interface Employee {
   fullName: string;
   phone: string;
   email?: string;
+  username?: string;
   jobTitle: string;
   password?: string;
   allowedPages: string[];
@@ -68,6 +69,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         fullName: item.full_name,
         phone: item.phone,
         email: item.email || undefined,
+        username: item.username || undefined,
         jobTitle: item.job_title || "",
         password: item.password,
         allowedPages: Array.isArray(item.allowed_pages) ? item.allowed_pages : JSON.parse(item.allowed_pages || "[]"),
@@ -115,6 +117,7 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       full_name: employee.fullName,
       phone: employee.phone,
       email: employee.email || null,
+      username: employee.username || null,
       job_title: employee.jobTitle,
       password: employee.password || "",
       assigned_responsibilities: employee.assignedResponsibilities || null,

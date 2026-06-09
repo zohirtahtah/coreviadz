@@ -97,7 +97,8 @@ export default function Auth({
       let matchingEmployee: any = cachedEmployees.find(
         emp => (
           (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
-           emp.phone?.trim() === emailInput.trim()) &&
+           emp.phone?.trim() === emailInput.trim() ||
+           emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
           emp.password === passwordInput
         )
       );
@@ -105,11 +106,11 @@ export default function Auth({
       // If we are online, query credentials from Supabase
       if (!matchingEmployee && supabase) {
         try {
-          // Look up user by both email and phone fields
+          // Look up user by email, phone, or username fields
           const { data: dbEmps } = await supabase
             .from("corevia_company_users")
             .select("*")
-            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()}`);
+            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
           
           if (dbEmps && dbEmps.length > 0) {
             const dbMatch = dbEmps.find(e => e.password === passwordInput);
@@ -120,6 +121,7 @@ export default function Auth({
                 fullName: dbMatch.full_name,
                 phone: dbMatch.phone,
                 email: dbMatch.email,
+                username: dbMatch.username,
                 jobTitle: dbMatch.job_title,
                 password: dbMatch.password,
                 allowedPages: Array.isArray(dbMatch.allowed_pages) 
