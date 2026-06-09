@@ -505,6 +505,66 @@ export default function App() {
     return alertsList;
   }, [basicInventory, subInventory, returnInventory, products, lang]);
 
+  // AUTOMATIC OWNERSHIP AUDIT TRAILING FOR REAL WORKSPACE COLLABORATION
+  const decorateWithAudit = <T extends { id: string, createdBy?: string, createdDate?: string, createdTime?: string, updatedBy?: string, updatedDate?: string, updatedTime?: string }>(
+    newItems: T[],
+    oldItems: T[]
+  ): T[] => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const dateStr = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+
+    const currentDate = `${year}-${month}-${dateStr}`;
+    const currentTime = `${hours}:${minutes}:${seconds}`;
+    const currentUser = session 
+      ? `${session.username} (${session.jobTitle || (session.role === "admin" ? "Owner" : "Employee")})`
+      : (lang === "ar" ? "مالك الشركة (المالك)" : "Company Owner (Owner)");
+
+    return newItems.map(item => {
+      const oldItem = oldItems.find(o => o.id === item.id);
+      if (!oldItem) {
+        // Is newly created
+        return {
+          ...item,
+          createdBy: item.createdBy || currentUser,
+          createdDate: item.createdDate || currentDate,
+          createdTime: item.createdTime || currentTime,
+          updatedBy: currentUser,
+          updatedDate: currentDate,
+          updatedTime: currentTime
+        };
+      } else {
+        // Is existing. Check if fields were actually modified
+        const copyOld = { ...oldItem, updatedBy: undefined, updatedDate: undefined, updatedTime: undefined };
+        const copyNew = { ...item, updatedBy: undefined, updatedDate: undefined, updatedTime: undefined };
+        const hasChanged = JSON.stringify(copyOld) !== JSON.stringify(copyNew);
+        if (hasChanged) {
+          return {
+            ...item,
+            createdBy: oldItem.createdBy || item.createdBy || currentUser,
+            createdDate: oldItem.createdDate || item.createdDate || currentDate,
+            createdTime: oldItem.createdTime || item.createdTime || currentTime,
+            updatedBy: currentUser,
+            updatedDate: currentDate,
+            updatedTime: currentTime
+          };
+        } else {
+          return {
+            ...oldItem,
+            ...item,
+            createdBy: oldItem.createdBy || item.createdBy || currentUser,
+            createdDate: oldItem.createdDate || item.createdDate || currentDate,
+            createdTime: oldItem.createdTime || item.createdTime || currentTime
+          };
+        }
+      }
+    });
+  };
+
   // MUTATIONS SAVE CALLS IN UPPER APP ORCHESTRATOR
   const saveOrdersAndPersist = (newOrders: Order[]) => {
     if (isReadOnly) {
@@ -512,11 +572,13 @@ export default function App() {
       return;
     }
 
+    const oldOrders = getOrders();
+    const audited = decorateWithAudit(newOrders, oldOrders);
+
     // Log Activity for Orders modification
     try {
-      const oldOrders = getOrders();
-      if (newOrders.length > oldOrders.length) {
-        const added = newOrders.find(n => !oldOrders.some(o => o.id === n.id));
+      if (audited.length > oldOrders.length) {
+        const added = audited.find(n => !oldOrders.some(o => o.id === n.id));
         if (session) {
           logActivity({
             companyId: session.company_id,
@@ -528,8 +590,8 @@ export default function App() {
             affectedRecord: `Order ID: ${added?.id || "Bulk"}`
           });
         }
-      } else if (newOrders.length === oldOrders.length) {
-        const changed = newOrders.find(n => {
+      } else if (audited.length === oldOrders.length) {
+        const changed = audited.find(n => {
           const old = oldOrders.find(o => o.id === n.id);
           return old && JSON.stringify(old) !== JSON.stringify(n);
         });
@@ -551,8 +613,8 @@ export default function App() {
       console.warn("Activity log order modification error:", err);
     }
 
-    setOrders(newOrders);
-    saveOrders(newOrders);
+    setOrders(audited);
+    saveOrders(audited);
 
     // Sync physical inventory immediately after order edits
     setBasicInventory(getBasicInventory());
@@ -561,7 +623,7 @@ export default function App() {
 
     // Auto synchronise order edits directly to the Supabase cloud partition
     if (session && session.company_id) {
-      pushSingleDatasetToCloud(session.company_id, "orders", newOrders);
+      pushSingleDatasetToCloud(session.company_id, "orders", audited);
     }
 
     // Instant Google Sheets Bidirectional Outbound Push
@@ -569,15 +631,15 @@ export default function App() {
       const syncSett = getSyncSettings();
       if (!syncSett.isPaused) {
         if (syncSett.isSimulation) {
-          const colSchema = getDynamicOrderColumns(newOrders);
+          const colSchema = getDynamicOrderColumns(audited);
           const blockRows = [colSchema];
-          newOrders.forEach(ord => {
+          audited.forEach(ord => {
             blockRows.push(serializeOrderToRow(ord, colSchema));
           });
           saveSimulationSheetData(blockRows);
           logSyncAudit("Pushed order updates immediately to simulated Sheet.", "success", "Corevia App");
         } else if (syncSett.accessToken && syncSett.sheetId) {
-          pushRealOrdersToGoogleSheet(syncSett.accessToken, syncSett.sheetId, newOrders)
+          pushRealOrdersToGoogleSheet(syncSett.accessToken, syncSett.sheetId, audited)
             .then(() => {
               logSyncAudit("Pushed order mutations successfully to Google Sheets.", "success", "Corevia App");
             })
@@ -597,11 +659,13 @@ export default function App() {
       return;
     }
 
+    const oldProducts = getProducts();
+    const audited = decorateWithAudit(newProducts, oldProducts);
+
     // Log Activity for products modifications
     try {
-      const oldProducts = getProducts();
-      if (newProducts.length > oldProducts.length) {
-        const added = newProducts.find(n => !oldProducts.some(p => p.id === n.id));
+      if (audited.length > oldProducts.length) {
+        const added = audited.find(n => !oldProducts.some(p => p.id === n.id));
         if (session) {
           logActivity({
             companyId: session.company_id,
@@ -613,8 +677,8 @@ export default function App() {
             affectedRecord: `Product Name: ${added?.name || "Bulk"}`
           });
         }
-      } else if (newProducts.length === oldProducts.length) {
-        const changed = newProducts.find(n => {
+      } else if (audited.length === oldProducts.length) {
+        const changed = audited.find(n => {
           const old = oldProducts.find(p => p.id === n.id);
           return old && JSON.stringify(old) !== JSON.stringify(n);
         });
@@ -636,13 +700,13 @@ export default function App() {
       console.warn("Product activity logging warning:", err);
     }
 
-    setProducts(newProducts);
-    saveProducts(newProducts);
+    setProducts(audited);
+    saveProducts(audited);
     // Automatic stockpiles feedback
     setBasicInventory(getBasicInventory());
 
     if (session && session.company_id) {
-      pushSingleDatasetToCloud(session.company_id, "products", newProducts);
+      pushSingleDatasetToCloud(session.company_id, "products", audited);
     }
   };
 
@@ -651,11 +715,14 @@ export default function App() {
       triggerToast(lang === "ar" ? "عذراً، هذا الحساب في وضع القراءة فقط." : "Sorry, this account is in Read-Only mode.", "info");
       return;
     }
-    setSuppliers(newSuppliers);
-    saveSuppliers(newSuppliers);
+    const oldSuppliers = getSuppliers();
+    const audited = decorateWithAudit(newSuppliers, oldSuppliers);
+
+    setSuppliers(audited);
+    saveSuppliers(audited);
 
     if (session && session.company_id) {
-      pushSingleDatasetToCloud(session.company_id, "suppliers", newSuppliers);
+      pushSingleDatasetToCloud(session.company_id, "suppliers", audited);
     }
   };
 
@@ -665,11 +732,13 @@ export default function App() {
       return;
     }
 
+    const oldInvoices = getSupplierInvoices();
+    const audited = decorateWithAudit(newInvoices, oldInvoices);
+
     // Log Activity for Invoice uploads/mutations
     try {
-      const oldInvoices = getSupplierInvoices();
-      if (newInvoices.length > oldInvoices.length) {
-        const added = newInvoices.find(n => !oldInvoices.some(i => i.id === n.id));
+      if (audited.length > oldInvoices.length) {
+        const added = audited.find(n => !oldInvoices.some(i => i.id === n.id));
         if (session) {
           logActivity({
             companyId: session.company_id,
@@ -681,8 +750,8 @@ export default function App() {
             affectedRecord: `Invoice Ref: ${added?.id || "Bulk"}`
           });
         }
-      } else if (newInvoices.length === oldInvoices.length) {
-        const changed = newInvoices.find(n => {
+      } else if (audited.length === oldInvoices.length) {
+        const changed = audited.find(n => {
           const old = oldInvoices.find(i => i.id === n.id);
           return old && JSON.stringify(old) !== JSON.stringify(n);
         });
@@ -704,8 +773,8 @@ export default function App() {
       console.warn("Invoice activity logging warning:", err);
     }
 
-    setInvoices(newInvoices);
-    saveSupplierInvoices(newInvoices);
+    setInvoices(audited);
+    saveSupplierInvoices(audited);
     
     // Sync stocks
     setBasicInventory(getBasicInventory());
@@ -731,11 +800,14 @@ export default function App() {
       return;
     }
 
-    setWorkers(newWorkers);
-    saveWorkers(newWorkers);
+    const oldWorkers = getWorkers();
+    const audited = decorateWithAudit(newWorkers, oldWorkers);
+
+    setWorkers(audited);
+    saveWorkers(audited);
 
     if (session && session.company_id) {
-      pushSingleDatasetToCloud(session.company_id, "workers", newWorkers);
+      pushSingleDatasetToCloud(session.company_id, "workers", audited);
     }
   };
 
@@ -745,11 +817,13 @@ export default function App() {
       return;
     }
 
+    const oldExpenses = expenses;
+    const audited = decorateWithAudit(newExpenses, oldExpenses);
+
     // Log Activity for Expense creation/modification
     try {
-      const oldExpenses = expenses;
-      if (newExpenses.length > oldExpenses.length) {
-        const added = newExpenses.find(n => !oldExpenses.some(x => x.id === n.id));
+      if (audited.length > oldExpenses.length) {
+        const added = audited.find(n => !oldExpenses.some(x => x.id === n.id));
         if (session) {
           logActivity({
             companyId: session.company_id,
@@ -761,8 +835,8 @@ export default function App() {
             affectedRecord: `Expense: ${added?.title || added?.type || "Unknown"}`
           });
         }
-      } else if (newExpenses.length === oldExpenses.length) {
-        const changed = newExpenses.find(n => {
+      } else if (audited.length === oldExpenses.length) {
+        const changed = audited.find(n => {
           const old = oldExpenses.find(x => x.id === n.id);
           return old && JSON.stringify(old) !== JSON.stringify(n);
         });
@@ -784,11 +858,11 @@ export default function App() {
       console.warn("Expense activity logging warning:", err);
     }
 
-    setExpenses(newExpenses);
-    localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(newExpenses));
+    setExpenses(audited);
+    localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(audited));
 
     if (session && session.company_id) {
-      pushSingleDatasetToCloud(session.company_id, "expenses", newExpenses);
+      pushSingleDatasetToCloud(session.company_id, "expenses", audited);
     }
   };
 

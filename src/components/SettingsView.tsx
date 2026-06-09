@@ -605,7 +605,13 @@ create table if not exists corevia_products (
   colors jsonb default '[]'::jsonb,
   sizes text[] default '{}'::text[],
   created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 3. Create table for Orders
@@ -635,7 +641,13 @@ create table if not exists corevia_orders (
   return_date text,
   notes text,
   deleted_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 4. Create table for Suppliers
@@ -647,7 +659,13 @@ create table if not exists corevia_suppliers (
   address text,
   email text,
   created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 5. Create table for Fixed and Variable Expenses
@@ -666,7 +684,13 @@ create table if not exists corevia_expenses (
   start_date text,
   end_date text,
   notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
+  created_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 6. Create table for Workers and Salaries
@@ -682,7 +706,13 @@ create table if not exists corevia_workers (
   role text,
   monthly_salary numeric,
   payrolls jsonb default '[]'::jsonb,
-  created_at text
+  created_at text,
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 create table if not exists corevia_salary_sheets (
@@ -700,8 +730,57 @@ create table if not exists corevia_salary_sheets (
   expenses jsonb default '[]'::jsonb,
   pay_status text, -- 'paid', 'unpaid'
   calculated_salary jsonb,
-  updated_at text
-);`;
+  updated_at text,
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
+);
+
+-- --- DOWNSTREAM UPDATES / AUTO UPGRADE MIGRATIONS FOR EXISTING COREVIA DATABASES ---
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;`;
 
     navigator.clipboard.writeText(rawSql);
     setCopiedSql(true);
@@ -1452,7 +1531,13 @@ create table if not exists corevia_products (
   colors jsonb default '[]'::jsonb,
   sizes text[] default '{}'::text[],
   created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 3. Create table for Orders
@@ -1482,7 +1567,13 @@ create table if not exists corevia_orders (
   return_date text,
   notes text,
   deleted_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 4. Create table for Suppliers
@@ -1494,7 +1585,13 @@ create table if not exists corevia_suppliers (
   address text,
   email text,
   created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+  updated_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 5. Create table for Fixed and Variable Expenses
@@ -1513,7 +1610,13 @@ create table if not exists corevia_expenses (
   start_date text,
   end_date text,
   notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
+  created_at timestamp with time zone default timezone('utc'::text, now()),
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 -- 6. Create table for Workers and Salaries
@@ -1529,7 +1632,13 @@ create table if not exists corevia_workers (
   role text,
   monthly_salary numeric,
   payrolls jsonb default '[]'::jsonb,
-  created_at text
+  created_at text,
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
 );
 
 create table if not exists corevia_salary_sheets (
@@ -1547,8 +1656,57 @@ create table if not exists corevia_salary_sheets (
   expenses jsonb default '[]'::jsonb,
   pay_status text, -- 'paid', 'unpaid'
   calculated_salary jsonb,
-  updated_at text
-);`}
+  updated_at text,
+  created_by text,
+  updated_by text,
+  created_date text,
+  created_time text,
+  updated_date text,
+  updated_time text
+);
+
+-- --- DOWNSTREAM UPDATES / AUTO UPGRADE MIGRATIONS FOR EXISTING COREVIA DATABASES ---
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_time text;
+
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;`}
                   </pre>
                 </div>
               </div>

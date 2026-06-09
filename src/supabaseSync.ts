@@ -233,7 +233,13 @@ export async function pushSingleDatasetToCloud(
         retail_price: p.retailPrice,
         colors: p.colors || [],
         sizes: p.sizes || [],
-        created_at: p.createdAt
+        created_at: p.createdAt,
+        created_by: p.createdBy || null,
+        updated_by: p.updatedBy || null,
+        created_date: p.createdDate || null,
+        created_time: p.createdTime || null,
+        updated_date: p.updatedDate || null,
+        updated_time: p.updatedTime || null
       }));
     } else if (type === "orders") {
       formattedItems = (rawItems as Order[]).map(o => ({
@@ -261,7 +267,13 @@ export async function pushSingleDatasetToCloud(
         return_cost: o.returnCost || null,
         return_date: o.returnDate || null,
         notes: o.notes || null,
-        deleted_at: o.deletedAt || null
+        deleted_at: o.deletedAt || null,
+        created_by: o.createdBy || null,
+        updated_by: o.updatedBy || null,
+        created_date: o.createdDate || null,
+        created_time: o.createdTime || null,
+        updated_date: o.updatedDate || null,
+        updated_time: o.updatedTime || null
       }));
     } else if (type === "suppliers") {
       formattedItems = (rawItems as Supplier[]).map(s => ({
@@ -271,10 +283,15 @@ export async function pushSingleDatasetToCloud(
         phone: s.phone,
         address: s.address,
         email: s.email,
-        created_at: s.createdAt
+        created_at: s.createdAt,
+        created_by: s.createdBy || null,
+        updated_by: s.updatedBy || null,
+        created_date: s.createdDate || null,
+        created_time: s.createdTime || null,
+        updated_date: s.updatedDate || null,
+        updated_time: s.updatedTime || null
       }));
     } else if (type === "expenses") {
-      // Separated into fixed, variable, and ads locally but saved in one unified table
       formattedItems = (rawItems as Expense[]).map(e => {
         const isFixed = e.type === "fixed";
         const isAd = e.type === "ads";
@@ -293,7 +310,13 @@ export async function pushSingleDatasetToCloud(
           amount_currency: asAd.amountCurrency || null,
           start_date: asAd.startDate || null,
           end_date: asAd.endDate || null,
-          notes: (e as any).notes || null
+          notes: (e as any).notes || null,
+          created_by: e.createdBy || null,
+          updated_by: e.updatedBy || null,
+          created_date: e.createdDate || null,
+          created_time: e.createdTime || null,
+          updated_date: e.updatedDate || null,
+          updated_time: e.updatedTime || null
         };
       });
     } else if (type === "workers") {
@@ -309,7 +332,13 @@ export async function pushSingleDatasetToCloud(
         role: w.role,
         monthly_salary: w.monthlySalary,
         payrolls: w.payrolls || [],
-        created_at: w.createdAt
+        created_at: w.createdAt,
+        created_by: w.createdBy || null,
+        updated_by: w.updatedBy || null,
+        created_date: w.createdDate || null,
+        created_time: w.createdTime || null,
+        updated_date: w.updatedDate || null,
+        updated_time: w.updatedTime || null
       }));
     } else if (type === "salary_sheets") {
       formattedItems = (rawItems as WorkerSalarySheet[]).map(sh => ({
@@ -327,7 +356,13 @@ export async function pushSingleDatasetToCloud(
         expenses: sh.expenses || [],
         pay_status: sh.payStatus,
         calculated_salary: sh.calculatedSalary,
-        updated_at: sh.updatedAt
+        updated_at: sh.updatedAt,
+        created_by: sh.createdBy || null,
+        updated_by: sh.updatedBy || null,
+        created_date: sh.createdDate || null,
+        created_time: sh.createdTime || null,
+        updated_date: sh.updatedDate || null,
+        updated_time: sh.updatedTime || null
       }));
     }
 
@@ -397,7 +432,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         retailPrice: safeNum(p.retail_price),
         colors: p.colors || [],
         sizes: p.sizes || [],
-        createdAt: p.created_at || new Date().toISOString()
+        createdAt: p.created_at || new Date().toISOString(),
+        createdBy: p.created_by || undefined,
+        updatedBy: p.updated_by || undefined,
+        createdDate: p.created_date || undefined,
+        createdTime: p.created_time || undefined,
+        updatedDate: p.updated_date || undefined,
+        updatedTime: p.updated_time || undefined
       }));
       saveProducts(formatted);
     }
@@ -433,7 +474,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         returnCost: o.return_cost ? safeNum(o.return_cost) : undefined,
         returnDate: o.return_date || undefined,
         notes: o.notes || undefined,
-        deletedAt: o.deleted_at || undefined
+        deletedAt: o.deleted_at || undefined,
+        createdBy: o.created_by || undefined,
+        updatedBy: o.updated_by || undefined,
+        createdDate: o.created_date || undefined,
+        createdTime: o.created_time || undefined,
+        updatedDate: o.updated_date || undefined,
+        updatedTime: o.updated_time || undefined
       }));
       saveOrders(formatted);
     }
@@ -451,7 +498,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         phone: s.phone || "",
         address: s.address || "",
         email: s.email || "",
-        createdAt: s.created_at || new Date().toISOString()
+        createdAt: s.created_at || new Date().toISOString(),
+        createdBy: s.created_by || undefined,
+        updatedBy: s.updated_by || undefined,
+        createdDate: s.created_date || undefined,
+        createdTime: s.created_time || undefined,
+        updatedDate: s.updated_date || undefined,
+        updatedTime: s.updated_time || undefined
       }));
       saveSuppliers(formatted);
     }
@@ -471,7 +524,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
             type: "fixed",
             amount: safeNum(e.amount),
             date: e.date || new Date().toISOString().split("T")[0],
-            createdAt: e.created_at || new Date().toISOString()
+            createdAt: e.created_at || new Date().toISOString(),
+            createdBy: e.created_by || undefined,
+            updatedBy: e.updated_by || undefined,
+            createdDate: e.created_date || undefined,
+            createdTime: e.created_time || undefined,
+            updatedDate: e.updated_date || undefined,
+            updatedTime: e.updated_time || undefined
           };
         } else if (e.type === "variable") {
           return {
@@ -481,7 +540,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
             amount: safeNum(e.amount),
             date: e.date || new Date().toISOString().split("T")[0],
             monthYear: e.month_year || new Date().toISOString().substring(0, 7),
-            createdAt: e.created_at || new Date().toISOString()
+            createdAt: e.created_at || new Date().toISOString(),
+            createdBy: e.created_by || undefined,
+            updatedBy: e.updated_by || undefined,
+            createdDate: e.created_date || undefined,
+            createdTime: e.created_time || undefined,
+            updatedDate: e.updated_date || undefined,
+            updatedTime: e.updated_time || undefined
           };
         } else {
           return {
@@ -498,7 +563,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
             monthYear: e.month_year || new Date().toISOString().substring(0, 7),
             startDate: e.start_date,
             endDate: e.end_date,
-            createdAt: e.created_at || new Date().toISOString()
+            createdAt: e.created_at || new Date().toISOString(),
+            createdBy: e.created_by || undefined,
+            updatedBy: e.updated_by || undefined,
+            createdDate: e.created_date || undefined,
+            createdTime: e.created_time || undefined,
+            updatedDate: e.updated_date || undefined,
+            updatedTime: e.updated_time || undefined
           } as any;
         }
       });
@@ -523,7 +594,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         role: w.role || "Employee",
         monthlySalary: safeNum(w.monthly_salary),
         payrolls: w.payrolls || [],
-        createdAt: w.created_at || new Date().toISOString()
+        createdAt: w.created_at || new Date().toISOString(),
+        createdBy: w.created_by || undefined,
+        updatedBy: w.updated_by || undefined,
+        createdDate: w.created_date || undefined,
+        createdTime: w.created_time || undefined,
+        updatedDate: w.updated_date || undefined,
+        updatedTime: w.updated_time || undefined
       }));
       saveWorkers(formatted);
     }
@@ -557,7 +634,13 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           expensesDeduction: 0,
           netSalary: 0
         },
-        updatedAt: sh.updated_at || new Date().toISOString()
+        updatedAt: sh.updated_at || new Date().toISOString(),
+        createdBy: sh.created_by || undefined,
+        updatedBy: sh.updated_by || undefined,
+        createdDate: sh.created_date || undefined,
+        createdTime: sh.created_time || undefined,
+        updatedDate: sh.updated_date || undefined,
+        updatedTime: sh.updated_time || undefined
       }));
       saveSalarySheets(formatted);
     }

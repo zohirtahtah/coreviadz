@@ -1210,9 +1210,30 @@ export default function OrdersView({
                       <td className="p-3.5">
                         <div className="font-extrabold text-white">{ord.customerName}</div>
                         <div className="text-[10px] text-zinc-400 mt-0.5">{ord.phone}</div>
-                        <div className="inline-flex items-center gap-1 mt-1 bg-zinc-800 px-1.5 py-0.5 rounded text-[9px] font-mono text-zinc-300">
-                          {ord.id}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          <span className="inline-flex items-center bg-zinc-800 px-1.5 py-0.5 rounded text-[9px] font-mono text-zinc-300">
+                            {ord.id}
+                          </span>
+                          {ord.createdBy && (
+                            <span className="inline-flex items-center bg-zinc-805/40 text-zinc-450 border border-zinc-800 px-1.5 py-0.5 rounded text-[8.5px] font-mono" title={`${lang === "ar" ? "المنشئ" : "Creator"}: ${ord.createdBy}`}>
+                              👤 {ord.createdBy.split(" (")[0]}
+                            </span>
+                          )}
                         </div>
+                        {ord.createdBy && (
+                          <div className="text-[8.5px] text-zinc-500 mt-1 leading-normal space-y-0.5" dir="rtl">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px]">✍️</span>
+                              <span>{lang === "ar" ? "أُنشئ:" : "Created:"} {ord.createdDate} {ord.createdTime} ({ord.createdBy.split(" (")[1]?.replace(")", "") || "Owner"})</span>
+                            </div>
+                            {ord.updatedBy && (ord.updatedBy !== ord.createdBy || ord.updatedDate !== ord.createdDate) && (
+                              <div className="flex items-center gap-1 text-indigo-450/80 border-t border-zinc-900/65 pt-0.5 mt-0.5">
+                                <span className="text-[10px]">🔄</span>
+                                <span>{lang === "ar" ? "عُدّل:" : "Updated:"} {ord.updatedDate} {ord.updatedTime} ({ord.updatedBy.split(" (")[0]})</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* Date */}

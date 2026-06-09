@@ -82,6 +82,12 @@ export interface Order {
   returnDate?: string;
   notes?: string;
   deletedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface ProductColorQuantity {
@@ -101,6 +107,12 @@ export interface Product {
   colors: ProductColorQuantity[];
   sizes: string[]; // e.g., ["S", "M", "L", "XL"]
   createdAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface BasicInventoryItem {
@@ -133,6 +145,12 @@ export interface Supplier {
   address: string;
   email: string;
   createdAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface SupplierPurchaseItem {
@@ -165,6 +183,12 @@ export interface SupplierInvoice {
   payments: InvoicePayment[];
   createdAt: string;
   updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface WorkerExpense {
@@ -207,6 +231,12 @@ export interface Worker {
   workingDaysPerMonth?: number;
   absenceDeductionRate?: number;
   notes?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface WorkerSalarySheet {
@@ -232,6 +262,12 @@ export interface WorkerSalarySheet {
     netSalary: number;
   };
   updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface Expense {
@@ -245,6 +281,12 @@ export interface Expense {
   exchangeRate?: number;
   notes?: string;
   createdAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdDate?: string;
+  createdTime?: string;
+  updatedDate?: string;
+  updatedTime?: string;
 }
 
 export interface FixedExpense {
