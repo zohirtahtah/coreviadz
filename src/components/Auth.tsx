@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Lock, Unlock, Mail, User, Eye, EyeOff, Globe, Sun, Moon, Check, 
   AlertCircle, ShieldAlert, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, KeyRound
@@ -40,6 +40,8 @@ export default function Auth({
   // Form input states
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  const autoLoginRef = useRef(false);
   const [nameInput, setNameInput] = useState("");
   
   // UI states
@@ -97,6 +99,7 @@ export default function Auth({
           
           setEmailInput(user);
           setPasswordInput(pass);
+          autoLoginRef.current = true;
           
           // Clear parameters from address bar to keep it elegant and clean
           try {
@@ -105,8 +108,8 @@ export default function Auth({
           
           onTriggerNotification(
             isRtl 
-              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء" 
-              : "📋 Employee credentials prefilled, click Login to proceed", 
+              ? "📋 تم تهيئة بيانات الموظف بنجاح، جاري تسجيل الدخول التلقائي..." 
+              : "📋 Employee credentials prefilled, auto-logging in...", 
             "success"
           );
         }
@@ -124,6 +127,19 @@ export default function Auth({
       console.warn("Error prefilling auth credentials:", e);
     }
   }, []);
+
+  // Auto-login when credentials are prefilled from URL params
+  useEffect(() => {
+    if (autoLoginRef.current && emailInput && passwordInput && !isSubmitting) {
+      autoLoginRef.current = false;
+      const timer = setTimeout(() => {
+        if (formRef.current) {
+          formRef.current.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [emailInput, passwordInput, isSubmitting]);
 
   // Toggle Theme
   const handleToggleTheme = () => {
@@ -623,7 +639,7 @@ export default function Auth({
 
           {/* LOGIN VIEW TEMPLATE */}
           {authMode === "login" && (
-            <form onSubmit={handleSubmit} className="space-y-4" id="login_form">
+            <form ref={formRef} onSubmit={handleSubmit} className="space-y-4" id="login_form">
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-300">
                   {isRtl ? "البريد الإلكتروني أو الهاتف أو اسم المستخدم" : "Email, Phone, or Username"}
