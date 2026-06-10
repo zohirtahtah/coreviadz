@@ -389,16 +389,139 @@ export default function App() {
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
   // automatically redirect them to the first allowed page in their list.
+  // This also prevents URL-based access bypass.
   useEffect(() => {
-    if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
-      if (!session.allowedPages.includes(activeTab)) {
-        const firstAllowed = session.allowedPages[0];
+    if (session?.role === "employee") {
+      if (!session.allowedPages || session.allowedPages.length === 0) {
+        // No pages allowed at all - send to my-profile as minimum
+        setActiveTab("my-profile");
+        return;
+      }
+      // Always allow my-profile and communication for employees
+      const alwaysAllowed = ["my-profile", "communication"];
+      const effectiveAllowed = [...new Set([...session.allowedPages, ...alwaysAllowed])];
+      
+      if (!effectiveAllowed.includes(activeTab)) {
+        const firstAllowed = effectiveAllowed[0];
         if (firstAllowed) {
           setActiveTab(firstAllowed);
         }
       }
+      
+      // Log access attempt to restricted page
+      if (activeTab !== "dashboard" && activeTab !== "my-profile" && !session.allowedPages.includes(activeTab)) {
+        console.warn(`[ACCESS GUARD] Employee tried to access restricted page: ${activeTab}`);
+      }
     }
   }, [session, activeTab]);
+
+  // Real-time Subscriptions for Multi-User Collaboration
+  useEffect(() => {
+    if (!supabase || !session?.company_id) return;
+
+    let channels: any[] = [];
+
+    const setupRealtime = () => {
+      // Subscribe to orders changes
+      const ordersChannel = supabase
+        .channel(`orders-${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "corevia_orders",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          async () => {
+            console.log("[REALTIME] Orders updated, refreshing...");
+            const updatedOrders = getOrders();
+            setOrders([...updatedOrders]);
+          }
+        )
+        .subscribe();
+
+      // Subscribe to products changes
+      const productsChannel = supabase
+        .channel(`products-${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "corevia_products",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          async () => {
+            console.log("[REALTIME] Products updated, refreshing...");
+            setProducts([...getProducts()]);
+          }
+        )
+        .subscribe();
+
+      // Subscribe to workers changes
+      const workersChannel = supabase
+        .channel(`workers-${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "corevia_workers",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          async () => {
+            console.log("[REALTIME] Workers updated, refreshing...");
+            setWorkers([...getWorkers()]);
+          }
+        )
+        .subscribe();
+
+      // Subscribe to company users changes (employees)
+      const employeesChannel = supabase
+        .channel(`employees-${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "corevia_company_users",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          async () => {
+            console.log("[REALTIME] Employees updated, refreshing...");
+          }
+        )
+        .subscribe();
+
+      // Subscribe to employee submissions changes
+      const submissionsChannel = supabase
+        .channel(`submissions-${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "corevia_employee_submissions",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          async () => {
+            console.log("[REALTIME] Employee submissions updated, refreshing...");
+          }
+        )
+        .subscribe();
+
+      channels = [ordersChannel, productsChannel, workersChannel, employeesChannel, submissionsChannel];
+    };
+
+    setupRealtime();
+
+    return () => {
+      channels.forEach(ch => {
+        supabase.removeChannel(ch);
+      });
+    };
+  }, [session?.company_id, supabase]);
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {
@@ -1689,6 +1812,13 @@ export default function App() {
           <MyProfileView
             session={session}
             lang={lang}
+            onTriggerNotification={triggerToast}
+            companyInfo={{
+              name: activeProfile.businessName,
+              phone: activeProfile.phone,
+              email: activeProfile.email,
+              address: activeProfile.address
+            }}
           />
         )}
 

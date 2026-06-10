@@ -3,9 +3,10 @@ import {
   Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X, 
   HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck
 } from "lucide-react";
-import { LanguageType } from "../types";
+import { LanguageType, Worker } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee, createEmployeeAuthAccount, deleteEmployeeAuthAccount } from "../employeeService";
+import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -29,6 +30,8 @@ export default function UsersPermissionsView({
   // State Management
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [submissions, setSubmissions] = useState<EmployeeSubmission[]>([]);
+  const [showSubmissions, setShowSubmissions] = useState(false);
   
   // Modal / Form States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -62,6 +65,11 @@ export default function UsersPermissionsView({
     loginUrl: string;
   } | null>(null);
 
+  // Worker selection for quick fill
+  const [workerList, setWorkerList] = useState<Worker[]>([]);
+  const [showWorkerDropdown, setShowWorkerDropdown] = useState(false);
+  const [workerFilter, setWorkerFilter] = useState("");
+
   useEffect(() => {
     if (!editingEmployee && fullName) {
       const slug = fullName.toLowerCase().trim()
@@ -70,6 +78,20 @@ export default function UsersPermissionsView({
       setUsername(slug);
     }
   }, [fullName, editingEmployee]);
+
+  // Load workers for quick fill
+  useEffect(() => {
+    if (isModalOpen && !editingEmployee) {
+      const allWorkers = getWorkers();
+      setWorkerList(allWorkers.filter(w => {
+        // exclude workers already linked to an employee
+        const isLinked = employees.some(e => 
+          e.fullName === w.name || e.phone === w.phone
+        );
+        return !isLinked;
+      }));
+    }
+  }, [isModalOpen, editingEmployee, employees]);
 
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -126,9 +148,49 @@ export default function UsersPermissionsView({
     }
   };
 
+  // Load employee submissions for review
+  const loadSubmissions = async () => {
+    if (!showSubmissions) return;
+    try {
+      const data = await getSubmissions(companyId);
+      data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setSubmissions(data);
+    } catch (e) {
+      console.error("Error loading submissions", e);
+    }
+  };
+
+  const handleReviewSubmission = async (sub: EmployeeSubmission, newStatus: "approved" | "rejected") => {
+    const updated: EmployeeSubmission = { ...sub, status: newStatus };
+    const success = await saveSubmission(updated);
+    if (success) {
+      onTriggerNotification(
+        isRtl
+          ? `✅ تم ${newStatus === "approved" ? "الموافقة على" : "رفض"} طلب ${sub.employeeName}`
+          : `✅ Submission ${newStatus === "approved" ? "approved" : "rejected"} for ${sub.employeeName}`
+      );
+      loadSubmissions();
+      logActivity({
+        companyId,
+        userName: session?.username || "Owner",
+        userId: session?.user_id || "owner_id",
+        jobTitle: "Company Owner",
+        actionType: newStatus === "approved" ? "Approve Report" : "Reject Report",
+        pageName: "Users & Permissions",
+        affectedRecord: `${sub.type} report from ${sub.employeeName}: ${sub.description}`
+      }).catch(() => {});
+    }
+  };
+
   useEffect(() => {
     loadEmployeesData();
   }, [companyId]);
+
+  useEffect(() => {
+    if (showSubmissions) {
+      loadSubmissions();
+    }
+  }, [showSubmissions, companyId]);
 
   // Total seats counted: 1 Owner + number of created employee accounts
   const totalSeatsCountUsed = 1 + employees.length;
@@ -214,17 +276,26 @@ export default function UsersPermissionsView({
 
   const handleDeleteEmployeeItem = async (emp: Employee) => {
     const confirmMsg = isRtl
-      ? `هل أنت متأكد تماماً من حذف حساب الموظف "${emp.fullName}" بشكل نهائي؟`
-      : `Are you completely sure you want to permanently delete the account of employee "${emp.fullName}"?`;
+      ? `هل أنت متأكد تماماً من حذف حساب الموظف "${emp.fullName}" بشكل نهائي؟\n\nسيتم إلغاء صلاحية الدخول ولكن ستبقى السجلات التاريخية (الطلبيات، النشاطات) محفوظة.`
+      : `Are you completely sure you want to permanently delete the account of employee "${emp.fullName}"?\n\nLogin access will be removed but historical records (orders, activities) will be preserved.`;
     
     if (window.confirm(confirmMsg)) {
       setIsLoading(true);
+
+      // Delete Supabase Auth account if exists
+      if (emp.authUserId) {
+        await deleteEmployeeAuthAccount(emp.authUserId);
+      } else if (emp.email) {
+        // Try to delete by email if we have it
+        await deleteEmployeeAuthAccount(emp.email);
+      }
+
       const success = await deleteEmployee(emp.id, companyId);
       if (success) {
         onTriggerNotification(
           isRtl 
-            ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح`
-            : `✅ Successfully deleted employee (${emp.fullName})`
+            ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح. السجلات التاريخية محفوظة.`
+            : `✅ Successfully deleted employee (${emp.fullName}). Historical records preserved.`
         );
 
         // Keep order history intact but update creator label
@@ -312,10 +383,40 @@ export default function UsersPermissionsView({
       password: password.trim(),
       allowedPages: selectedPages,
       assignedResponsibilities: assignedResponsibilities.trim() || undefined,
+      baseSalary: baseSalary,
+      monthlySalary: monthlySalary,
+      dailyHours: workingHoursPerDay,
+      workingDaysPerMonth: workingDaysPerMonth,
+      overtimeRate: overtimeHourRate,
+      absenceDeductionRate: absenceDeductionRate,
+      notes: notes.trim() || undefined,
       status,
       lastActivity: editingEmployee?.lastActivity,
       createdAt: editingEmployee?.createdAt || new Date().toISOString()
     };
+
+    // If creating a new employee with an email, try to create a Supabase Auth account
+    if (isNew && email.trim()) {
+      try {
+        const authResult = await createEmployeeAuthAccount(
+          email.trim(),
+          password.trim(),
+          fullName.trim()
+        );
+        if (authResult.userId) {
+          payload.authUserId = authResult.userId;
+          onTriggerNotification(
+            isRtl
+              ? `🔐 تم إنشاء حساب دخول آمن للموظف (${fullName}) في النظام`
+              : `🔐 Supabase Auth account created for (${fullName})`
+          );
+        } else if (authResult.error) {
+          console.warn("Supabase Auth account creation skipped:", authResult.error);
+        }
+      } catch (authErr) {
+        console.warn("Failed to create Supabase Auth account:", authErr);
+      }
+    }
 
     const success = await saveEmployee(payload);
     if (success) {
@@ -388,13 +489,24 @@ export default function UsersPermissionsView({
       });
 
       if (isNew) {
-        setCreatedCredentials({
-          fullName: fullName.trim(),
-          email: email.trim() || undefined,
-          username: username.trim(),
-          password: password.trim(),
-          loginUrl: `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`
-        });
+        const loginUrl = `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`;
+        
+        // Auto-copy login URL to clipboard
+        try {
+          navigator.clipboard.writeText(loginUrl);
+        } catch (clipErr) {
+          console.warn("Could not auto-copy URL:", clipErr);
+        }
+
+        onTriggerNotification(
+          isRtl 
+            ? `✅ تم إنشاء حساب ${fullName} بنجاح! تم نسخ رابط الدخول للحافظة.`
+            : `✅ Created ${fullName}'s account! Login link copied to clipboard.`
+        );
+
+        // Close the modal automatically
+        setIsModalOpen(false);
+        loadEmployeesData();
       } else {
         setIsModalOpen(false);
         loadEmployeesData();
@@ -654,6 +766,101 @@ export default function UsersPermissionsView({
         </div>
       </div>
 
+      {/* Employee Submissions Review Section */}
+      <div className="bg-[#09090b] border border-[#27272a] rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowSubmissions(!showSubmissions)}
+          className="w-full p-4 flex items-center justify-between bg-[#0c0c0e] hover:bg-[#121214] transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-bold ${showSubmissions ? "text-indigo-400" : "text-slate-400"}`}>
+              {showSubmissions ? "▼" : "▶"}
+            </span>
+            <span className="text-sm font-bold text-white">
+              {isRtl ? "تقارير الموظفين المقدمة" : "Employee Submissions Review"}
+            </span>
+          </div>
+          <span className="text-[10px] text-slate-500">
+            {submissions.filter(s => s.status === "pending").length} {isRtl ? "معلقة" : "pending"}
+          </span>
+        </button>
+
+        {showSubmissions && (
+          <div className="p-4 space-y-3">
+            {submissions.length === 0 ? (
+              <div className="text-center py-8 text-slate-500 text-xs">
+                {isRtl ? "لا توجد تقارير مقدمة من الموظفين بعد" : "No submissions from employees yet"}
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {submissions.map((sub) => (
+                  <div key={sub.id} className="bg-[#121214] border border-[#27272a] rounded-xl p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {sub.status === "pending" ? (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-900/30 text-[10px] font-bold">
+                            {isRtl ? "قيد المراجعة" : "Pending"}
+                          </span>
+                        ) : sub.status === "approved" ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-900/30 text-[10px] font-bold">
+                            {isRtl ? "مقبول" : "Approved"}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-900/30 text-[10px] font-bold">
+                            {isRtl ? "مرفوض" : "Rejected"}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-slate-400 font-mono text-[10px]">{sub.date}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-white font-bold block">{sub.employeeName}</span>
+                        <span className="text-slate-400 text-[10px]">
+                          {sub.type === "overtime" ? (isRtl ? "ساعات إضافية" : "Overtime") :
+                           sub.type === "missing_hours" ? (isRtl ? "ساعات ضائعة" : "Missing Hours") :
+                           sub.type === "absence" ? (isRtl ? "غياب" : "Absence") :
+                           (isRtl ? "مصاريف" : "Expense")}
+                          : {sub.amount} {sub.type === "expense" ? "دج" : sub.type === "absence" ? (isRtl ? "يوم" : "days") : (isRtl ? "ساعة" : "hrs")}
+                        </span>
+                      </div>
+                      {sub.status === "pending" && (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => handleReviewSubmission(sub, "approved")}
+                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                          >
+                            ✓ {isRtl ? "قبول" : "Approve"}
+                          </button>
+                          <button
+                            onClick={() => handleReviewSubmission(sub, "rejected")}
+                            className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                          >
+                            ✗ {isRtl ? "رفض" : "Reject"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {sub.description && (
+                      <p className="text-slate-400 text-[10px] bg-[#09090b] p-2 rounded border border-[#1c1c1f]">
+                        {sub.description}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={loadSubmissions}
+              className="w-full py-1.5 bg-[#1c1c1e] hover:bg-[#27272a] text-slate-400 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" />
+              {isRtl ? "تحديث" : "Refresh"}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* MODAL WINDOW FOR CREATE / EDIT EMPLOYEE */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[999] animate-fade-in text-right">
@@ -773,17 +980,77 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
               {/* Basic input fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 
-                {/* Full Name */}
-                <div>
+                {/* Full Name with Worker Selection Dropdown */}
+                <div className="relative">
                   <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الاسم الكامل للموظف *" : "Full Name *"}</label>
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder={isRtl ? "توفيق العلمي..." : "e.g., John Doe..."}
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={fullName}
+                      onChange={(e) => {
+                        setFullName(e.target.value);
+                        setWorkerFilter(e.target.value);
+                        if (!editingEmployee) setShowWorkerDropdown(true);
+                      }}
+                      onFocus={() => { if (!editingEmployee && workerList.length > 0) setShowWorkerDropdown(true); }}
+                      onBlur={() => setTimeout(() => setShowWorkerDropdown(false), 200)}
+                      placeholder={isRtl ? "اختر موظفاً من العمال أو اكتب الاسم..." : "Select a worker or type name..."}
+                      className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                    />
+                    {!editingEmployee && workerList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowWorkerDropdown(!showWorkerDropdown)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
+                      >
+                        ▼
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Worker Dropdown List */}
+                  {showWorkerDropdown && !editingEmployee && workerList.length > 0 && (
+                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-[#121214] border border-[#27272a] rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                      {workerList
+                        .filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase()))
+                        .map((w) => (
+                          <button
+                            key={w.id}
+                            type="button"
+                            onMouseDown={() => {
+                              // Auto-fill all fields from worker
+                              setFullName(w.name);
+                              setPhone(w.phone);
+                              setJobTitle(w.role);
+                              setBaseSalary(w.baseSalary);
+                              setMonthlySalary(w.monthlySalary);
+                              setWorkingHoursPerDay(w.dailyHours);
+                              setWorkingDaysPerMonth(w.workingDaysPerMonth || 22);
+                              setOvertimeHourRate(w.overtimeRate);
+                              setAbsenceDeductionRate(w.absenceDeductionRate || 1.0);
+                              setNotes(w.notes || "");
+                              setWorkerFilter("");
+                              setShowWorkerDropdown(false);
+                              onTriggerNotification(
+                                isRtl
+                                  ? `✅ تم تعبئة بيانات ${w.name} تلقائياً`
+                                  : `✅ Auto-filled data for ${w.name}`
+                              );
+                            }}
+                            className="w-full text-right p-2.5 text-xs text-slate-300 hover:bg-[#1c1c1e] hover:text-white border-b border-[#1f1f23] last:border-0 transition-colors flex items-center justify-between"
+                          >
+                            <span className="font-bold">{w.name}</span>
+                            <span className="text-[10px] text-slate-500">{w.role} • {w.phone}</span>
+                          </button>
+                        ))}
+                      {workerList.filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase())).length === 0 && (
+                        <div className="p-3 text-center text-slate-500 text-[10px]">
+                          {isRtl ? "لا يوجد عمال متاحون" : "No workers available"}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Job Title */}
