@@ -62,7 +62,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
       throw error;
     }
 
-    if (data && data.length > 0) {
+    if (data) {
       const mapped: Employee[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
@@ -79,11 +79,39 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Cache back locally for stability, sorting by creation date
-      const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
-      saveLocalEmployees([...otherCompaniesObj, ...mapped]);
+      // Merge: Supabase data wins by ID, but keep local-only records too
+      const supabaseIds = new Set(mapped.map(e => e.id));
+      const localOnly = localList.filter(e => !supabaseIds.has(e.id));
 
-      return mapped;
+      // Try to upsert any local-only employees to Supabase
+      for (const local of localOnly) {
+        try {
+          await supabase.from("corevia_company_users").upsert({
+            id: local.id,
+            company_id: local.companyId,
+            full_name: local.fullName,
+            phone: local.phone,
+            email: local.email || null,
+            username: local.username || null,
+            job_title: local.jobTitle,
+            password: local.password || "",
+            assigned_responsibilities: local.assignedResponsibilities || null,
+            allowed_pages: local.allowedPages,
+            status: local.status,
+            last_activity: local.lastActivity || null
+          });
+        } catch (e2) {
+          // Silently continue — local copy is preserved
+        }
+      }
+
+      const merged = [...mapped, ...localOnly];
+
+      // Cache merged list locally
+      const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
+      saveLocalEmployees([...otherCompaniesObj, ...merged]);
+
+      return merged;
     }
   } catch (e) {
     console.warn("Failed to fetch employees from Supabase, reverting to local cache:", e);
