@@ -238,8 +238,10 @@ export default function App() {
         role: userMeta.role
       };
 
-      // Auto provision company details in local tenant log
-      registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
+      // Auto provision company details in local tenant log (skip for employees)
+      if (userMeta.role !== "employee") {
+        registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
+      }
 
       // Save user session locally which patches the activeLocalStorage Multi-Tenant key immediately
       saveUserSession(activeSession);

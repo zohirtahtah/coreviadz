@@ -150,111 +150,115 @@ export default function Auth({
         return;
       }
 
-      // 1. Search employee records first (to override normal account lookup if they are an employee)
-      const cachedEmployees = getLocalEmployees();
-      let matchingEmployee: any = cachedEmployees.find(
-        emp => (
-          (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
-           emp.phone?.trim() === emailInput.trim() ||
-           emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
-          emp.password === passwordInput
-        )
-      );
+      try {
+        // 1. Search employee records first (to override normal account lookup if they are an employee)
+        const cachedEmployees = getLocalEmployees();
+        let matchingEmployee: any = cachedEmployees.find(
+          emp => (
+            (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
+             emp.phone?.trim() === emailInput.trim() ||
+             emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
+            emp.password === passwordInput
+          )
+        );
 
-      // If we are online, query credentials from Supabase
-      if (!matchingEmployee && supabase) {
-        try {
-          // Look up user by email, phone, or username fields
-          const { data: dbEmps } = await supabase
-            .from("corevia_company_users")
-            .select("*")
-            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
-          
-          if (dbEmps && dbEmps.length > 0) {
-            const dbMatch = dbEmps.find(e => e.password === passwordInput);
-            if (dbMatch) {
-              matchingEmployee = {
-                id: dbMatch.id,
-                companyId: dbMatch.company_id,
-                fullName: dbMatch.full_name,
-                phone: dbMatch.phone,
-                email: dbMatch.email,
-                username: dbMatch.username,
-                jobTitle: dbMatch.job_title,
-                password: dbMatch.password,
-                allowedPages: Array.isArray(dbMatch.allowed_pages) 
-                  ? dbMatch.allowed_pages 
-                  : JSON.parse(dbMatch.allowed_pages || "[]"),
-                status: dbMatch.status,
-                assignedResponsibilities: dbMatch.assigned_responsibilities,
-                lastActivity: dbMatch.last_activity,
-                createdAt: dbMatch.created_at
-              };
-              // Cache back locally for next login
-              const localList = getLocalEmployees();
-              const existsLocally = localList.some(e => e.id === matchingEmployee.id);
-              if (!existsLocally) {
-                localList.push(matchingEmployee);
-                localStorage.setItem("corevia_employees_list_v2", JSON.stringify(localList));
+        // If we are online, query credentials from Supabase
+        if (!matchingEmployee && supabase) {
+          try {
+            const { data: dbEmps } = await supabase
+              .from("corevia_company_users")
+              .select("*")
+              .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
+            
+            if (dbEmps && dbEmps.length > 0) {
+              const dbMatch = dbEmps.find(e => e.password === passwordInput);
+              if (dbMatch) {
+                matchingEmployee = {
+                  id: dbMatch.id,
+                  companyId: dbMatch.company_id,
+                  fullName: dbMatch.full_name,
+                  phone: dbMatch.phone,
+                  email: dbMatch.email,
+                  username: dbMatch.username,
+                  jobTitle: dbMatch.job_title,
+                  password: dbMatch.password,
+                  allowedPages: Array.isArray(dbMatch.allowed_pages) 
+                    ? dbMatch.allowed_pages 
+                    : JSON.parse(dbMatch.allowed_pages || "[]"),
+                  status: dbMatch.status,
+                  assignedResponsibilities: dbMatch.assigned_responsibilities,
+                  lastActivity: dbMatch.last_activity,
+                  createdAt: dbMatch.created_at
+                };
+                const localList = getLocalEmployees();
+                const existsLocally = localList.some(e => e.id === matchingEmployee.id);
+                if (!existsLocally) {
+                  localList.push(matchingEmployee);
+                  localStorage.setItem("corevia_employees_list_v2", JSON.stringify(localList));
+                }
               }
             }
+          } catch (e) {
+            console.warn("Supabase employee credentials lookup warning:", e);
           }
-        } catch (e) {
-          console.warn("Supabase employee credentials lookup warning:", e);
         }
-      }
 
-      if (matchingEmployee) {
-        if (matchingEmployee.status === "Suspended") {
-          setAuthMode("suspended");
+        if (matchingEmployee) {
+          if (matchingEmployee.status === "Suspended") {
+            setAuthMode("suspended");
+            onTriggerNotification(
+              isRtl 
+                ? "عذراً، هذا الحساب معلق من قِبل إدارة الشركة. يرجى مراجعة المسؤول." 
+                : "Access Denied: This account is suspended. Contact your company administrator.", 
+              "info"
+            );
+            setIsSubmitting(false);
+            return;
+          }
+
+          const isReadOnlyMode = matchingEmployee.status === "Read Only";
+
+          const employeeSession: UserSession = {
+            username: matchingEmployee.fullName,
+            email: matchingEmployee.email || emailInput,
+            isRegistered: true,
+            isApproved: true,
+            isSuspended: false,
+            user_id: matchingEmployee.id,
+            company_id: matchingEmployee.companyId,
+            role: "employee",
+            allowedPages: matchingEmployee.allowedPages,
+            jobTitle: matchingEmployee.jobTitle,
+            isReadOnly: isReadOnlyMode
+          };
+
+          try {
+            await logActivity({
+              companyId: matchingEmployee.companyId,
+              userName: matchingEmployee.fullName,
+              userId: matchingEmployee.id,
+              jobTitle: matchingEmployee.jobTitle,
+              actionType: "Login",
+              pageName: "Authentication",
+              affectedRecord: `Employee: ${matchingEmployee.fullName}`
+            });
+          } catch (logErr) {
+            // ignore
+          }
+
+          onAuthSuccess(employeeSession);
           onTriggerNotification(
             isRtl 
-              ? "عذراً، هذا الحساب معلق من قِبل إدارة الشركة. يرجى مراجعة المسؤول." 
-              : "Access Denied: This account is suspended. Contact your company administrator.", 
-            "info"
+              ? `تم تسجيل الدخول بنجاح كموظف: ${matchingEmployee.fullName} ${isReadOnlyMode ? "(للقراءة فقط)" : ""}` 
+              : `Logged in as ${matchingEmployee.fullName} ${isReadOnlyMode ? "(Read Only)" : ""}`, 
+            "success"
           );
           setIsSubmitting(false);
           return;
         }
-
-        const isReadOnlyMode = matchingEmployee.status === "Read Only";
-
-        const employeeSession: UserSession = {
-          username: matchingEmployee.fullName,
-          email: matchingEmployee.email || emailInput,
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false,
-          user_id: matchingEmployee.id,
-          company_id: matchingEmployee.companyId,
-          role: "employee",
-          allowedPages: matchingEmployee.allowedPages,
-          jobTitle: matchingEmployee.jobTitle,
-          isReadOnly: isReadOnlyMode
-        };
-
-        // Log login action
-        try {
-          await logActivity({
-            companyId: matchingEmployee.companyId,
-            userName: matchingEmployee.fullName,
-            userId: matchingEmployee.id,
-            jobTitle: matchingEmployee.jobTitle,
-            actionType: "Login",
-            pageName: "Authentication",
-            affectedRecord: `Employee: ${matchingEmployee.fullName}`
-          });
-        } catch (logErr) {
-          // ignore
-        }
-
-        onAuthSuccess(employeeSession);
-        onTriggerNotification(
-          isRtl 
-            ? `تم تسجيل الدخول بنجاح كموظف: ${matchingEmployee.fullName} ${isReadOnlyMode ? "(للقراءة فقط)" : ""}` 
-            : `Logged in as ${matchingEmployee.fullName} ${isReadOnlyMode ? "(Read Only)" : ""}`, 
-          "success"
-        );
+      } catch (empErr: any) {
+        console.error("Employee login error:", empErr);
+        onTriggerNotification(isRtl ? `خطأ في تسجيل دخول الموظف: ${empErr.message || empErr}` : `Employee login error: ${empErr.message || empErr}`, "info");
         setIsSubmitting(false);
         return;
       }
