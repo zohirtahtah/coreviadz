@@ -20,12 +20,14 @@ interface MyProfileViewProps {
   session: UserSession;
   lang: LanguageType;
   onTriggerNotification: (msg: string, type?: "success" | "info" | "warning") => void;
+  refreshKey?: number;
 }
 
 export const MyProfileView: React.FC<MyProfileViewProps> = ({
   session,
   lang,
-  onTriggerNotification
+  onTriggerNotification,
+  refreshKey = 0
 }) => {
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
@@ -70,30 +72,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
 
   useEffect(() => {
     loadProfileAndHistory();
-    const interval = setInterval(() => {
-      // Re-read worker profile from localStorage (updated by real-time subscriptions)
-      const allWorkers = getWorkers();
-      const match = allWorkers.find(
-        w => w.id === session.user_id || session.userId || 
-             (w.phone && session.phone && w.phone.replace(/[^0-9]/g, "") === session.phone.replace(/[^0-9]/g, "")) ||
-             w.name.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
-      );
-      if (match) setWorkerProfile(match);
-    }, 5000);
-    const subInterval = setInterval(async () => {
-      try {
-        const data = await getSubmissions(session.company_id);
-        const filtered = data.filter(
-          s => s.employeeId === session.user_id || session.userId || 
-               s.employeeName.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
-        );
-        setSubmissions(filtered);
-      } catch (err) {
-        console.warn("Failed to refresh submissions", err);
-      }
-    }, 5000);
-    return () => { clearInterval(interval); clearInterval(subInterval); };
-  }, [session]);
+  }, [session, refreshKey]);
 
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();

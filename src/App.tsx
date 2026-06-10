@@ -189,6 +189,7 @@ export default function App() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Custom visual colors choices
   const [customColorsList, setCustomColorsList] = useState<string[]>([]);
@@ -411,6 +412,7 @@ export default function App() {
           updatedDate: o.updated_date || undefined, updatedTime: o.updated_time || undefined
         }));
         saveOrders(formatted); setOrders(formatted);
+        setRefreshKey(k => k + 1);
         console.log("[REALTIME] Synced orders from Supabase");
       }
     };
@@ -429,6 +431,7 @@ export default function App() {
           updatedDate: p.updated_date || undefined, updatedTime: p.updated_time || undefined
         }));
         saveProducts(formatted); setProducts(formatted);
+        setRefreshKey(k => k + 1);
         console.log("[REALTIME] Synced products from Supabase");
       }
     };
@@ -469,6 +472,7 @@ export default function App() {
           }
         });
         saveWorkers(expanded); setWorkers(expanded);
+        setRefreshKey(k => k + 1);
         console.log("[REALTIME] Synced workers from Supabase");
       }
     };
@@ -484,6 +488,7 @@ export default function App() {
           updatedDate: s.updated_date || undefined, updatedTime: s.updated_time || undefined
         }));
         saveSuppliers(formatted); setSuppliers(formatted);
+        setRefreshKey(k => k + 1);
       }
     };
 
@@ -501,6 +506,7 @@ export default function App() {
         });
         localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(formatted));
         setExpenses(formatted);
+        setRefreshKey(k => k + 1);
       }
     };
 
@@ -515,6 +521,7 @@ export default function App() {
           lastActivity: e.last_activity || null, createdAt: e.created_at || new Date().toISOString()
         }));
         saveLocalEmployees(formatted);
+        setRefreshKey(k => k + 1);
       }
     };
 
@@ -527,6 +534,7 @@ export default function App() {
           status: s.status || "pending", createdAt: s.created_at || new Date().toISOString()
         }));
         saveLocalSubmissions(formatted);
+        setRefreshKey(k => k + 1);
       }
     };
 
@@ -539,6 +547,7 @@ export default function App() {
           createdAt: m.created_at
         }));
         saveLocalChatMessages(formatted);
+        setRefreshKey(k => k + 1);
       }
     };
 
@@ -1967,17 +1976,18 @@ export default function App() {
         )}
 
         {activeTab === "workers" && (
-          <WorkersView
-            workers={workers}
-            onSaveWorkers={saveWorkersAndPersist}
-            lang={lang}
-            onSoftDeleteWorker={handleSoftDeleteWorker}
-            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-            onTriggerNotification={triggerToast}
-            orders={orders}
-            onSectionChange={setActiveTab}
-            session={session}
-          />
+        <WorkersView
+          workers={workers}
+          onSaveWorkers={saveWorkersAndPersist}
+          lang={lang}
+          onSoftDeleteWorker={handleSoftDeleteWorker}
+          onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+          onTriggerNotification={triggerToast}
+          orders={orders}
+          onSectionChange={setActiveTab}
+          session={session}
+          refreshKey={refreshKey}
+        />
         )}
 
         {activeTab === "expenses" && (
@@ -2037,13 +2047,14 @@ export default function App() {
         )}
 
         {activeTab === "users-permissions" && (
-          <UsersPermissionsView
-            lang={lang}
-            session={session}
-            onTriggerNotification={triggerToast}
-            seatsLimit={seatsLimit}
-            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-          />
+        <UsersPermissionsView
+          lang={lang}
+          session={session}
+          onTriggerNotification={triggerToast}
+          seatsLimit={seatsLimit}
+          onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+          refreshKey={refreshKey}
+        />
         )}
 
         {activeTab === "activity-log" && (
@@ -2055,19 +2066,21 @@ export default function App() {
         )}
 
         {activeTab === "communication" && (
-          <CommunicationView
-            session={session}
-            lang={lang}
-            onTriggerNotification={triggerToast}
-          />
+        <CommunicationView
+          session={session}
+          lang={lang}
+          onTriggerNotification={triggerToast}
+          refreshKey={refreshKey}
+        />
         )}
 
         {activeTab === "my-profile" && (
-          <MyProfileView
-            session={session}
-            lang={lang}
-            onTriggerNotification={triggerToast}
-          />
+        <MyProfileView
+          session={session}
+          lang={lang}
+          onTriggerNotification={triggerToast}
+          refreshKey={refreshKey}
+        />
         )}
 
         {activeTab === "super-admin" && (

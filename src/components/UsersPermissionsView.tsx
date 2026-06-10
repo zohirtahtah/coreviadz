@@ -35,6 +35,7 @@ interface UsersPermissionsViewProps {
   onTriggerNotification: (msg: string) => void;
   seatsLimit?: number;
   onDeleteEntireWorkerProfile?: (code: string) => void;
+  refreshKey?: number;
 }
 
 export default function UsersPermissionsView({
@@ -42,7 +43,8 @@ export default function UsersPermissionsView({
   session,
   onTriggerNotification,
   seatsLimit = 5,
-  onDeleteEntireWorkerProfile
+  onDeleteEntireWorkerProfile,
+  refreshKey = 0
 }: UsersPermissionsViewProps) {
   const isRtl = lang === "ar";
   const companyId = session?.company_id || "cop_default";
@@ -180,11 +182,7 @@ export default function UsersPermissionsView({
 
   useEffect(() => {
     loadEmployeesData();
-    const interval = setInterval(() => {
-      getEmployees(companyId).then(setEmployees).catch(() => {});
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [companyId]);
+  }, [companyId, refreshKey]);
 
   // Total seats counted: 1 Owner + number of created employee accounts
   const totalSeatsCountUsed = 1 + employees.length;

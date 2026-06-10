@@ -20,6 +20,7 @@ interface WorkersViewProps {
   orders?: Order[];
   onSectionChange?: (tab: string) => void;
   session?: any;
+  refreshKey?: number;
 }
 
 // 2.1 الدوال المساعدة العامة
@@ -99,7 +100,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   onTriggerNotification,
   orders = [],
   onSectionChange,
-  session
+  session,
+  refreshKey = 0
 }) => {
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
@@ -214,7 +216,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
   useEffect(() => {
     loadAllSubmissions();
-  }, [showEmployeeFilings]);
+  }, [showEmployeeFilings, refreshKey]);
 
   useEffect(() => {
     if (deleteConfirm) {

@@ -17,12 +17,14 @@ interface CommunicationViewProps {
   session: UserSession;
   lang: LanguageType;
   onTriggerNotification: (msg: string, type?: "success" | "info" | "warning") => void;
+  refreshKey?: number;
 }
 
 export const CommunicationView: React.FC<CommunicationViewProps> = ({
   session,
   lang,
-  onTriggerNotification
+  onTriggerNotification,
+  refreshKey = 0
 }) => {
   const isRtl = lang === "ar";
   const channelRef = useRef<any>(null);
@@ -119,17 +121,16 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     }
     typingChannelRef.current = typingChannel;
 
-    // Fallback polling every 10 seconds
-    const interval = setInterval(() => {
-      loadMessages(true);
-    }, 10000);
-
     return () => {
-      clearInterval(interval);
       if (channel) supabase.removeChannel(channel);
       if (typingChannel) supabase.removeChannel(typingChannel);
     };
   }, [session.company_id]);
+
+  // Re-load messages when refreshKey changes (real-time sync from other tabs/devices)
+  useEffect(() => {
+    loadMessages(true);
+  }, [refreshKey]);
 
   // Mark messages as seen when they appear in the list
   useEffect(() => {
