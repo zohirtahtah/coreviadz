@@ -67,9 +67,10 @@ export async function getChatMessages(companyId: string): Promise<ChatMessage[]>
         seenBy: d.seen_by || []
       }));
       
-      // Save to local cache
+      // Save to local cache (merges with existing local messages)
       saveLocalChatMessages(mapped);
-      return mapped;
+      // Return merged list to preserve any messages that failed to sync to Supabase
+      return getLocalChatMessages(companyId).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     }
   } catch (err) {
     console.warn("Supabase fetch exception, falling back:", err);

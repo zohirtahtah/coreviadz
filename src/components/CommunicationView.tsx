@@ -82,14 +82,16 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     const pullChatFromSupabase = async () => {
       if (!supabase) return;
       const { data } = await supabase.from("corevia_chat_messages").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
+      if (data) {
         const formatted = data.map((m: any) => ({
           id: m.id, companyId: m.company_id, senderId: m.sender_id, senderName: m.sender_name,
           senderJobTitle: m.sender_job_title, content: m.content || "", voiceUrl: m.voice_url || undefined,
           createdAt: m.created_at, seenBy: m.seen_by || []
         }));
+        // Merge with local messages to preserve any that failed to sync to Supabase
         saveLocalChatMessages(formatted);
-        setMessages(formatted);
+        const merged = await getChatMessages(session.company_id);
+        setMessages(merged);
       }
     };
 
