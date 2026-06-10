@@ -135,7 +135,7 @@ export default function Sidebar({
     { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: true },
     { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: true },
     { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: true },
-    { id: "communication", label: lang === "ar" ? "التواصل مع الشركة" : lang === "fr" ? "Communication d'Entreprise" : "Company Communication", icon: MessageSquare, isRestricted: false },
+    { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: false },
     { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
     { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },

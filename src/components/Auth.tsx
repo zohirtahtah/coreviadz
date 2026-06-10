@@ -62,16 +62,19 @@ export default function Auth({
       if (setupWorker === "true") {
         const id = params.get("id");
         const cid = params.get("cid");
-        const name = params.get("name") || "";
-        const user = params.get("user") || "";
-        const pass = params.get("pass") || "";
-        const title = params.get("title") || "";
-        const pagesStr = params.get("pages") || "[]";
+        const name = params.get("name") ? decodeURIComponent(params.get("name")!) : "";
+        const user = params.get("user") ? decodeURIComponent(params.get("user")!) : "";
+        const pass = params.get("pass") ? decodeURIComponent(params.get("pass")!) : "";
+        const title = params.get("title") ? decodeURIComponent(params.get("title")!) : "";
+        const pagesStr = params.get("pages") ? decodeURIComponent(params.get("pages")!) : "[]";
         
         if (id && cid && user && pass) {
           let pagesArr: string[] = [];
-          try { pagesArr = JSON.parse(pagesStr); } catch(e) {}
+          try {
+            pagesArr = JSON.parse(pagesStr);
+          } catch(e) {}
           
+          // Import or update local cache list
           const cached = getLocalEmployees();
           const exists = cached.some(emp => emp.id === id);
           if (!exists) {
@@ -88,28 +91,34 @@ export default function Auth({
               status: "Active",
               createdAt: new Date().toISOString()
             });
+            // Save to localStorage (un-suffixed since no user is logged in yet)
             localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
           }
           
           setEmailInput(user);
           setPasswordInput(pass);
           
+          // Clear parameters from address bar to keep it elegant and clean
           try {
             window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
           } catch (histErr) {}
           
           onTriggerNotification(
-            isRtl
-              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء"
-              : "📋 Employee credentials prefilled, click Login to proceed",
+            isRtl 
+              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء" 
+              : "📋 Employee credentials prefilled, click Login to proceed", 
             "success"
           );
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
         const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
-        if (urlEmail) setEmailInput(urlEmail);
-        if (urlPass) setPasswordInput(urlPass);
+        if (urlEmail) {
+          setEmailInput(decodeURIComponent(urlEmail));
+        }
+        if (urlPass) {
+          setPasswordInput(decodeURIComponent(urlPass));
+        }
       }
     } catch (e) {
       console.warn("Error prefilling auth credentials:", e);
@@ -140,115 +149,104 @@ export default function Auth({
         return;
       }
 
-      try {
-        // 1. Search employee records first (to override normal account lookup if they are an employee)
-        const cachedEmployees = getLocalEmployees();
-        let matchingEmployee: any = cachedEmployees.find(
-          emp => (
-            (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
-             emp.phone?.trim() === emailInput.trim() ||
-             emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
-            emp.password === passwordInput
-          )
-        );
+      // 1. Search employee records first (to override normal account lookup if they are an employee)
+      const cachedEmployees = getLocalEmployees();
+      let matchingEmployee: any = cachedEmployees.find(
+        emp => (
+          (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
+           emp.phone?.trim() === emailInput.trim() ||
+           emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
+          emp.password === passwordInput
+        )
+      );
 
-        // If we are online, query credentials from Supabase
-        if (!matchingEmployee && supabase) {
-          try {
-            const { data: dbEmps } = await supabase
-              .from("corevia_company_users")
-              .select("*")
-              .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
-            
-            if (dbEmps && dbEmps.length > 0) {
-              const dbMatch = dbEmps.find(e => e.password === passwordInput);
-              if (dbMatch) {
-                matchingEmployee = {
-                  id: dbMatch.id,
-                  companyId: dbMatch.company_id,
-                  fullName: dbMatch.full_name,
-                  phone: dbMatch.phone,
-                  email: dbMatch.email,
-                  username: dbMatch.username,
-                  jobTitle: dbMatch.job_title,
-                  password: dbMatch.password,
-                  allowedPages: Array.isArray(dbMatch.allowed_pages) 
-                    ? dbMatch.allowed_pages 
-                    : JSON.parse(dbMatch.allowed_pages || "[]"),
-                  status: dbMatch.status,
-                  assignedResponsibilities: dbMatch.assigned_responsibilities,
-                  lastActivity: dbMatch.last_activity,
-                  createdAt: dbMatch.created_at
-                };
-                const localList = getLocalEmployees();
-                const existsLocally = localList.some(e => e.id === matchingEmployee.id);
-                if (!existsLocally) {
-                  localList.push(matchingEmployee);
-                  localStorage.setItem("corevia_employees_list_v2", JSON.stringify(localList));
-                }
-              }
+      // If we are online, query credentials from Supabase
+      if (!matchingEmployee && supabase) {
+        try {
+          // Look up user by email, phone, or username fields
+          const { data: dbEmps } = await supabase
+            .from("corevia_company_users")
+            .select("*")
+            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
+          
+          if (dbEmps && dbEmps.length > 0) {
+            const dbMatch = dbEmps.find(e => e.password === passwordInput);
+            if (dbMatch) {
+              matchingEmployee = {
+                id: dbMatch.id,
+                companyId: dbMatch.company_id,
+                fullName: dbMatch.full_name,
+                phone: dbMatch.phone,
+                email: dbMatch.email,
+                username: dbMatch.username,
+                jobTitle: dbMatch.job_title,
+                password: dbMatch.password,
+                allowedPages: Array.isArray(dbMatch.allowed_pages) 
+                  ? dbMatch.allowed_pages 
+                  : JSON.parse(dbMatch.allowed_pages || "[]"),
+                status: dbMatch.status,
+                assignedResponsibilities: dbMatch.assigned_responsibilities,
+                lastActivity: dbMatch.last_activity,
+                createdAt: dbMatch.created_at
+              };
             }
-          } catch (e) {
-            console.warn("Supabase employee credentials lookup warning:", e);
           }
+        } catch (e) {
+          console.warn("Supabase employee credentials lookup warning:", e);
         }
+      }
 
-        if (matchingEmployee) {
-          if (matchingEmployee.status === "Suspended") {
-            setAuthMode("suspended");
-            onTriggerNotification(
-              isRtl 
-                ? "عذراً، هذا الحساب معلق من قِبل إدارة الشركة. يرجى مراجعة المسؤول." 
-                : "Access Denied: This account is suspended. Contact your company administrator.", 
-              "info"
-            );
-            setIsSubmitting(false);
-            return;
-          }
-
-          const isReadOnlyMode = matchingEmployee.status === "Read Only";
-
-          const employeeSession: UserSession = {
-            username: matchingEmployee.fullName,
-            email: matchingEmployee.email || emailInput,
-            isRegistered: true,
-            isApproved: true,
-            isSuspended: false,
-            user_id: matchingEmployee.id,
-            company_id: matchingEmployee.companyId,
-            role: "employee",
-            allowedPages: matchingEmployee.allowedPages,
-            jobTitle: matchingEmployee.jobTitle,
-            isReadOnly: isReadOnlyMode
-          };
-
-          try {
-            await logActivity({
-              companyId: matchingEmployee.companyId,
-              userName: matchingEmployee.fullName,
-              userId: matchingEmployee.id,
-              jobTitle: matchingEmployee.jobTitle,
-              actionType: "Login",
-              pageName: "Authentication",
-              affectedRecord: `Employee: ${matchingEmployee.fullName}`
-            });
-          } catch (logErr) {
-            // ignore
-          }
-
-          onAuthSuccess(employeeSession);
+      if (matchingEmployee) {
+        if (matchingEmployee.status === "Suspended") {
+          setAuthMode("suspended");
           onTriggerNotification(
             isRtl 
-              ? `تم تسجيل الدخول بنجاح كموظف: ${matchingEmployee.fullName} ${isReadOnlyMode ? "(للقراءة فقط)" : ""}` 
-              : `Logged in as ${matchingEmployee.fullName} ${isReadOnlyMode ? "(Read Only)" : ""}`, 
-            "success"
+              ? "عذراً، هذا الحساب معلق من قِبل إدارة الشركة. يرجى مراجعة المسؤول." 
+              : "Access Denied: This account is suspended. Contact your company administrator.", 
+            "info"
           );
           setIsSubmitting(false);
           return;
         }
-      } catch (empErr: any) {
-        console.error("Employee login error:", empErr);
-        onTriggerNotification(isRtl ? `خطأ في تسجيل دخول الموظف: ${empErr.message || empErr}` : `Employee login error: ${empErr.message || empErr}`, "info");
+
+        const isReadOnlyMode = matchingEmployee.status === "Read Only";
+
+        const employeeSession: UserSession = {
+          username: matchingEmployee.fullName,
+          email: matchingEmployee.email || emailInput,
+          isRegistered: true,
+          isApproved: true,
+          isSuspended: false,
+          user_id: matchingEmployee.id,
+          company_id: matchingEmployee.companyId,
+          role: "employee",
+          allowedPages: matchingEmployee.allowedPages,
+          jobTitle: matchingEmployee.jobTitle,
+          isReadOnly: isReadOnlyMode
+        };
+
+        // Log login action
+        try {
+          await logActivity({
+            companyId: matchingEmployee.companyId,
+            userName: matchingEmployee.fullName,
+            userId: matchingEmployee.id,
+            jobTitle: matchingEmployee.jobTitle,
+            actionType: "Login",
+            pageName: "Authentication",
+            affectedRecord: `Employee: ${matchingEmployee.fullName}`
+          });
+        } catch (logErr) {
+          // ignore
+        }
+
+        onAuthSuccess(employeeSession);
+        onTriggerNotification(
+          isRtl 
+            ? `تم تسجيل الدخول بنجاح كموظف: ${matchingEmployee.fullName} ${isReadOnlyMode ? "(للقراءة فقط)" : ""}` 
+            : `Logged in as ${matchingEmployee.fullName} ${isReadOnlyMode ? "(Read Only)" : ""}`, 
+          "success"
+        );
         setIsSubmitting(false);
         return;
       }

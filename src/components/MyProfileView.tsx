@@ -10,13 +10,9 @@ import {
   deleteSubmission 
 } from "../employeeSubmissionsService";
 import { 
-  Employee, 
-  getEmployees 
-} from "../employeeService";
-import { 
   DollarSign, Clock, Calendar, FileText, AlertCircle, 
   CheckCircle2, XCircle, Send, Plus, Trash2, ShieldAlert,
-  UserCheck, HeartHandshake, TrendingUp, Building2
+  UserCheck, HeartHandshake, TrendingUp
 } from "lucide-react";
 import { logActivity } from "../activityLogService";
 
@@ -24,14 +20,12 @@ interface MyProfileViewProps {
   session: UserSession;
   lang: LanguageType;
   onTriggerNotification: (msg: string, type?: "success" | "info" | "warning") => void;
-  companyInfo?: { name?: string; phone?: string; email?: string; address?: string; };
 }
 
 export const MyProfileView: React.FC<MyProfileViewProps> = ({
   session,
   lang,
-  onTriggerNotification,
-  companyInfo
+  onTriggerNotification
 }) => {
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
@@ -39,7 +33,6 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
   // State
   const [submissions, setSubmissions] = useState<EmployeeSubmission[]>([]);
   const [workerProfile, setWorkerProfile] = useState<Worker | null>(null);
-  const [employeeRecord, setEmployeeRecord] = useState<Employee | null>(null);
   
   // Form State
   const [subType, setSubType] = useState<"overtime" | "missing_hours" | "absence" | "expense">("overtime");
@@ -50,24 +43,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
 
   // Load all synced info
   const loadProfileAndHistory = async () => {
-    // 1. Get the employee record directly
-    if (session.company_id && session.userId) {
-      try {
-        const employees = await getEmployees(session.company_id);
-        const empRecord = employees.find(
-          e => e.id === session.userId || 
-               e.username === session.username ||
-               e.fullName === session.username
-        );
-        if (empRecord) {
-          setEmployeeRecord(empRecord);
-        }
-      } catch (err) {
-        console.warn("Failed to load employee record:", err);
-      }
-    }
-
-    // 2. Locate matching Worker record
+    // 1. Locate matching Worker record
     const allWorkers = getWorkers();
     const match = allWorkers.find(
       w => w.id === session.userId || 
@@ -78,9 +54,10 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       setWorkerProfile(match);
     }
 
-    // 3. Load submission history
+    // 2. Load submission history
     try {
       const data = await getSubmissions(session.company_id);
+      // Filter for this specific employee
       const filtered = data.filter(
         s => s.employeeId === session.userId || 
              s.employeeName.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
@@ -237,17 +214,14 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
     }
   };
 
-  // Resolve salary numbers nicely (prefer employee record, fallback to worker record)
-  const emp = employeeRecord;
-  const baseSalaryVal = workerProfile?.baseSalary ?? emp?.baseSalary ?? 35000;
-  const monthlySalaryVal = workerProfile?.monthlySalary ?? emp?.monthlySalary ?? 35000;
-  const dailyHoursVal = workerProfile?.dailyHours ?? emp?.dailyHours ?? 8;
-  const workingDaysVal = workerProfile?.workingDaysPerMonth ?? emp?.workingDaysPerMonth ?? 26;
-  const overtimeRateVal = workerProfile?.overtimeRate ?? emp?.overtimeRate ?? 250;
-  const absenceRateVal = workerProfile?.absenceDeductionRate ?? emp?.absenceDeductionRate ?? 1500;
-  const notesVal = workerProfile?.notes ?? emp?.notes ?? "";
-  const jobTitleVal = session.jobTitle || emp?.jobTitle || (isRtl ? "موظف" : "Employee");
-  const responsibilitiesVal = emp?.assignedResponsibilities || "";
+  // Resolve salary numbers nicely
+  const baseSalaryVal = workerProfile?.baseSalary ?? 35000;
+  const monthlySalaryVal = workerProfile?.monthlySalary ?? 35000;
+  const dailyHoursVal = workerProfile?.dailyHours ?? 8;
+  const workingDaysVal = workerProfile?.workingDaysPerMonth ?? 26;
+  const overtimeRateVal = workerProfile?.overtimeRate ?? 250;
+  const absenceRateVal = workerProfile?.absenceDeductionRate ?? 1500;
+  const notesVal = workerProfile?.notes ?? "";
 
   return (
     <div className="space-y-6 animate-fade-in" dir={isRtl ? "rtl" : "ltr"}>
@@ -271,10 +245,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
         </div>
         <div className="p-3 bg-indigo-950 rounded-2xl border border-indigo-500/30 text-center select-none w-full md:w-auto min-w-[160px]">
           <span className="block text-[10px] uppercase font-bold tracking-wider text-indigo-400 mb-0.5">{isRtl ? "المنصب الوظيفي" : "Role Title"}</span>
-          <span className="block font-black text-sm text-white">💼 {jobTitleVal}</span>
-          {responsibilitiesVal && (
-            <span className="block text-[8px] text-indigo-300 mt-1 opacity-70">{responsibilitiesVal.substring(0, 40)}</span>
-          )}
+          <span className="block font-black text-sm text-white">💼 {session.jobTitle || (isRtl ? "موظف مبيعات" : "Specialist")}</span>
         </div>
       </div>
 
@@ -350,42 +321,6 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
                   : "Security Advisory: Compensation schema is read-only. Contact the Company Owner or HR representative to submit modification queries."}
               </span>
             </div>
-
-            {/* Company Information */}
-            {companyInfo && (
-              <div className="bg-[#121214] border border-[#1d1d20] p-4 rounded-2xl text-xs space-y-2">
-                <span className="block font-black text-slate-300 border-b border-[#1c1c1f] pb-1.5 flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-indigo-400" />
-                  {isRtl ? "معلومات الشركة" : "Company Information"}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 leading-loose text-slate-350">
-                  {companyInfo.name && (
-                    <div className="flex justify-between items-center sm:flex-row-reverse">
-                      <span>{isRtl ? "اسم الشركة:" : "Company Name:"}</span>
-                      <strong className="text-white font-mono text-[11px]">{companyInfo.name}</strong>
-                    </div>
-                  )}
-                  {companyInfo.phone && (
-                    <div className="flex justify-between items-center sm:flex-row-reverse">
-                      <span>{isRtl ? "الهاتف:" : "Phone:"}</span>
-                      <strong className="text-white font-mono text-[11px]">{companyInfo.phone}</strong>
-                    </div>
-                  )}
-                  {companyInfo.email && (
-                    <div className="flex justify-between items-center sm:flex-row-reverse">
-                      <span>{isRtl ? "البريد:" : "Email:"}</span>
-                      <strong className="text-white font-mono text-[11px]">{companyInfo.email}</strong>
-                    </div>
-                  )}
-                  {companyInfo.address && (
-                    <div className="flex justify-between items-center sm:flex-row-reverse sm:col-span-2">
-                      <span>{isRtl ? "العنوان:" : "Address:"}</span>
-                      <strong className="text-white font-mono text-[11px]">{companyInfo.address}</strong>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
 
           </div>
         </div>

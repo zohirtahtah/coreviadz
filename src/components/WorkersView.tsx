@@ -7,12 +7,15 @@ import {
   XCircle
 } from "lucide-react";
 import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
+import { getEmployees, saveEmployee } from "../employeeService";
+import { cleanArabicName, cleanPhoneDigits } from "./UsersPermissionsView";
 
 interface WorkersViewProps {
   workers: Worker[];
   onSaveWorkers: (arr: Worker[]) => void;
   lang: LanguageType;
   onSoftDeleteWorker: (id: string) => void;
+  onDeleteEntireWorkerProfile?: (code: string) => void;
   onTriggerNotification: (msg: string, type?: "success" | "info" | "warning") => void;
   orders?: Order[];
   onSectionChange?: (tab: string) => void;
@@ -92,6 +95,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   onSaveWorkers,
   lang,
   onSoftDeleteWorker,
+  onDeleteEntireWorkerProfile,
   onTriggerNotification,
   orders = [],
   onSectionChange,
@@ -1187,6 +1191,42 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     const targetDates = fillDates(formMonth, yearFilter);
     const listCopy = [...workers];
 
+    // Automatically sync to Users & Permissions (Employee accounts)
+    const syncToEmployeeAccounts = async (workerIdToUse: string) => {
+      try {
+        const companyId = session?.company_id || "cop_default";
+        const emps = await getEmployees(companyId);
+        
+        let matchingEmp = emps.find(e => 
+          e.id === workerIdToUse || 
+          (e.phone && formPhone && cleanPhoneDigits(e.phone) === cleanPhoneDigits(formPhone)) || 
+          (e.fullName && formName && cleanArabicName(e.fullName) === cleanArabicName(formName))
+        );
+
+        const slug = (formName || "").toLowerCase().trim()
+          .replace(/\s+/g, ".")
+          .replace(/[^a-z0-9.]/g, "");
+
+        const employeePayload: any = {
+          id: matchingEmp ? matchingEmp.id : workerIdToUse,
+          companyId,
+          fullName: (formName || "").trim(),
+          phone: (formPhone || "").trim(),
+          email: matchingEmp?.email || `${slug}@corevia.dz`,
+          username: matchingEmp?.username || slug,
+          jobTitle: formRole || "موظف",
+          password: matchingEmp?.password || Math.floor(100000 + Math.random() * 900000).toString(),
+          allowedPages: matchingEmp?.allowedPages || ["my-profile"], // only personal info view
+          status: matchingEmp?.status || "Active",
+          createdAt: matchingEmp?.createdAt || new Date().toISOString()
+        };
+
+        await saveEmployee(employeePayload);
+      } catch (err) {
+        console.error("Auto sync to employees from workers view error:", err);
+      }
+    };
+
     const parsedOvertimeHours = Number(formOvertimeHours) || 0;
     const parsedOvertimeRate = Number(formOvertimeRate) || 250;
     const parsedAbsenceDays = Number(formAbsenceDays) || 0;
@@ -1295,6 +1335,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
         onSaveWorkers(listCopy);
+        syncToEmployeeAccounts(editId);
         onTriggerNotification(isRtl ? "تم تعديل ملف العامل وحساباته الشهرية بنجاح" : "Payroll files adjusted successfully", "success");
       }
     } else {
@@ -1395,6 +1436,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
       onSaveWorkers(listCopy);
+      syncToEmployeeAccounts(freshId);
       onTriggerNotification(isRtl ? "تم تفصيل وتوظيف العامل الجديد بنجاح" : "Staff onboarded successfully!", "success");
     }
 
@@ -1413,6 +1455,33 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       setLastDeletedWorker(workerToDelete);
       onSaveWorkers(workers.filter(x => x.id !== deleteConfirm));
       onTriggerNotification(isRtl ? "تم حذف السجل الشهري للعامِل بنجاح." : "Monthly statements dropped.", "info");
+    }
+    setDeleteConfirm(null);
+  };
+
+  // Delete worker ENTIRE profile (all monthly statements)
+  const handleDeleteEntireWorkerProfile = () => {
+    if (!deleteConfirm) return;
+    const workerToDelete = workers.find(x => x.id === deleteConfirm);
+    if (workerToDelete) {
+      const targetCode = workerToDelete.code;
+      const targetName = workerToDelete.name;
+      
+      if (onDeleteEntireWorkerProfile) {
+        onDeleteEntireWorkerProfile(targetCode);
+      } else {
+        const remaining = workers.filter(x => x.code !== targetCode);
+        onSaveWorkers(remaining);
+        if (onSoftDeleteWorker) {
+          onSoftDeleteWorker(workerToDelete.id);
+        }
+        onTriggerNotification(
+          isRtl 
+            ? `✅ تم حذف ملف الموظف (${targetName}) بالكامل مع جميع سجلاته.` 
+            : `✅ Employee (${targetName}) and all records deleted permanently.`, 
+          "success"
+        );
+      }
     }
     setDeleteConfirm(null);
   };
@@ -2756,23 +2825,36 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       {/* deleteConfirm Dialog */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-          <div className="bg-[#09090b] border border-zinc-900 rounded-xl max-w-sm w-full p-5 space-y-4 text-right" dir="rtl">
-            <h4 className="text-xs font-extrabold text-white">تأكيد حذف القيد الشهري للعامل؟</h4>
-            <p className="text-[11px] text-zinc-400">هل أنت متأكد من رغبتك بحذف كشف الراتب الشهري لهذا الموظف؟ لن تتمكن من استعادتها إلا بالتراجع الفوري.</p>
-            <div className="flex justify-end gap-1.5">
+          <div className="bg-[#09090b] border border-[#27272a] rounded-xl max-w-md w-full p-6 space-y-4 text-right shadow-2xl" dir="rtl">
+            <h4 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
+              <span>خيارات حذف بيانات العامل</span>
+              <span className="text-rose-500">⚠</span>
+            </h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              يرجى التدقيق في اختيار خيار الحذف المناسب من الأزرار أدناه للحفاظ على تماسك البيانات:
+            </p>
+            
+            <div className="space-y-2 pt-2">
               <button 
                 type="button" 
-                onClick={() => setDeleteConfirm(null)} 
-                className="px-3 py-1.5 bg-zinc-900 text-zinc-400 border border-zinc-800 rounded text-xs"
+                onClick={handleDeleteEntireWorkerProfile} 
+                className="w-full py-2.5 px-3 bg-rose-650 hover:bg-rose-600 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow flex items-center justify-center gap-1.5"
               >
-                إلغاء
+                <span>⚠️ حذف ملف العامل بالكامل (كل شهوره وتاريخه)</span>
               </button>
               <button 
                 type="button" 
                 onClick={handleDeleteWorkerRecord} 
-                className="px-3.5 py-1.5 bg-rose-650 hover:bg-rose-600 text-white rounded text-xs font-bold font-mono"
+                className="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-amber-500 hover:text-amber-400 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
-                نعم، احذف السجل
+                <span>🗑️ حذف هذا السجل الشهري للأجر والشهر المحدد فقط</span>
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setDeleteConfirm(null)} 
+                className="w-full py-2 bg-transparent text-slate-400 hover:text-white rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center justify-center"
+              >
+                تراجع وإلغاء
               </button>
             </div>
           </div>

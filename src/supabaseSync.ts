@@ -366,11 +366,18 @@ export async function pushSingleDatasetToCloud(
       }));
     }
 
+    // First, clear old records for this company of this table in background to handle deletions perfectly
+    const { error: deleteError } = await supabase.from(tableName).delete().eq("company_id", companyId);
+    if (deleteError) {
+      console.warn(`[AutoSync] Could not clear table "${tableName}" for sync:`, deleteError);
+    }
+
     if (formattedItems.length > 0) {
-      // First clear old records for this company in background to avoid stale arrays, or just upsert
-      const { error } = await supabase.from(tableName).upsert(formattedItems);
-      if (error) throw error;
+      const { error: insertError } = await supabase.from(tableName).insert(formattedItems);
+      if (insertError) throw insertError;
       console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items).`);
+    } else {
+      console.log(`Automatic background cloud sync success for table "${tableName}" (purged, 0 items left).`);
     }
   } catch (err) {
     console.warn(`[AutoSync] Background cloud sync for "${type}" was skipped or failed:`, err);

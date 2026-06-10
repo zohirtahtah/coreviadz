@@ -10,7 +10,7 @@ import {
   getSubInventory, saveSubInventory, getReturnInventory, saveReturnInventory,
   getSuppliers, saveSuppliers, getSupplierInvoices, saveSupplierInvoices,
   getWorkers, saveWorkers, getTrashItems, saveTrashItems, initializeDatabase,
-  deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft,
+  deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft, deleteEntireWorkerProfileSoft,
   restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft
 } from "./storageUtils";
 import { 
@@ -238,10 +238,8 @@ export default function App() {
         role: userMeta.role
       };
 
-      // Auto provision company details in local tenant log (skip for employees)
-      if (userMeta.role !== "employee") {
-        registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
-      }
+      // Auto provision company details in local tenant log
+      registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
 
       // Save user session locally which patches the activeLocalStorage Multi-Tenant key immediately
       saveUserSession(activeSession);
@@ -391,139 +389,16 @@ export default function App() {
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
   // automatically redirect them to the first allowed page in their list.
-  // This also prevents URL-based access bypass.
   useEffect(() => {
-    if (session?.role === "employee") {
-      if (!session.allowedPages || session.allowedPages.length === 0) {
-        // No pages allowed at all - send to my-profile as minimum
-        setActiveTab("my-profile");
-        return;
-      }
-      // Always allow my-profile and communication for employees
-      const alwaysAllowed = ["my-profile", "communication"];
-      const effectiveAllowed = [...new Set([...session.allowedPages, ...alwaysAllowed])];
-      
-      if (!effectiveAllowed.includes(activeTab)) {
-        const firstAllowed = effectiveAllowed[0];
+    if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
+      if (!session.allowedPages.includes(activeTab)) {
+        const firstAllowed = session.allowedPages[0];
         if (firstAllowed) {
           setActiveTab(firstAllowed);
         }
       }
-      
-      // Log access attempt to restricted page
-      if (activeTab !== "dashboard" && activeTab !== "my-profile" && !session.allowedPages.includes(activeTab)) {
-        console.warn(`[ACCESS GUARD] Employee tried to access restricted page: ${activeTab}`);
-      }
     }
   }, [session, activeTab]);
-
-  // Real-time Subscriptions for Multi-User Collaboration
-  useEffect(() => {
-    if (!supabase || !session?.company_id) return;
-
-    let channels: any[] = [];
-
-    const setupRealtime = () => {
-      // Subscribe to orders changes
-      const ordersChannel = supabase
-        .channel(`orders-${session.company_id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "corevia_orders",
-            filter: `company_id=eq.${session.company_id}`
-          },
-          async () => {
-            console.log("[REALTIME] Orders updated, refreshing...");
-            const updatedOrders = getOrders();
-            setOrders([...updatedOrders]);
-          }
-        )
-        .subscribe();
-
-      // Subscribe to products changes
-      const productsChannel = supabase
-        .channel(`products-${session.company_id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "corevia_products",
-            filter: `company_id=eq.${session.company_id}`
-          },
-          async () => {
-            console.log("[REALTIME] Products updated, refreshing...");
-            setProducts([...getProducts()]);
-          }
-        )
-        .subscribe();
-
-      // Subscribe to workers changes
-      const workersChannel = supabase
-        .channel(`workers-${session.company_id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "corevia_workers",
-            filter: `company_id=eq.${session.company_id}`
-          },
-          async () => {
-            console.log("[REALTIME] Workers updated, refreshing...");
-            setWorkers([...getWorkers()]);
-          }
-        )
-        .subscribe();
-
-      // Subscribe to company users changes (employees)
-      const employeesChannel = supabase
-        .channel(`employees-${session.company_id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "corevia_company_users",
-            filter: `company_id=eq.${session.company_id}`
-          },
-          async () => {
-            console.log("[REALTIME] Employees updated, refreshing...");
-          }
-        )
-        .subscribe();
-
-      // Subscribe to employee submissions changes
-      const submissionsChannel = supabase
-        .channel(`submissions-${session.company_id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "corevia_employee_submissions",
-            filter: `company_id=eq.${session.company_id}`
-          },
-          async () => {
-            console.log("[REALTIME] Employee submissions updated, refreshing...");
-          }
-        )
-        .subscribe();
-
-      channels = [ordersChannel, productsChannel, workersChannel, employeesChannel, submissionsChannel];
-    };
-
-    setupRealtime();
-
-    return () => {
-      channels.forEach(ch => {
-        supabase.removeChannel(ch);
-      });
-    };
-  }, [session?.company_id, supabase]);
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {
@@ -536,6 +411,155 @@ export default function App() {
       root.style.backgroundColor = "#f4f4f5"; // Elegant soft warm-white backdrop for light mode
     }
   }, [theme]);
+
+  // 3. Global Enter Key Navigation / Submission & Print Shortcut P
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      const isInput = active && (
+        active.tagName === "INPUT" ||
+        active.tagName === "TEXTAREA" ||
+        active.tagName === "SELECT" ||
+        active.getAttribute("contenteditable") === "true"
+      );
+
+      // --- 1. Print shortcut "P" or "p" (only when not in typing context) ---
+      if (!isInput && e.key.toLowerCase() === "p" && !(e.ctrlKey || e.altKey || e.shiftKey || e.metaKey)) {
+        // Look for buttons related to print
+        const buttons = Array.from(document.querySelectorAll("button, a, [role='button']")) as HTMLElement[];
+        let foundBtn: HTMLElement | null = null;
+
+        // Try exact/partial matching of typical print elements
+        for (const btn of buttons) {
+          const text = (btn.textContent || "").toLowerCase().trim();
+          const title = (btn.getAttribute("title") || "").toLowerCase().trim();
+          
+          // Check if button is visible
+          const rect = btn.getBoundingClientRect();
+          const style = window.getComputedStyle(btn);
+          const isVisible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+
+          if (isVisible) {
+            // Priority matches for Print / طباعة
+            if (
+              text.includes("طباعة") || 
+              text.includes("print") || 
+              text.includes("imprimer") ||
+              title.includes("طباعة") || 
+              title.includes("print") || 
+              title.includes("imprimer") ||
+              btn.classList.contains("print-btn")
+            ) {
+              foundBtn = btn;
+              break;
+            }
+          }
+        }
+
+        if (foundBtn) {
+          e.preventDefault();
+          foundBtn.click();
+        }
+        return;
+      }
+
+      // --- 2. Enter key navigation and OK/Confirm action ---
+      if (e.key === "Enter") {
+        // If we are typing in a TEXTAREA, allow natural enter (newline)
+        if (active && active.tagName === "TEXTAREA") {
+          return;
+        }
+
+        if (isInput) {
+          // Navigating between fields
+          e.preventDefault();
+
+          // Search inside the closest modal, form, or general parent container
+          const modalWindow = document.querySelector(".fixed.inset-0, [role='dialog'], .modal");
+          const formElement = active?.closest("form") || active?.closest(".grid") || active?.closest("div.space-y-4");
+          const container = modalWindow || formElement || document.body;
+
+          if (container) {
+            // Find all visible, non-disabled input/select/textarea controls
+            const focusables = Array.from(container.querySelectorAll(
+              "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled])"
+            )) as HTMLElement[];
+
+            const visibleFocusables = focusables.filter(el => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+            });
+
+            const index = visibleFocusables.indexOf(active as HTMLElement);
+            if (index !== -1 && index < visibleFocusables.length - 1) {
+              // Focus the next field
+              const nextEl = visibleFocusables[index + 1];
+              nextEl.focus();
+              if (nextEl instanceof HTMLInputElement) {
+                nextEl.select();
+              }
+            } else {
+              // We are at the last input, or there is no next field. Let's trigger the submit/confirm button!
+              // First search for any clear primary action button inside the active container
+              const submitBtn = container.querySelector("button[type='submit'], button.bg-rose-650, button.bg-emerald-600, button.bg-rose-500, button.bg-indigo-600, button.bg-slate-900") as HTMLElement | null;
+              if (submitBtn) {
+                submitBtn.focus();
+                submitBtn.click();
+              }
+            }
+          }
+        } else {
+          // If NOT in an input context and Enter is pressed, check for active overlay modal/dialogs to click "Yes/Confirm/Save"
+          const openModal = document.querySelector(".fixed.inset-0, [role='dialog'], .modal");
+          if (openModal) {
+            const buttons = Array.from(openModal.querySelectorAll("button")) as HTMLElement[];
+            const visibleButtons = buttons.filter(btn => {
+              const rect = btn.getBoundingClientRect();
+              const style = window.getComputedStyle(btn);
+              return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+            });
+
+            // Arabic-first order of confirmation words
+            const confirmWords = ["نعم", "تأكيد", "موافق", "حفظ", "إضافة", "اضافة", "تسجيل", "قبول", "confirm", "ok", "save", "yes", "delete"];
+            let targetBtn: HTMLElement | null = null;
+
+            for (const word of confirmWords) {
+              const match = visibleButtons.find(btn => {
+                const text = (btn.textContent || "").toLowerCase().trim();
+                return text.includes(word);
+              });
+              if (match) {
+                targetBtn = match;
+                break;
+              }
+            }
+
+            if (targetBtn) {
+              e.preventDefault();
+              targetBtn.click();
+            }
+          } else {
+            // No modal is open, but maybe we can trigger the main submit button on the active view
+            const mainSubmitBtn = document.querySelector("button[type='submit'], .btn-primary") as HTMLElement | null;
+            if (mainSubmitBtn) {
+              const rect = mainSubmitBtn.getBoundingClientRect();
+              const style = window.getComputedStyle(mainSubmitBtn);
+              if (rect.width > 0 && style.display !== "none" && style.visibility !== "hidden") {
+                e.preventDefault();
+                mainSubmitBtn.click();
+              }
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeyDown, true);
+    };
+  }, []);
 
   const triggerToast = (msg: string, type: "success" | "info" = "success") => {
     setToastMessage(msg);
@@ -1052,10 +1076,15 @@ export default function App() {
     }
 
     deleteOrderSoft(orderId);
-    setOrders(getOrders());
+    const updatedOrdersList = getOrders();
+    setOrders(updatedOrdersList);
     setBasicInventory(getBasicInventory());
     setSubInventory(getSubInventory());
     setReturnInventory(getReturnInventory());
+    
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "orders", updatedOrdersList);
+    }
     
     const updatedTrash = getTrashItems();
     setTrashItems(updatedTrash);
@@ -1085,9 +1114,14 @@ export default function App() {
     }
 
     deleteProductSoft(pid);
-    setProducts(getProducts());
+    const updatedProductsList = getProducts();
+    setProducts(updatedProductsList);
     setBasicInventory(getBasicInventory());
     setSubInventory(getSubInventory());
+    
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "products", updatedProductsList);
+    }
     
     const updatedTrash = getTrashItems();
     setTrashItems(updatedTrash);
@@ -1147,7 +1181,12 @@ export default function App() {
     }
 
     deleteWorkerSoft(wId);
-    setWorkers(getWorkers());
+    const updatedWorkersList = getWorkers();
+    setWorkers(updatedWorkersList);
+    
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "workers", updatedWorkersList);
+    }
     
     const updatedTrash = getTrashItems();
     setTrashItems(updatedTrash);
@@ -1160,6 +1199,40 @@ export default function App() {
       }, 5000);
     }
     triggerToast("تم نقل ملف الموظف وأجور رواتبه لسلة الحذف.", "info");
+  };
+
+  const handleDeleteEntireWorkerProfile = (workerCode: string) => {
+    if (session) {
+      logActivity({
+        companyId: session.company_id,
+        userName: session.username,
+        userId: session.user_id,
+        jobTitle: session.jobTitle || (session.role === "admin" ? "Admin" : "Employee"),
+        actionType: "Delete Entire Worker Profile",
+        pageName: "Workers",
+        affectedRecord: `Worker Code: ${workerCode}`
+      }).catch(() => {});
+    }
+
+    deleteEntireWorkerProfileSoft(workerCode);
+    const updatedWorkersList = getWorkers();
+    setWorkers(updatedWorkersList);
+    
+    if (session && session.company_id) {
+      pushSingleDatasetToCloud(session.company_id, "workers", updatedWorkersList);
+    }
+    
+    const updatedTrash = getTrashItems();
+    setTrashItems(updatedTrash);
+
+    const addedTrash = updatedTrash[updatedTrash.length - 1];
+    if (addedTrash) {
+      setUndoTarget({ trashId: addedTrash.id, title: addedTrash.title, type: "worker" });
+      setTimeout(() => {
+        setUndoTarget(current => current?.trashId === addedTrash.id ? null : current);
+      }, 5000);
+    }
+    triggerToast(lang === "ar" ? "✅ تم حذف ملف العامل بالكامل مع جميع سجلاته." : "✅ Employee and all records deleted permanently.", "success");
   };
 
   const handleSoftDeleteExpense = (expId: string) => {
@@ -1280,23 +1353,9 @@ export default function App() {
           setSession(newSession);
           saveUserSession(newSession);
           
-          // Auto sync tenant list on login or sign-up (skip for employees)
-          if (newSession && newSession.email && newSession.role !== "employee") {
+          // Auto sync tenant list on login or sign-up!
+          if (newSession && newSession.email) {
             registerSaaSCompanyOnLoginAndSignUp(newSession.email, newSession.username || newSession.email.split("@")[0]);
-          }
-          
-          // Cleanup: remove any accidental SaaS entries created for employees
-          if (newSession && newSession.role === "employee" && newSession.email) {
-            try {
-              const stored = localStorage.getItem("corevia_saas_companies_v1");
-              if (stored) {
-                const list = JSON.parse(stored);
-                const filtered = list.filter((c: any) => c.email?.toLowerCase() !== newSession.email?.toLowerCase());
-                if (filtered.length !== list.length) {
-                  localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(filtered));
-                }
-              }
-            } catch (e) {}
           }
         }}
         onTriggerNotification={triggerToast}
@@ -1434,8 +1493,8 @@ export default function App() {
   // LANDING GATES: SaaS SUBSCRIPTION STATUSES
   // ==========================================
 
-  // GATE I: DISABLED TENANT BLOCKADE (skip for employees)
-  if (isDisabled && session?.role !== "employee") {
+  // GATE I: DISABLED TENANT BLOCKADE
+  if (isDisabled) {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_disabled">
@@ -1469,8 +1528,8 @@ export default function App() {
     );
   }
 
-  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE (skip for employees)
-  if (isSuspended && session?.role !== "employee") {
+  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE
+  if (isSuspended) {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_suspended">
@@ -1504,8 +1563,8 @@ export default function App() {
     );
   }
 
-  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN) (skip for employees)
-  if (isPendingVerification && saasAccount && session?.role !== "employee") {
+  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN)
+  if (isPendingVerification && saasAccount) {
     const isRtl = lang === "ar";
     
     const handleVerifyOtpSubmit = (e: React.FormEvent) => {
@@ -1736,6 +1795,7 @@ export default function App() {
             onSaveWorkers={saveWorkersAndPersist}
             lang={lang}
             onSoftDeleteWorker={handleSoftDeleteWorker}
+            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
             onTriggerNotification={triggerToast}
             orders={orders}
             onSectionChange={setActiveTab}
@@ -1828,13 +1888,6 @@ export default function App() {
           <MyProfileView
             session={session}
             lang={lang}
-            onTriggerNotification={triggerToast}
-            companyInfo={{
-              name: activeProfile.businessName,
-              phone: activeProfile.phone,
-              email: activeProfile.email,
-              address: activeProfile.address
-            }}
           />
         )}
 

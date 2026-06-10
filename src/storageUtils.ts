@@ -1008,6 +1008,34 @@ export function deleteWorkerSoft(id: string): void {
   saveTrashItems(trash);
 }
 
+// Soft delete ENTIRE worker profile (all monthly statements matching a code)
+export function deleteEntireWorkerProfileSoft(code: string): void {
+  const workers = getWorkers();
+  const toDelete = workers.filter(x => x.code === code);
+  if (toDelete.length === 0) return;
+
+  const remaining = workers.filter(x => x.code !== code);
+  saveWorkers(remaining);
+
+  const trash = getTrashItems();
+  toDelete.forEach((worker, index) => {
+    const monthVal = (worker as any).month;
+    const yearVal = (worker as any).year;
+    const titleSuffix = (monthVal !== undefined && yearVal !== undefined)
+      ? ` - شهر ${monthVal + 1}/${yearVal}`
+      : "";
+    trash.push({
+      id: `trash-w-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 4)}`,
+      itemId: worker.id,
+      type: "worker",
+      title: `ملف العامل: ${worker.name} (${worker.code})${titleSuffix}`,
+      deletedAt: new Date().toISOString(),
+      originalData: worker
+    });
+  });
+  saveTrashItems(trash);
+}
+
 export function restoreWorkerSoft(w: Worker): void {
   const workers = getWorkers();
   workers.push(w);

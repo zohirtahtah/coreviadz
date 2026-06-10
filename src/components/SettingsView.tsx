@@ -564,6 +564,22 @@ create table if not exists corevia_companies (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+create table if not exists corevia_company_users (
+  id text primary key,
+  company_id text default 'cop_default',
+  full_name text not null,
+  phone text not null,
+  email text,
+  username text,
+  job_title text,
+  password text,
+  assigned_responsibilities text,
+  allowed_pages jsonb default '[]'::jsonb,
+  status text default 'Active',
+  last_activity text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 create table if not exists corevia_saas_users (
   user_id text primary key,
   company_id text references corevia_companies(id) on delete set null,
@@ -780,7 +796,19 @@ ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;`;
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;
+
+-- Disable Row Level Security (RLS) on all Corevia framework tables to authorize anonymous public ERP traffic
+ALTER TABLE corevia_companies DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_company_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_saas_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_profile DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_suppliers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_expenses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_workers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_salary_sheets DISABLE ROW LEVEL SECURITY;`;
 
     navigator.clipboard.writeText(rawSql);
     setCopiedSql(true);
@@ -1490,6 +1518,22 @@ create table if not exists corevia_companies (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+create table if not exists corevia_company_users (
+  id text primary key,
+  company_id text default 'cop_default',
+  full_name text not null,
+  phone text not null,
+  email text,
+  username text,
+  job_title text,
+  password text,
+  assigned_responsibilities text,
+  allowed_pages jsonb default '[]'::jsonb,
+  status text default 'Active',
+  last_activity text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 create table if not exists corevia_saas_users (
   user_id text primary key,
   company_id text references corevia_companies(id) on delete set null,
@@ -1706,7 +1750,19 @@ ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
 ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;`}
+ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;
+
+-- Disable Row Level Security (RLS) on all Corevia framework tables to authorize anonymous public ERP traffic
+ALTER TABLE corevia_companies DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_company_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_saas_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_profile DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_suppliers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_expenses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_workers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE corevia_salary_sheets DISABLE ROW LEVEL SECURITY;`}
                   </pre>
                 </div>
               </div>
