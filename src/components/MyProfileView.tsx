@@ -70,6 +70,29 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
 
   useEffect(() => {
     loadProfileAndHistory();
+    const interval = setInterval(() => {
+      // Re-read worker profile from localStorage (updated by real-time subscriptions)
+      const allWorkers = getWorkers();
+      const match = allWorkers.find(
+        w => w.id === session.userId || 
+             (w.phone && session.phone && w.phone.replace(/[^0-9]/g, "") === session.phone.replace(/[^0-9]/g, "")) ||
+             w.name.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
+      );
+      if (match) setWorkerProfile(match);
+    }, 5000);
+    const subInterval = setInterval(async () => {
+      try {
+        const data = await getSubmissions(session.company_id);
+        const filtered = data.filter(
+          s => s.employeeId === session.userId || 
+               s.employeeName.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
+        );
+        setSubmissions(filtered);
+      } catch (err) {
+        console.warn("Failed to refresh submissions", err);
+      }
+    }, 5000);
+    return () => { clearInterval(interval); clearInterval(subInterval); };
   }, [session]);
 
   const handleSubmitReport = async (e: React.FormEvent) => {

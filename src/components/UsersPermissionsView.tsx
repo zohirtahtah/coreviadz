@@ -177,6 +177,10 @@ export default function UsersPermissionsView({
 
   useEffect(() => {
     loadEmployeesData();
+    const interval = setInterval(() => {
+      getEmployees(companyId).then(setEmployees).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
   }, [companyId]);
 
   // Total seats counted: 1 Owner + number of created employee accounts

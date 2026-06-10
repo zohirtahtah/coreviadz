@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { UserSession, LanguageType, ChatMessage } from "../types";
 import { 
   getChatMessages, 
-  sendChatMessage 
+  sendChatMessage,
+  saveLocalChatMessages
 } from "../communicationService";
+import { supabase } from "../supabaseClient";
 import { 
   MessageSquare, Send, Mic, Square, Search, X, Volume2, 
   Trash2, UserCheck, Calendar, ShieldCheck, Sparkles, ArrowDown
@@ -66,14 +68,40 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     }
   };
 
-  // Setup polling for direct messaging sync
+  // Setup real-time subscription for direct messaging sync
   useEffect(() => {
     loadMessages();
+
+    const pullChatFromSupabase = async () => {
+      if (!supabase) return;
+      const { data } = await supabase.from("corevia_chat_messages").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((m: any) => ({
+          id: m.id, companyId: m.company_id, senderId: m.sender_id, senderName: m.sender_name,
+          senderJobTitle: m.sender_job_title, content: m.content || "", voiceUrl: m.voice_url || undefined,
+          createdAt: m.created_at
+        }));
+        saveLocalChatMessages(formatted);
+        setMessages(formatted);
+      }
+    };
+
+    let channel: any = null;
+    if (supabase) {
+      channel = supabase.channel(`chat-realtime-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_chat_messages", filter: `company_id=eq.${session.company_id}` }, pullChatFromSupabase)
+        .subscribe();
+    }
+
+    // Fallback polling every 10 seconds
     const interval = setInterval(() => {
       loadMessages(true);
-    }, 3000); // Poll every 3 seconds for extremely quick updates
+    }, 10000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [session.company_id]);
 
   // Scroll on messages change

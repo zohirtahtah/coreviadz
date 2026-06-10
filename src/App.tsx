@@ -13,6 +13,9 @@ import {
   deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft, deleteEntireWorkerProfileSoft,
   restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft
 } from "./storageUtils";
+import { saveLocalEmployees } from "./employeeService";
+import { saveLocalSubmissions } from "./employeeSubmissionsService";
+import { saveLocalChatMessages } from "./communicationService";
 import { 
   BusinessProfile, Order, Product, BasicInventoryItem, SubInventoryItem, 
   ReturnInventoryItem, Supplier, SupplierInvoice, Worker, Expense, TrashItem 
@@ -447,6 +450,75 @@ export default function App() {
       }
     };
 
+    const pullSuppliers = async () => {
+      const { data } = await supabase.from("corevia_suppliers").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((s: any) => ({
+          id: s.id, name: s.name, phone: s.phone || "", address: s.address || "",
+          email: s.email || "", createdAt: s.created_at || new Date().toISOString(),
+          createdBy: s.created_by || undefined, updatedBy: s.updated_by || undefined,
+          createdDate: s.created_date || undefined, createdTime: s.created_time || undefined,
+          updatedDate: s.updated_date || undefined, updatedTime: s.updated_time || undefined
+        }));
+        saveSuppliers(formatted); setSuppliers(formatted);
+      }
+    };
+
+    const pullExpenses = async () => {
+      const { data } = await supabase.from("corevia_expenses").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((e: any) => {
+          if (e.type === "fixed") {
+            return { id: e.id, title: e.name || "Fixed Expense", type: "fixed", amount: e.amount || 0, date: e.date || new Date().toISOString().split("T")[0], createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
+          } else if (e.type === "variable") {
+            return { id: e.id, title: e.name || "Variable Expense", type: "variable", amount: e.amount || 0, date: e.date || new Date().toISOString().split("T")[0], monthYear: e.month_year || new Date().toISOString().substring(0, 7), createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
+          } else {
+            return { id: e.id, title: e.name || `Campaign: ${e.platform}`, type: "ads", amount: e.amount_currency || 0, date: e.start_date || new Date().toISOString().split("T")[0], isUSD: true, usdAmount: e.amount_usd || 0, exchangeRate: e.exchange_rate || 0, notes: e.notes || "", platform: e.platform || "Facebook", monthYear: e.month_year || new Date().toISOString().substring(0, 7), startDate: e.start_date, endDate: e.end_date, createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
+          }
+        });
+        localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(formatted));
+        setExpenses(formatted);
+      }
+    };
+
+    const pullEmployees = async () => {
+      const { data } = await supabase.from("corevia_company_users").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((e: any) => ({
+          id: e.id, companyId: e.company_id, fullName: e.full_name, phone: e.phone || "",
+          email: e.email || "", username: e.username || "", jobTitle: e.job_title || "",
+          password: e.password || "", allowedPages: typeof e.allowed_pages === "string" ? JSON.parse(e.allowed_pages) : (e.allowed_pages || []),
+          assignedResponsibilities: e.assigned_responsibilities || "", status: e.status || "Active",
+          lastActivity: e.last_activity || null, createdAt: e.created_at || new Date().toISOString()
+        }));
+        saveLocalEmployees(formatted);
+      }
+    };
+
+    const pullSubmissions = async () => {
+      const { data } = await supabase.from("corevia_employee_submissions").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((s: any) => ({
+          id: s.id, companyId: s.company_id, employeeId: s.employee_id, employeeName: s.employee_name,
+          type: s.type, amount: s.amount || 0, description: s.description || "", date: s.date || "",
+          status: s.status || "pending", createdAt: s.created_at || new Date().toISOString()
+        }));
+        saveLocalSubmissions(formatted);
+      }
+    };
+
+    const pullChatMessages = async () => {
+      const { data } = await supabase.from("corevia_chat_messages").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((m: any) => ({
+          id: m.id, companyId: m.company_id, senderId: m.sender_id, senderName: m.sender_name,
+          senderJobTitle: m.sender_job_title, content: m.content || "", voiceUrl: m.voice_url || undefined,
+          createdAt: m.created_at
+        }));
+        saveLocalChatMessages(formatted);
+      }
+    };
+
     const setupRealtime = () => {
       const ordersChannel = supabase.channel(`orders-${session.company_id}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "corevia_orders", filter: `company_id=eq.${session.company_id}` }, pullOrders)
@@ -457,7 +529,22 @@ export default function App() {
       const workersChannel = supabase.channel(`workers-${session.company_id}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "corevia_workers", filter: `company_id=eq.${session.company_id}` }, pullWorkers)
         .subscribe();
-      channels = [ordersChannel, productsChannel, workersChannel];
+      const suppliersChannel = supabase.channel(`suppliers-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_suppliers", filter: `company_id=eq.${session.company_id}` }, pullSuppliers)
+        .subscribe();
+      const expensesChannel = supabase.channel(`expenses-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_expenses", filter: `company_id=eq.${session.company_id}` }, pullExpenses)
+        .subscribe();
+      const employeesChannel = supabase.channel(`employees-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_company_users", filter: `company_id=eq.${session.company_id}` }, pullEmployees)
+        .subscribe();
+      const submissionsChannel = supabase.channel(`submissions-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_employee_submissions", filter: `company_id=eq.${session.company_id}` }, pullSubmissions)
+        .subscribe();
+      const chatChannel = supabase.channel(`chat-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_chat_messages", filter: `company_id=eq.${session.company_id}` }, pullChatMessages)
+        .subscribe();
+      channels = [ordersChannel, productsChannel, workersChannel, suppliersChannel, expensesChannel, employeesChannel, submissionsChannel, chatChannel];
     };
 
     setupRealtime();
@@ -1956,6 +2043,7 @@ export default function App() {
           <MyProfileView
             session={session}
             lang={lang}
+            onTriggerNotification={triggerToast}
           />
         )}
 
