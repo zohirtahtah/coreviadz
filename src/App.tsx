@@ -335,6 +335,45 @@ export default function App() {
     }
   }, []);
 
+  // Process employee invite link at App level (works regardless of login state)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("setup_worker") === "true") {
+        const id = params.get("id");
+        const cid = params.get("cid");
+        const name = params.get("name") ? decodeURIComponent(params.get("name")!) : "";
+        const user = params.get("user") ? decodeURIComponent(params.get("user")!) : "";
+        const pass = params.get("pass") ? decodeURIComponent(params.get("pass")!) : "";
+        const title = params.get("title") ? decodeURIComponent(params.get("title")!) : "";
+        const pagesStr = params.get("pages") ? decodeURIComponent(params.get("pages")!) : "[]";
+        if (id && cid && user && pass) {
+          let pagesArr: string[] = [];
+          try { pagesArr = JSON.parse(pagesStr); } catch (e) {}
+          // Save to localStorage
+          const cached = (() => { try { return JSON.parse(localStorage.getItem("corevia_employees_list_v2") || "[]"); } catch (e) { return []; } })();
+          if (!cached.some((emp: any) => emp.id === id)) {
+            cached.push({ id, companyId: cid, fullName: name || user, phone: "", email: "", username: user, jobTitle: title || "موظف", password: pass, allowedPages: pagesArr, status: "Active", createdAt: new Date().toISOString() });
+            localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
+          }
+          // Create session and auto-login
+          const employeeSession: UserSession = {
+            username: name || user,
+            email: user,
+            isRegistered: true, isApproved: true, isSuspended: false,
+            user_id: id, company_id: cid, role: "employee", allowedPages: pagesArr, jobTitle: title || "موظف"
+          };
+          setSession(employeeSession);
+          saveUserSession(employeeSession);
+          // Clean URL
+          window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+        }
+      }
+    } catch (e) {
+      console.warn("Error processing setup_worker link:", e);
+    }
+  }, []);
+
   // Helper to load localized database and configuration records from local cache
   const loadStateFromLocal = () => {
     const profObj = getBusinessProfile();
