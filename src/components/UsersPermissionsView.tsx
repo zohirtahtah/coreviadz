@@ -34,13 +34,15 @@ interface UsersPermissionsViewProps {
   session: any;
   onTriggerNotification: (msg: string) => void;
   seatsLimit?: number;
+  onDeleteEntireWorkerProfile?: (code: string) => void;
 }
 
 export default function UsersPermissionsView({
   lang,
   session,
   onTriggerNotification,
-  seatsLimit = 5
+  seatsLimit = 5,
+  onDeleteEntireWorkerProfile
 }: UsersPermissionsViewProps) {
   const isRtl = lang === "ar";
   const companyId = session?.company_id || "cop_default";
@@ -286,7 +288,16 @@ export default function UsersPermissionsView({
 
       // If user selected to delete the entire worker file, do it too!
       if (deleteWorkerProfile && linkedWorkerFound) {
-        deleteEntireWorkerProfileSoft(linkedWorkerFound.code);
+        if (onDeleteEntireWorkerProfile) {
+          onDeleteEntireWorkerProfile(linkedWorkerFound.code);
+        } else {
+          deleteEntireWorkerProfileSoft(linkedWorkerFound.code);
+          if (companyId) {
+            pushSingleDatasetToCloud(companyId, "workers", getWorkers()).catch(err => {
+              console.error("[AutoSync] Error syncing workers database delete:", err);
+            });
+          }
+        }
         onTriggerNotification(
           isRtl
             ? `✅ تم شطب وحذف ملف العامل (${linkedWorkerFound.name}) وسجلاته المالية بالكامل.`

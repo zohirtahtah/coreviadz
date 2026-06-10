@@ -1865,6 +1865,7 @@ export default function App() {
             session={session}
             onTriggerNotification={triggerToast}
             seatsLimit={seatsLimit}
+            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
           />
         )}
 

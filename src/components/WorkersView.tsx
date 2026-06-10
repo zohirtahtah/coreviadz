@@ -114,6 +114,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedMonthsToDelete, setSelectedMonthsToDelete] = useState<string[]>([]);
   const [showCalc, setShowCalc] = useState<string | null>(null); // holds worker code
 
   const [showPayModal, setShowPayModal] = useState(false);
@@ -154,6 +155,14 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   useEffect(() => {
     loadAllSubmissions();
   }, [showEmployeeFilings]);
+
+  useEffect(() => {
+    if (deleteConfirm) {
+      setSelectedMonthsToDelete([deleteConfirm]);
+    } else {
+      setSelectedMonthsToDelete([]);
+    }
+  }, [deleteConfirm]);
 
   // Core Submission Approval
   const handleApproveSubmissionInWorkersList = (sub: any, adjustedAmount?: number) => {
@@ -990,9 +999,11 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       nextYear += 1;
     }
 
-    const uniqueCodes = Array.from(new Set(workers.map(w => w.code)));
+    // Only rollover employees who are active/exist in the CURRENT filtered month/year!
+    const activeWorkersInCurrentFilteredMonth = workers.filter(w => (w as any).month === monthFilter && (w as any).year === yearFilter);
+    const uniqueCodes = Array.from(new Set(activeWorkersInCurrentFilteredMonth.map(w => w.code)));
     if (uniqueCodes.length === 0) {
-      onTriggerNotification(isRtl ? "يرجى تسجيل عامل أولاً قبل فتح شهر جديد" : "No active workers inside list", "warning");
+      onTriggerNotification(isRtl ? "يرجى تسجيل عامل في الشهر الحالي أولاً قبل فتح شهر جديد" : "No active workers inside the current month's list to roll over", "warning");
       return;
     }
 
@@ -1339,6 +1350,18 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         onTriggerNotification(isRtl ? "تم تعديل ملف العامل وحساباته الشهرية بنجاح" : "Payroll files adjusted successfully", "success");
       }
     } else {
+      // Prevent duplicate names under different codes
+      const nameConflict = listCopy.find(w => w.code !== formCode && cleanArabicName(w.name) === cleanArabicName(formName));
+      if (nameConflict) {
+        onTriggerNotification(
+          isRtl
+            ? `❌ هذا العامل مسجل في النظام برمز تعريف آخر (${nameConflict.code}). يرجى اختياره من القائمة أو مطابقة رمز التعريف لتجنب التكرار.`
+            : `❌ This worker is already registered under code (${nameConflict.code}). Please match the code or select them from the list to avoid duplication.`,
+          "warning"
+        );
+        return;
+      }
+
       // Check if worker record already exists for selected month/year
       const conflict = listCopy.some(w => w.code === formCode && (w as any).month === formMonth && (w as any).year === yearFilter);
       if (conflict) {
@@ -1456,6 +1479,20 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       onSaveWorkers(workers.filter(x => x.id !== deleteConfirm));
       onTriggerNotification(isRtl ? "تم حذف السجل الشهري للعامِل بنجاح." : "Monthly statements dropped.", "info");
     }
+    setDeleteConfirm(null);
+  };
+
+  // Delete selected worker months
+  const handleDeleteSelectedMonths = () => {
+    if (selectedMonthsToDelete.length === 0) return;
+    const remaining = workers.filter(x => !selectedMonthsToDelete.includes(x.id));
+    onSaveWorkers(remaining);
+    onTriggerNotification(
+      isRtl
+        ? "✅ تم حذف السجلات الشهرية المحددة للعامِل بنجاح."
+        : "✅ Selected monthly records deleted successfully.",
+      "success"
+    );
     setDeleteConfirm(null);
   };
 
@@ -2364,6 +2401,45 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
               <div className="space-y-3">
                 <h4 className="text-xs font-bold text-indigo-400 border-b border-zinc-900 pb-1">4.2 معلومات العامل والهوية وبطاقة الراتب</h4>
                 
+                {/* Link with existing worker dropdown */}
+                {!editId && (() => {
+                  const uniqueCodes = Array.from(new Set(workers.map(w => w.code)));
+                  const uniqueWorkersList = uniqueCodes.map(code => workers.find(w => w.code === code)!).filter(Boolean);
+                  if (uniqueWorkersList.length === 0) return null;
+                  return (
+                    <div className="flex flex-col gap-1 p-2.5 bg-indigo-950/20 border border-indigo-900/30 rounded-lg text-right">
+                      <label className="text-[10px] text-indigo-400 font-bold block">
+                        🔗 تعبئة من ملف عامل مسجل مسبقاً (اختياري):
+                      </label>
+                      <select
+                        onChange={(e) => {
+                          const selectedCode = e.target.value;
+                          if (selectedCode) {
+                            const match = workers.find(w => w.code === selectedCode);
+                            if (match) {
+                              setFormCode(match.code);
+                              setFormName(match.name);
+                              setFormPhone(match.phone || "");
+                              setFormRole(match.role || "Sales Handler");
+                              setFormBaseSalary(match.baseSalary || 35000);
+                              setFormDailyHours(match.dailyHours || 8);
+                              setFormOvertimeRate((match as any).overtimeRate || 250);
+                            }
+                          }
+                        }}
+                        className="bg-[#040406] border border-indigo-900/40 rounded p-1.5 text-xs text-white outline-none mt-1 shadow-inner focus:border-indigo-500"
+                      >
+                        <option value="">{isRtl ? "-- اختر عاملاً لتعبئة البيانات تلقائياً --" : "-- Select an existing worker --"}</option>
+                        {uniqueWorkersList.map(w => (
+                          <option key={w.code} value={w.code}>
+                            {w.name} ({w.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] text-zinc-500 font-bold">كود الموظف (الرمز المعرف)</label>
                   <input
@@ -2823,43 +2899,77 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       )}
 
       {/* deleteConfirm Dialog */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-          <div className="bg-[#09090b] border border-[#27272a] rounded-xl max-w-md w-full p-6 space-y-4 text-right shadow-2xl" dir="rtl">
-            <h4 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
-              <span>خيارات حذف بيانات العامل</span>
-              <span className="text-rose-500">⚠</span>
-            </h4>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              يرجى التدقيق في اختيار خيار الحذف المناسب من الأزرار أدناه للحفاظ على تماسك البيانات:
-            </p>
-            
-            <div className="space-y-2 pt-2">
-              <button 
-                type="button" 
-                onClick={handleDeleteEntireWorkerProfile} 
-                className="w-full py-2.5 px-3 bg-rose-650 hover:bg-rose-600 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow flex items-center justify-center gap-1.5"
-              >
-                <span>⚠️ حذف ملف العامل بالكامل (كل شهوره وتاريخه)</span>
-              </button>
-              <button 
-                type="button" 
-                onClick={handleDeleteWorkerRecord} 
-                className="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-amber-500 hover:text-amber-400 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <span>🗑️ حذف هذا السجل الشهري للأجر والشهر المحدد فقط</span>
-              </button>
-              <button 
-                type="button" 
-                onClick={() => setDeleteConfirm(null)} 
-                className="w-full py-2 bg-transparent text-slate-400 hover:text-white rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center justify-center"
-              >
-                تراجع وإلغاء
-              </button>
+      {deleteConfirm && (() => {
+        const workerToDelete = workers.find(x => x.id === deleteConfirm);
+        const workerCode = workerToDelete?.code;
+        const workerRecords = workers.filter(w => w.code === workerCode);
+        const workerName = workerToDelete?.name || "";
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+            <div className="bg-[#09090b] border border-[#27272a] rounded-xl max-w-md w-full p-6 space-y-4 text-right shadow-2xl" dir="rtl">
+              <h4 className="text-sm font-black text-white flex items-center gap-1.5 justify-end">
+                <span>خيارات حذف بيانات العامل: {workerName}</span>
+                <span className="text-rose-500">⚠</span>
+              </h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                يرجى تحديد الأشهر التي ترغب في حذفها للعامل من القائمة أدناه، أو اختيار حذف الملف بالكامل:
+              </p>
+
+              {/* Checklist representing worker records/months */}
+              <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-800 space-y-2 max-h-40 overflow-y-auto">
+                <p className="text-[10px] text-zinc-500 font-bold mb-1">📅 الأشهر المسجلة لهذا العامل:</p>
+                {workerRecords.map((r: any) => {
+                  const isChecked = selectedMonthsToDelete.includes(r.id);
+                  const mName = lang === "ar" ? monthNamesAr[r.month] : (lang === "fr" ? monthNamesFr[r.month] : monthNamesEn[r.month]);
+                  return (
+                    <label key={r.id} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer hover:bg-zinc-900/50 p-1.5 rounded transition">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked) {
+                            setSelectedMonthsToDelete(selectedMonthsToDelete.filter(id => id !== r.id));
+                          } else {
+                            setSelectedMonthsToDelete([...selectedMonthsToDelete, r.id]);
+                          }
+                        }}
+                        className="rounded border-zinc-800 text-rose-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span className="font-medium">{mName} / {r.year}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              
+              <div className="space-y-2 pt-2">
+                <button 
+                  type="button" 
+                  onClick={handleDeleteSelectedMonths} 
+                  disabled={selectedMonthsToDelete.length === 0}
+                  className="w-full py-2.5 px-3 bg-rose-650 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow flex items-center justify-center gap-1.5"
+                >
+                  <span>🗑️ حذف الأشهر المحددة ({selectedMonthsToDelete.length})</span>
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleDeleteEntireWorkerProfile} 
+                  className="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-amber-500 hover:text-amber-400 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>⚠️ حذف ملف العامل بالكامل (كل شهوره وتاريخه)</span>
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setDeleteConfirm(null)} 
+                  className="w-full py-2 bg-transparent text-slate-400 hover:text-white rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center justify-center"
+                >
+                  تراجع وإلغاء
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Undo Toast component overlay */}
       {lastDeletedWorker && (
