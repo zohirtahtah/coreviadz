@@ -1150,32 +1150,16 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                   {/* Base Salary */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "الراتب الأساسي (DZD) *" : "Base Salary (DZD) *"}
+                      {isRtl ? "الراتب الأساسي المعتاد (DZD)" : "Base Salary (DZD)"}
                     </label>
                     <input
                       type="number"
-                      required
                       value={baseSalary || ""}
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         setBaseSalary(val);
-                        // By default sync monthly salary
                         setMonthlySalary(val);
                       }}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
-                    />
-                  </div>
-
-                  {/* Monthly Salary */}
-                  <div>
-                    <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "الراتب الإجمالي المتفق عليه *" : "Contracted Monthly Salary *"}
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      value={monthlySalary || ""}
-                      onChange={(e) => setMonthlySalary(Number(e.target.value))}
                       className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
                     />
                   </div>
@@ -1183,55 +1167,37 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                   {/* Daily hours */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "ساعات العمل اليومية *" : "Daily Working Hours *"}
+                      {isRtl ? "ساعات العمل اليومية" : "Daily Working Hours"}
                     </label>
                     <input
                       type="number"
-                      required
                       value={workingHoursPerDay || ""}
                       onChange={(e) => setWorkingHoursPerDay(Number(e.target.value))}
                       className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
                     />
                   </div>
 
-                  {/* Working days per month */}
+                  {/* Overtime rate per hour */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "أيام العمل الشهرية المتوقعة *" : "Expected Working Days/Month *"}
+                      {isRtl ? "أجر كل ساعة إضافية (دج)" : "Overtime Rate per Hour (DZD)"}
                     </label>
                     <input
                       type="number"
-                      required
-                      value={workingDaysPerMonth || ""}
-                      onChange={(e) => setWorkingDaysPerMonth(Number(e.target.value))}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
-                    />
-                  </div>
-
-                  {/* Overtime rate multiplier */}
-                  <div>
-                    <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "معدل الراتب الإضافي لكل ساعة *" : "Overtime Hour Multiplier *"}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      required
                       value={overtimeHourRate || ""}
                       onChange={(e) => setOvertimeHourRate(Number(e.target.value))}
                       className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
                     />
                   </div>
 
-                  {/* Daily penalty rate */}
+                  {/* Absence deduction rate */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "مضاعف خصم الغياب اليومي *" : "Daily Absence Penalty Multiplier *"}
+                      {isRtl ? "مضاعف خصم الغياب" : "Absence Deduction Multiplier"}
                     </label>
                     <input
                       type="number"
                       step="0.1"
-                      required
                       value={absenceDeductionRate || ""}
                       onChange={(e) => setAbsenceDeductionRate(Number(e.target.value))}
                       className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
