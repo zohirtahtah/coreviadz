@@ -42,28 +42,30 @@ export function saveLocalEmployees(employees: Employee[]): void {
  * falling back and syncing with local storage.
  */
 export async function getEmployees(companyId: string): Promise<Employee[]> {
-  const localList = getLocalEmployees().filter(e => e.companyId === companyId);
+  // Always start with localStorage as the source of truth
+  let localList = getLocalEmployees().filter(e => e.companyId === companyId);
+
+  // Fallback: if no employees match this companyId, show ALL employees
+  if (localList.length === 0) {
+    const allEmps = getLocalEmployees();
+    if (allEmps.length > 0) {
+      localList = allEmps;
+    }
+  }
 
   if (!supabase) {
     return localList;
   }
 
+  // Try to sync with Supabase in background (never override local data)
   try {
     const { data, error } = await supabase
       .from("corevia_company_users")
       .select("*")
       .eq("company_id", companyId);
 
-    if (error) {
-      if (error.code === "PGRST116" || error.code === "42P01") {
-        // Table not created yet, return local cached state
-        return localList;
-      }
-      throw error;
-    }
-
-    if (data) {
-      const mapped: Employee[] = data.map((item: any) => ({
+    if (!error && data) {
+      const supabaseMapped: Employee[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
         fullName: item.full_name,
@@ -79,11 +81,13 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Merge: Supabase data wins by ID, but keep local-only records too
-      const supabaseIds = new Set(mapped.map(e => e.id));
-      const localOnly = localList.filter(e => !supabaseIds.has(e.id));
+      const localIds = new Set(localList.map(e => e.id));
+      // Only add Supabase records that aren't already in localStorage
+      const supabaseOnly = supabaseMapped.filter(e => !localIds.has(e.id));
 
       // Try to upsert any local-only employees to Supabase
+      const supabaseIds = new Set(supabaseMapped.map(e => e.id));
+      const localOnly = localList.filter(e => !supabaseIds.has(e.id));
       for (const local of localOnly) {
         try {
           await supabase.from("corevia_company_users").upsert({
@@ -98,23 +102,23 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
             assigned_responsibilities: local.assignedResponsibilities || null,
             allowed_pages: local.allowedPages,
             status: local.status,
-            last_activity: local.lastActivity || null
+            last_activity: local.lastActivity || null,
+            created_at: local.createdAt || new Date().toISOString()
           });
         } catch (e2) {
           // Silently continue — local copy is preserved
         }
       }
 
-      const merged = [...mapped, ...localOnly];
+      const merged = [...localList, ...supabaseOnly];
 
-      // Cache merged list locally
       const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
       saveLocalEmployees([...otherCompaniesObj, ...merged]);
 
       return merged;
     }
   } catch (e) {
-    console.warn("Failed to fetch employees from Supabase, reverting to local cache:", e);
+    console.warn("Failed to fetch employees from Supabase, using local cache:", e);
   }
 
   return localList;
@@ -151,7 +155,8 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       assigned_responsibilities: employee.assignedResponsibilities || null,
       allowed_pages: employee.allowedPages,
       status: employee.status,
-      last_activity: employee.lastActivity || null
+      last_activity: employee.lastActivity || null,
+      created_at: employee.createdAt || new Date().toISOString()
     };
 
     const { error } = await supabase

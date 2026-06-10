@@ -441,6 +441,12 @@ export default function UsersPermissionsView({
         newValue: JSON.stringify(payload)
       });
 
+      // Update local state directly for instant feedback
+      setEmployees(prev => {
+        const filtered = prev.filter(e => e.id !== employeeId);
+        return [payload, ...filtered];
+      });
+
       if (isNew) {
         setCreatedCredentials({
           fullName: fullName.trim(),
@@ -451,8 +457,9 @@ export default function UsersPermissionsView({
         });
       } else {
         setIsModalOpen(false);
-        loadEmployeesData();
       }
+      // Always refresh from localStorage+Supabase to stay in sync with other devices
+      loadEmployeesData();
     } else {
       onTriggerNotification(isRtl ? "❌ فشل حفظ تفاصيل الحساب" : "❌ Failed to save account details");
     }
