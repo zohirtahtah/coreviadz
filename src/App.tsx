@@ -1278,9 +1278,23 @@ export default function App() {
           setSession(newSession);
           saveUserSession(newSession);
           
-          // Auto sync tenant list on login or sign-up!
-          if (newSession && newSession.email) {
+          // Auto sync tenant list on login or sign-up (skip for employees)
+          if (newSession && newSession.email && newSession.role !== "employee") {
             registerSaaSCompanyOnLoginAndSignUp(newSession.email, newSession.username || newSession.email.split("@")[0]);
+          }
+          
+          // Cleanup: remove any accidental SaaS entries created for employees
+          if (newSession && newSession.role === "employee" && newSession.email) {
+            try {
+              const stored = localStorage.getItem("corevia_saas_companies_v1");
+              if (stored) {
+                const list = JSON.parse(stored);
+                const filtered = list.filter((c: any) => c.email?.toLowerCase() !== newSession.email?.toLowerCase());
+                if (filtered.length !== list.length) {
+                  localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(filtered));
+                }
+              }
+            } catch (e) {}
           }
         }}
         onTriggerNotification={triggerToast}
@@ -1418,8 +1432,8 @@ export default function App() {
   // LANDING GATES: SaaS SUBSCRIPTION STATUSES
   // ==========================================
 
-  // GATE I: DISABLED TENANT BLOCKADE
-  if (isDisabled) {
+  // GATE I: DISABLED TENANT BLOCKADE (skip for employees)
+  if (isDisabled && session?.role !== "employee") {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_disabled">
@@ -1453,8 +1467,8 @@ export default function App() {
     );
   }
 
-  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE
-  if (isSuspended) {
+  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE (skip for employees)
+  if (isSuspended && session?.role !== "employee") {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_suspended">
@@ -1488,8 +1502,8 @@ export default function App() {
     );
   }
 
-  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN)
-  if (isPendingVerification && saasAccount) {
+  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN) (skip for employees)
+  if (isPendingVerification && saasAccount && session?.role !== "employee") {
     const isRtl = lang === "ar";
     
     const handleVerifyOtpSubmit = (e: React.FormEvent) => {
