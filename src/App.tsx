@@ -436,17 +436,39 @@ export default function App() {
     const pullWorkers = async () => {
       const { data } = await supabase.from("corevia_workers").select("*").eq("company_id", session.company_id);
       if (data && data.length > 0) {
-        const formatted = data.map((w: any) => ({
-          id: w.id, name: w.name, code: w.code || "W-" + w.id.substring(0, 4),
-          phone: w.phone || "", baseSalary: w.base_salary || 0, dailyHours: w.daily_hours || 8,
-          overtimeRate: w.overtime_rate || 2, role: w.role || "Employee",
-          monthlySalary: w.monthly_salary || w.base_salary || 0,
-          payrolls: w.payrolls || [], createdAt: w.created_at || new Date().toISOString(),
-          createdBy: w.created_by || undefined, updatedBy: w.updated_by || undefined,
-          createdDate: w.created_date || undefined, createdTime: w.created_time || undefined,
-          updatedDate: w.updated_date || undefined, updatedTime: w.updated_time || undefined
-        }));
-        saveWorkers(formatted); setWorkers(formatted);
+        // Expand base workers + their payrolls into monthly records
+        const expanded: any[] = [];
+        data.forEach((w: any) => {
+          const base = {
+            id: w.id, name: w.name, code: w.code || "W-" + w.id.substring(0, 4),
+            phone: w.phone || "", baseSalary: w.base_salary || 0, dailyHours: w.daily_hours || 8,
+            overtimeRate: w.overtime_rate || 250, role: w.role || "Employee",
+            monthlySalary: w.monthly_salary || w.base_salary || 0,
+            payrolls: w.payrolls || [], createdAt: w.created_at || new Date().toISOString(),
+            workingDaysPerMonth: w.working_days_per_month || undefined,
+            absenceDeductionRate: w.absence_deduction_rate || undefined,
+            notes: w.notes || undefined,
+            createdBy: w.created_by || undefined, updatedBy: w.updated_by || undefined,
+            createdDate: w.created_date || undefined, createdTime: w.created_time || undefined,
+            updatedDate: w.updated_date || undefined, updatedTime: w.updated_time || undefined
+          };
+          const payrolls: any[] = w.payrolls || [];
+          if (payrolls.length > 0) {
+            payrolls.forEach((p: any) => {
+              expanded.push({
+                ...base, id: `${w.id}-${p.month ?? 0}-${p.year ?? 0}`,
+                month: p.month, year: p.year,
+                overtimeHours: p.overtimeHours || 0, missingHours: p.missingHours || 0,
+                absenceDays: p.absenceDays || 0, expenses: p.expenses || [],
+                paid: p.paid || false, paymentAmount: p.paymentAmount || 0,
+                paymentDate: p.paymentDate || ""
+              });
+            });
+          } else {
+            expanded.push(base);
+          }
+        });
+        saveWorkers(expanded); setWorkers(expanded);
         console.log("[REALTIME] Synced workers from Supabase");
       }
     };

@@ -104,6 +104,49 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
 
+  // Helper functions
+  const getsLabel = (ar: string, fr: string, en: string) => {
+    if (lang === "ar") return ar;
+    if (lang === "fr") return fr;
+    return en;
+  };
+
+  const getMonthName = (m: number) => {
+    if (lang === "ar") return monthNamesAr[m] || "";
+    if (lang === "fr") return monthNamesFr[m] || "";
+    return monthNamesEn[m] || "";
+  };
+
+  const getNextCode = () => {
+    const existing = workers.filter(w => !(w as any).month);
+    const maxCode = existing.reduce((max, w) => {
+      const num = parseInt(w.code?.replace(/\D/g, "") || "0", 10);
+      return num > max ? num : max;
+    }, 0);
+    return `W-${String(maxCode + 1).padStart(3, "0")}`;
+  };
+
+  const fillDates = (year: number, month: number) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const syncExpensesWithGeneralLedger = (code: string, name: string, expenses: any[], month: number, year: number) => {
+    try {
+      const stored = localStorage.getItem("corevia_unified_expenses_v1");
+      if (!stored) return;
+      const allExpenses = JSON.parse(stored);
+      const workerLabel = `[${code}] ${name}`;
+      const filtered = allExpenses.filter((e: any) => e.title && e.title.includes(workerLabel));
+      const otherExpenses = allExpenses.filter((e: any) => !e.title || !e.title.includes(workerLabel));
+      const updatedExpenses = [...otherExpenses, ...expenses.map((exp: any) => ({
+        ...exp, title: exp.title || `${workerLabel} - ${exp.desc || "Expense"}`
+      }))];
+      localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(updatedExpenses));
+    } catch (e) {
+      console.warn("Failed to sync worker expenses with general ledger", e);
+    }
+  };
+
   // Filter values
   const today = new Date();
   const [monthFilter, setMonthFilter] = useState<number>(today.getMonth());
@@ -128,6 +171,23 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
   const [showYearlySummary, setShowYearlySummary] = useState(false);
   const [lastDeletedWorker, setLastDeletedWorker] = useState<any | null>(null);
+
+  // Form state for adding/editing workers
+  const [formCode, setFormCode] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formRole, setFormRole] = useState("Sales Handler");
+  const [formMonth, setFormMonth] = useState<number>(today.getMonth());
+  const [formBaseSalary, setFormBaseSalary] = useState<number>(35000);
+  const [formDailyHours, setFormDailyHours] = useState<number>(8);
+  const [formOvertimeHours, setFormOvertimeHours] = useState<number>(0);
+  const [formOvertimeRate, setFormOvertimeRate] = useState<number>(250);
+  const [formMissingHours, setFormMissingHours] = useState<number>(0);
+  const [formAbsenceDays, setFormAbsenceDays] = useState<number>(0);
+  const [formExpenses, setFormExpenses] = useState<any[]>([]);
+  const [formPaid, setFormPaid] = useState(false);
+  const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
+  const [formPaymentDate, setFormPaymentDate] = useState("");
 
   // Employee approval workflow states
   const [showEmployeeFilings, setShowEmployeeFilings] = useState(false);
