@@ -62,30 +62,25 @@ export default function Auth({
       if (setupWorker === "true") {
         const id = params.get("id");
         const cid = params.get("cid");
-        const name = params.get("name") ? decodeURIComponent(params.get("name")!) : "";
-        const user = params.get("user") ? decodeURIComponent(params.get("user")!) : "";
-        const pass = params.get("pass") ? decodeURIComponent(params.get("pass")!) : "";
-        const title = params.get("title") ? decodeURIComponent(params.get("title")!) : "";
-        const pagesStr = params.get("pages") ? decodeURIComponent(params.get("pages")!) : "[]";
+        const name = params.get("name") || "";
+        const user = params.get("user") || "";
+        const pass = params.get("pass") || "";
+        const title = params.get("title") || "";
+        const pagesStr = params.get("pages") || "[]";
         
         if (id && cid && user && pass) {
           let pagesArr: string[] = [];
-          try {
-            pagesArr = JSON.parse(pagesStr);
-          } catch(e) {}
+          try { pagesArr = JSON.parse(pagesStr); } catch(e) {}
           
-          // Import or update local cache list
           const cached = getLocalEmployees();
           const exists = cached.some(emp => emp.id === id);
           if (!exists) {
-            const phoneFromUrl = params.get("phone") || "";
-            const emailFromUrl = params.get("email") || "";
             cached.push({
               id,
               companyId: cid,
               fullName: name || user,
-              phone: phoneFromUrl,
-              email: emailFromUrl,
+              phone: params.get("phone") || "",
+              email: params.get("email") || "",
               username: user,
               jobTitle: title || "موظف",
               password: pass,
@@ -99,27 +94,22 @@ export default function Auth({
           setEmailInput(user);
           setPasswordInput(pass);
           
-          // Clear parameters from address bar
           try {
             window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
           } catch (histErr) {}
           
           onTriggerNotification(
-            isRtl 
-              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء" 
-              : "📋 Employee credentials prefilled, click Login to proceed", 
+            isRtl
+              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء"
+              : "📋 Employee credentials prefilled, click Login to proceed",
             "success"
           );
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
         const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
-        if (urlEmail) {
-          setEmailInput(decodeURIComponent(urlEmail));
-        }
-        if (urlPass) {
-          setPasswordInput(decodeURIComponent(urlPass));
-        }
+        if (urlEmail) setEmailInput(urlEmail);
+        if (urlPass) setPasswordInput(urlPass);
       }
     } catch (e) {
       console.warn("Error prefilling auth credentials:", e);
