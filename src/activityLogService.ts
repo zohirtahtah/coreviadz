@@ -142,7 +142,7 @@ export async function getActivityLogs(companyId: string): Promise<ActivityLogEnt
       throw error;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       const mapped: ActivityLogEntry[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,

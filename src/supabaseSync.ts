@@ -366,19 +366,21 @@ export async function pushSingleDatasetToCloud(
       }));
     }
 
-    // First, clear old records for this company of this table in background to handle deletions perfectly
-    const { error: deleteError } = await supabase.from(tableName).delete().eq("company_id", companyId);
-    if (deleteError) {
-      console.warn(`[AutoSync] Could not clear table "${tableName}" for sync:`, deleteError);
+    // Delete all current records for this company so that removed items (deletes) propagate
+    try {
+      await supabase.from(tableName).delete().eq("company_id", companyId);
+    } catch (deleteErr) {
+      console.warn(`[AutoSync] Could not clear table "${tableName}" (sync may be incomplete):`, deleteErr);
     }
 
     if (formattedItems.length > 0) {
-      const { error: insertError } = await supabase.from(tableName).insert(formattedItems);
-      if (insertError) throw insertError;
+      const { error } = await supabase.from(tableName).upsert(formattedItems);
+      if (error) throw error;
       console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items).`);
     } else {
       console.log(`Automatic background cloud sync success for table "${tableName}" (purged, 0 items left).`);
     }
+
   } catch (err) {
     console.warn(`[AutoSync] Background cloud sync for "${type}" was skipped or failed:`, err);
   }
@@ -427,7 +429,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbProducts) {
+    if (dbProducts && dbProducts.length > 0) {
       const formatted = dbProducts.map(p => ({
         id: p.id,
         name: p.name,
@@ -456,7 +458,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbOrders) {
+    if (dbOrders && dbOrders.length > 0) {
       const formatted = dbOrders.map(o => ({
         id: o.id,
         date: o.date,
@@ -498,7 +500,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbSuppliers) {
+    if (dbSuppliers && dbSuppliers.length > 0) {
       const formatted = dbSuppliers.map(s => ({
         id: s.id,
         name: s.name,
@@ -522,7 +524,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbExpenses) {
+    if (dbExpenses && dbExpenses.length > 0) {
       const unifiedExpenses: Expense[] = dbExpenses.map(e => {
         if (e.type === "fixed") {
           return {
@@ -589,7 +591,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbWorkers) {
+    if (dbWorkers && dbWorkers.length > 0) {
       const formatted = dbWorkers.map(w => ({
         id: w.id,
         name: w.name,
@@ -618,7 +620,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    if (dbSheets) {
+    if (dbSheets && dbSheets.length > 0) {
       const formatted = dbSheets.map(sh => ({
         id: sh.id,
         workerId: sh.worker_id,

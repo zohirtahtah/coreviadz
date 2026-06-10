@@ -94,6 +94,28 @@ export default function UsersPermissionsView({
     }
   }, [fullName, editingEmployee]);
 
+  // Auto-fill email from username when creating new employee
+  const [isEmailManuallyEdited, setIsEmailManuallyEdited] = useState(false);
+  useEffect(() => {
+    if (!editingEmployee && username && !isEmailManuallyEdited) {
+      setEmail(username);
+    }
+  }, [username, editingEmployee, isEmailManuallyEdited]);
+
+  // Load workers for quick fill
+  useEffect(() => {
+    if (isModalOpen && !editingEmployee) {
+      const allWorkers = getWorkers();
+      setWorkerList(allWorkers.filter(w => {
+        // exclude workers already linked to an employee
+        const isLinked = employees.some(e => 
+          e.fullName === w.name || e.phone === w.phone
+        );
+        return !isLinked;
+      }));
+    }
+  }, [isModalOpen, editingEmployee, employees]);
+
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
   const [passRevealId, setPassRevealId] = useState<string | null>(null);
@@ -176,6 +198,7 @@ export default function UsersPermissionsView({
     setPhone("");
     setEmail("");
     setUsername("");
+    setIsEmailManuallyEdited(false);
     setJobTitle("");
     setPassword(Math.floor(100000 + Math.random() * 900000).toString()); // Pre-fill with clean random password
     setStatus("Active");
@@ -199,6 +222,7 @@ export default function UsersPermissionsView({
     setPhone(emp.phone);
     setEmail(emp.email || "");
     setUsername(emp.username || "");
+    setIsEmailManuallyEdited(false);
     setJobTitle(emp.jobTitle);
     setPassword(emp.password || "");
     setStatus(emp.status);
@@ -389,46 +413,6 @@ export default function UsersPermissionsView({
           ? `✅ تم ${isNew ? "إنشاء" : "تحديث"} حساب الموظف (${fullName}) بنجاح`
           : `✅ Successfully ${isNew ? "created" : "updated"} employee account (${fullName})`
       );
-
-      // Automatically create/update Worker Profile
-      try {
-        const currentWorkers = getWorkers();
-        let workerIndex = currentWorkers.findIndex(
-          w => w.id === employeeId || 
-               (w.phone && phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(phone)) ||
-               (w.name && fullName && cleanArabicName(w.name) === cleanArabicName(fullName))
-        );
-
-        const updatedWorker = {
-          id: workerIndex !== -1 ? currentWorkers[workerIndex].id : employeeId,
-          name: fullName.trim(),
-          code: workerIndex !== -1 ? currentWorkers[workerIndex].code : `W-${Date.now().toString().slice(-4)}`,
-          phone: phone.trim(),
-          baseSalary: baseSalary,
-          monthlySalary: monthlySalary,
-          dailyHours: workingHoursPerDay,
-          workingDaysPerMonth: workingDaysPerMonth,
-          overtimeRate: overtimeHourRate,
-          absenceDeductionRate: absenceDeductionRate,
-          notes: notes.trim(),
-          role: jobTitle.trim() || "موظف",
-          payrolls: workerIndex !== -1 ? currentWorkers[workerIndex].payrolls || [] : [],
-          createdAt: workerIndex !== -1 ? currentWorkers[workerIndex].createdAt || new Date().toISOString() : new Date().toISOString()
-        };
-
-        if (workerIndex !== -1) {
-          currentWorkers[workerIndex] = updatedWorker;
-        } else {
-          currentWorkers.push(updatedWorker);
-        }
-
-        saveWorkers(currentWorkers);
-        if (companyId) {
-          await pushSingleDatasetToCloud(companyId, "workers", currentWorkers);
-        }
-      } catch (err) {
-        console.error("Worker Profile auto-sync error:", err);
-      }
 
       // Log specific activities
       const actionType = isNew ? "Create User" : "Update User";
@@ -1045,7 +1029,101 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                     />
                   </div>
 
-                  {/* Monthly Salary */}
+                  {/* Daily Working Hours */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "ساعات العمل اليومية" : "Daily Working Hours"}</label>
+                    <input
+                      type="number"
+                      value={workingHoursPerDay || ""}
+                      onChange={(e) => setWorkingHoursPerDay(Number(e.target.value))}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* بيانات الدخول (Login Credentials) */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-amber-500 border-b border-zinc-800 pb-1">
+                  {isRtl ? "بيانات الدخول إلى النظام" : "Login Credentials"}
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  
+                  {/* Username */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "اسم المستخدم للولوج (Username)" : "Username (Login Key)"}</label>
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""))}
+                      placeholder="mohamed.orders"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-emerald-400 font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Email (Optional) */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "البريد الإلكتروني (اختياري)" : "Email (Optional Login Key)"}</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setIsEmailManuallyEdited(true); }}
+                      placeholder="name@corevia.dz"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Password input */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordRaw(!showPasswordRaw)}
+                        className="text-[10px] text-slate-400 hover:text-white"
+                      >
+                        {showPasswordRaw ? (isRtl ? "إخفاء" : "Hide") : (isRtl ? "إظهار" : "Show")}
+                      </button>
+                      <label className="block text-slate-400 font-bold">{isRtl ? "رمز المرور للولوج" : "Secret Password"}</label>
+                    </div>
+                    <input
+                      type={showPasswordRaw ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Account Status */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "حالة الحساب الميداني" : "Account Status"}</label>
+                    <select
+                      value={status}
+                      onChange={(e: any) => setStatus(e.target.value)}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs pr-7 text-right"
+                      disabled={session?.role === 'employee'}
+                    >
+                      <option value="Active">{isRtl ? "نشط - Active" : "Active"}</option>
+                      <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
+                      <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 💼 محددات الراتب وعقد العمل والدقة والامتيازات */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-indigo-400 border-b border-zinc-800 pb-1">
+                  💼 {isRtl ? "محددات الراتب وعقد العمل والدقة والامتيازات:" : "Salary Regulations & Contractual Details:"}
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  
+                  {/* Overtime rate per hour */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
                       {isRtl ? "الراتب الإجمالي المتفق عليه *" : "Contracted Monthly Salary *"}

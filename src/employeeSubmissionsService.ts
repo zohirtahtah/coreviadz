@@ -56,7 +56,7 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
       throw error;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       const mapped: EmployeeSubmission[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
@@ -119,13 +119,12 @@ export async function saveSubmission(submission: EmployeeSubmission): Promise<bo
       .upsert(dbPayload);
 
     if (error) {
-      console.warn("Failed to save employee submission in Supabase:", error);
-      return false;
+      console.warn("Failed to save employee submission in Supabase (local save succeeded):", error);
     }
     return true;
   } catch (err) {
-    console.warn("Network offline during submission save:", err);
-    return false;
+    console.warn("Network offline during submission save (local save succeeded):", err);
+    return true;
   }
 }
 

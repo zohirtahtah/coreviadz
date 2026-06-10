@@ -50,7 +50,6 @@ import {
   fetchUserSaaSMeta, 
   saveOnboardingCompletionInCloud, 
   pushSingleDatasetToCloud, 
-  pullMultiTenantData, 
   pushFullTenantData,
   cleanSlateResetSandbox
 } from "./supabaseSync";
@@ -136,7 +135,7 @@ export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTab] = useState<string>(() => localStorage.getItem("corevia_active_tab") || "dashboard");
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
   // ==========================================
@@ -191,9 +190,22 @@ export default function App() {
   // Custom visual colors choices
   const [customColorsList, setCustomColorsList] = useState<string[]>([]);
 
-  // Security credentials challenges
-  const [isLocked, setIsLocked] = useState<boolean>(true);
-  const [unlockedTabs, setUnlockedTabs] = useState<string[]>([]);
+  // Persist activeTab across refreshes
+  useEffect(() => {
+    localStorage.setItem("corevia_active_tab", activeTab);
+  }, [activeTab]);
+
+  // Security credentials challenges - persist across refreshes
+  const [isLocked, setIsLocked] = useState<boolean>(() => localStorage.getItem("corevia_is_locked") !== "false");
+  const [unlockedTabs, setUnlockedTabs] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("corevia_unlocked_tabs") || "[]"); } catch { return []; }
+  });
+  useEffect(() => {
+    localStorage.setItem("corevia_is_locked", String(isLocked));
+  }, [isLocked]);
+  useEffect(() => {
+    localStorage.setItem("corevia_unlocked_tabs", JSON.stringify(unlockedTabs));
+  }, [unlockedTabs]);
 
   // Instant notification toasts
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -246,10 +258,7 @@ export default function App() {
       setSession(activeSession);
 
       if (userMeta.hasCompletedOnboarding) {
-        // Download all cloud records instantly
-        const pullSuccess = await pullMultiTenantData(userMeta.companyId);
-        
-        // Load the pulled values to memory
+        // Load from local storage only (cloud is backup-only, never auto-pull)
         const currentProfile = getBusinessProfile();
         setProfile(currentProfile);
         if (currentProfile) {
@@ -357,34 +366,7 @@ export default function App() {
 
   // 2. Local database loader triggered whenever active tenant session resolves
   useEffect(() => {
-    // 1. Instantly load offline database cache so the app is immediately interactive for the user
     loadStateFromLocal();
-
-    // 2. Hydrate from Cloud in background if there's an active SaaS company session
-    if (session?.company_id && supabase) {
-      const profObj = getBusinessProfile();
-      const hasPreExistingData = !!(profObj && profObj.businessName);
-      
-      // Only show full screen loader if we have no local cache at all
-      if (!hasPreExistingData) {
-        setIsSyncingOnAuth(true);
-      }
-
-      pullMultiTenantData(session.company_id)
-        .then((success) => {
-          if (success) {
-            console.log("Successfully hydrated multi-tenant workspace from the cloud.");
-            // Hot reload the active records to React state
-            loadStateFromLocal();
-          }
-        })
-        .catch((e) => {
-          console.warn("Could not sync cloud records on login:", e);
-        })
-        .finally(() => {
-          setIsSyncingOnAuth(false);
-        });
-    }
   }, [session]);
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
@@ -399,6 +381,91 @@ export default function App() {
       }
     }
   }, [session, activeTab]);
+
+  // Real-time Subscriptions — pull fresh data from Supabase on changes (not from localStorage)
+  useEffect(() => {
+    if (!supabase || !session?.company_id) return;
+
+    let channels: any[] = [];
+
+    const pullOrders = async () => {
+      const { data } = await supabase.from("corevia_orders").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((o: any) => ({
+          id: o.id, date: o.date, customerName: o.customer_name, phone: o.phone,
+          wilaya: o.wilaya, commune: o.commune, deliveryLocation: o.delivery_location || "Home",
+          deliveryCompany: o.delivery_company || "Yalidine Express", deliveryType: o.delivery_type || "Home",
+          deliveryPrice: o.delivery_price || 0, items: o.items || [], totalPrice: o.total_price || 0,
+          paidAmount: o.paid_amount || 0, discount: o.discount || 0,
+          customerPaysDelivery: Boolean(o.customer_pays_delivery), isExchange: Boolean(o.is_exchange),
+          exchangeOrderRef: o.exchange_order_ref || undefined, agentName: o.agent_name || "Owner",
+          source: o.source || "1", status: o.status || "pending",
+          returnCost: o.return_cost || undefined, returnDate: o.return_date || undefined,
+          notes: o.notes || undefined, deletedAt: o.deleted_at || undefined,
+          createdBy: o.created_by || undefined, updatedBy: o.updated_by || undefined,
+          createdDate: o.created_date || undefined, createdTime: o.created_time || undefined,
+          updatedDate: o.updated_date || undefined, updatedTime: o.updated_time || undefined
+        }));
+        saveOrders(formatted); setOrders(formatted);
+        console.log("[REALTIME] Synced orders from Supabase");
+      }
+    };
+
+    const pullProducts = async () => {
+      const { data } = await supabase.from("corevia_products").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((p: any) => ({
+          id: p.id, name: p.name, wholesaleCostPrice: p.wholesale_cost_price || 0,
+          wholesalePercentage: p.wholesale_percentage || 0, wholesalePrice: p.wholesale_price || 0,
+          retailCostPrice: p.retail_cost_price || 0, retailPercentage: p.retail_percentage || 0,
+          retailPrice: p.retail_price || 0, colors: p.colors || [], sizes: p.sizes || [],
+          createdAt: p.created_at || new Date().toISOString(),
+          createdBy: p.created_by || undefined, updatedBy: p.updated_by || undefined,
+          createdDate: p.created_date || undefined, createdTime: p.created_time || undefined,
+          updatedDate: p.updated_date || undefined, updatedTime: p.updated_time || undefined
+        }));
+        saveProducts(formatted); setProducts(formatted);
+        console.log("[REALTIME] Synced products from Supabase");
+      }
+    };
+
+    const pullWorkers = async () => {
+      const { data } = await supabase.from("corevia_workers").select("*").eq("company_id", session.company_id);
+      if (data && data.length > 0) {
+        const formatted = data.map((w: any) => ({
+          id: w.id, name: w.name, code: w.code || "W-" + w.id.substring(0, 4),
+          phone: w.phone || "", baseSalary: w.base_salary || 0, dailyHours: w.daily_hours || 8,
+          overtimeRate: w.overtime_rate || 2, role: w.role || "Employee",
+          monthlySalary: w.monthly_salary || w.base_salary || 0,
+          payrolls: w.payrolls || [], createdAt: w.created_at || new Date().toISOString(),
+          createdBy: w.created_by || undefined, updatedBy: w.updated_by || undefined,
+          createdDate: w.created_date || undefined, createdTime: w.created_time || undefined,
+          updatedDate: w.updated_date || undefined, updatedTime: w.updated_time || undefined
+        }));
+        saveWorkers(formatted); setWorkers(formatted);
+        console.log("[REALTIME] Synced workers from Supabase");
+      }
+    };
+
+    const setupRealtime = () => {
+      const ordersChannel = supabase.channel(`orders-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_orders", filter: `company_id=eq.${session.company_id}` }, pullOrders)
+        .subscribe();
+      const productsChannel = supabase.channel(`products-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_products", filter: `company_id=eq.${session.company_id}` }, pullProducts)
+        .subscribe();
+      const workersChannel = supabase.channel(`workers-${session.company_id}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_workers", filter: `company_id=eq.${session.company_id}` }, pullWorkers)
+        .subscribe();
+      channels = [ordersChannel, productsChannel, workersChannel];
+    };
+
+    setupRealtime();
+
+    return () => {
+      channels.forEach(ch => { supabase.removeChannel(ch); });
+    };
+  }, [session?.company_id, supabase]);
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {

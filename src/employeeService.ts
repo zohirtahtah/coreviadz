@@ -62,7 +62,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
       throw error;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       const mapped: Employee[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
@@ -131,13 +131,11 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       .upsert(dbPayload);
 
     if (error) {
-      console.warn("Could not save employee to remote db table:", error);
-      // Return true anyway so local storage save continues and UI is not frozen
-      return true;
+      console.warn("Could not save employee to remote db table (local save succeeded):", error);
     }
     return true;
   } catch (err) {
-    console.warn("Network offline or missing table during employee save:", err);
+    console.warn("Network offline or missing table during employee save (local save succeeded):", err);
     return true;
   }
 }
