@@ -65,6 +65,14 @@ export default function UsersPermissionsView({
     loginUrl: string;
   } | null>(null);
 
+  // Financial self-reporting fields (editable by employee)
+  const [overtimeHours, setOvertimeHours] = useState<number>(0);
+  const [missingHours, setMissingHours] = useState<number>(0);
+  const [absenceDays, setAbsenceDays] = useState<number>(0);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [newExpDesc, setNewExpDesc] = useState("");
+  const [newExpAmount, setNewExpAmount] = useState<number>(0);
+
   // Worker selection for quick fill
   const [workerList, setWorkerList] = useState<Worker[]>([]);
   const [showWorkerDropdown, setShowWorkerDropdown] = useState(false);
@@ -976,182 +984,121 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                 </div>
 
                 <form onSubmit={handleFormSubmit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-              
-              {/* Basic input fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                
-                {/* Full Name with Worker Selection Dropdown */}
-                <div className="relative">
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الاسم الكامل للموظف *" : "Full Name *"}</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => {
-                        setFullName(e.target.value);
-                        setWorkerFilter(e.target.value);
-                        if (!editingEmployee) setShowWorkerDropdown(true);
-                      }}
-                      onFocus={() => { if (!editingEmployee && workerList.length > 0) setShowWorkerDropdown(true); }}
-                      onBlur={() => setTimeout(() => setShowWorkerDropdown(false), 200)}
-                      placeholder={isRtl ? "اختر موظفاً من العمال أو اكتب الاسم..." : "Select a worker or type name..."}
-                      className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                    />
-                    {!editingEmployee && workerList.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowWorkerDropdown(!showWorkerDropdown)}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
-                      >
-                        ▼
-                      </button>
-                    )}
-                  </div>
+
+              {/* 4.2 معلومات العامل والهوية وبطاقة الراتب */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-indigo-400 border-b border-zinc-800 pb-1">
+                  {isRtl ? "4.2 معلومات العامل والهوية وبطاقة الراتب" : "4.2 Worker Identity & Pay Card"}
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                   
-                  {/* Worker Dropdown List */}
-                  {showWorkerDropdown && !editingEmployee && workerList.length > 0 && (
-                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-[#121214] border border-[#27272a] rounded-xl shadow-2xl max-h-48 overflow-y-auto">
-                      {workerList
-                        .filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase()))
-                        .map((w) => (
-                          <button
-                            key={w.id}
-                            type="button"
-                            onMouseDown={() => {
-                              // Auto-fill all fields from worker
-                              setFullName(w.name);
-                              setPhone(w.phone);
-                              setJobTitle(w.role);
-                              setBaseSalary(w.baseSalary);
-                              setMonthlySalary(w.monthlySalary);
-                              setWorkingHoursPerDay(w.dailyHours);
-                              setWorkingDaysPerMonth(w.workingDaysPerMonth || 22);
-                              setOvertimeHourRate(w.overtimeRate);
-                              setAbsenceDeductionRate(w.absenceDeductionRate || 1.0);
-                              setNotes(w.notes || "");
-                              setWorkerFilter("");
-                              setShowWorkerDropdown(false);
-                              onTriggerNotification(
-                                isRtl
-                                  ? `✅ تم تعبئة بيانات ${w.name} تلقائياً`
-                                  : `✅ Auto-filled data for ${w.name}`
-                              );
-                            }}
-                            className="w-full text-right p-2.5 text-xs text-slate-300 hover:bg-[#1c1c1e] hover:text-white border-b border-[#1f1f23] last:border-0 transition-colors flex items-center justify-between"
-                          >
-                            <span className="font-bold">{w.name}</span>
-                            <span className="text-[10px] text-slate-500">{w.role} • {w.phone}</span>
-                          </button>
-                        ))}
-                      {workerList.filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase())).length === 0 && (
-                        <div className="p-3 text-center text-slate-500 text-[10px]">
-                          {isRtl ? "لا يوجد عمال متاحون" : "No workers available"}
-                        </div>
+                  {/* Full Name with Worker Selection Dropdown */}
+                  <div className="relative">
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الاسم الكامل للموظف" : "Full Name"}</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        value={fullName}
+                        onChange={(e) => {
+                          setFullName(e.target.value);
+                          setWorkerFilter(e.target.value);
+                          if (!editingEmployee) setShowWorkerDropdown(true);
+                        }}
+                        onFocus={() => { if (!editingEmployee && workerList.length > 0) setShowWorkerDropdown(true); }}
+                        onBlur={() => setTimeout(() => setShowWorkerDropdown(false), 200)}
+                        placeholder={isRtl ? "اختر موظفاً من العمال أو اكتب الاسم..." : "Select a worker or type name..."}
+                        className="w-full p-2 bg-[#040406] border border-zinc-800 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                        disabled={session?.role === 'employee'}
+                      />
+                      {!editingEmployee && workerList.length > 0 && session?.role !== 'employee' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowWorkerDropdown(!showWorkerDropdown)}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
+                        >
+                          ▼
+                        </button>
                       )}
                     </div>
-                  )}
-                </div>
-
-                {/* Job Title */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "المنصب أو المسمى الوظيفي *" : "Job Title *"}</label>
-                  <input
-                    type="text"
-                    required
-                    value={jobTitle}
-                    onChange={(e) => setJobTitle(e.target.value)}
-                    placeholder={isRtl ? "مدير مبيعات، مسؤول دليفري..." : "e.g., Sales Manager..."}
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
-                </div>
-
-                {/* Phone */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "رقم الهاتف للاتصال والولوج *" : "Phone Number (Login Key) *"}</label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="0540000000"
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
-                </div>
-
-                {/* Username */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "اسم المستخدم للولوج (Username) *" : "Username (Login Key) *"}</label>
-                  <input
-                    type="text"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""))}
-                    placeholder="mohamed.orders"
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-emerald-400 font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
-                </div>
-
-                {/* Email (Optional) */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "البريد الإلكتروني (اختياري)" : "Email (Optional Login Key)"}</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@corevia.dz"
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
-                </div>
-
-                {/* Password input */}
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowPasswordRaw(!showPasswordRaw)}
-                      className="text-[10px] text-slate-400 hover:text-white"
-                    >
-                      {showPasswordRaw ? (isRtl ? "إخفاء" : "Hide") : (isRtl ? "إظهار" : "Show")}
-                    </button>
-                    <label className="block text-slate-400 font-bold">{isRtl ? "رمز المرور للولوج *" : "Secret Password *"}</label>
+                    
+                    {/* Worker Dropdown List */}
+                    {showWorkerDropdown && !editingEmployee && workerList.length > 0 && (
+                      <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-[#121214] border border-[#27272a] rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                        {workerList
+                          .filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase()))
+                          .map((w) => (
+                            <button
+                              key={w.id}
+                              type="button"
+                              onMouseDown={() => {
+                                setFullName(w.name);
+                                setPhone(w.phone);
+                                setJobTitle(w.role);
+                                setBaseSalary(w.baseSalary || 35000);
+                                setMonthlySalary(w.monthlySalary || w.baseSalary || 35000);
+                                setWorkingHoursPerDay(w.dailyHours || 8);
+                                setWorkingDaysPerMonth(w.workingDaysPerMonth || 22);
+                                setOvertimeHourRate(w.overtimeRate || 250);
+                                setAbsenceDeductionRate(w.absenceDeductionRate || 1.0);
+                                setNotes(w.notes || "");
+                                setWorkerFilter("");
+                                setShowWorkerDropdown(false);
+                                onTriggerNotification(
+                                  isRtl
+                                    ? `✅ تم تعبئة بيانات ${w.name} تلقائياً`
+                                    : `✅ Auto-filled data for ${w.name}`
+                                );
+                              }}
+                              className="w-full text-right p-2.5 text-xs text-slate-300 hover:bg-[#1c1c1e] hover:text-white border-b border-[#1f1f23] last:border-0 transition-colors flex items-center justify-between"
+                            >
+                              <span className="font-bold">{w.name}</span>
+                              <span className="text-[10px] text-slate-500">{w.role} • {w.phone}</span>
+                            </button>
+                          ))}
+                        {workerList.filter(w => !workerFilter || w.name.toLowerCase().includes(workerFilter.toLowerCase())).length === 0 && (
+                          <div className="p-3 text-center text-slate-500 text-[10px]">
+                            {isRtl ? "لا يوجد عمال متاحون" : "No workers available"}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <input
-                    type={showPasswordRaw ? "text" : "password"}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
-                  />
-                </div>
 
-                {/* Account Status Selection */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">{isRtl ? "حالة الحساب الميداني *" : "Account Status *"}</label>
-                  <select
-                    value={status}
-                    onChange={(e: any) => setStatus(e.target.value)}
-                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs pr-7 text-right"
-                  >
-                    <option value="Active">{isRtl ? "نشط - Active" : "Active"}</option>
-                    <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
-                    <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
-                  </select>
-                </div>
-              </div>
+                  {/* Job Title / Role */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الدور الوظيفي والصفة" : "Job Title / Role"}</label>
+                    <select
+                      value={jobTitle}
+                      onChange={(e) => setJobTitle(e.target.value)}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
+                    >
+                      <option value="Sales Handler">{isRtl ? "مناوب مبيعات - Sales Handler" : "Sales Handler"}</option>
+                      <option value="Inventory Manager">{isRtl ? "تأطير المخازن - Inventory Manager" : "Inventory Manager"}</option>
+                      <option value="Courier Delivery Handler">{isRtl ? "عون شحن وتوصيل - Courier" : "Courier Delivery Handler"}</option>
+                      <option value="Packaging Officer">{isRtl ? "فرز وتغليف - Packaging Officer" : "Packaging Officer"}</option>
+                      <option value="Operations Director">{isRtl ? "إشراف وتسيير عام - Director" : "Operations Director"}</option>
+                    </select>
+                  </div>
 
-              {/* Workforce Contract & Salary Regulations */}
-              <div className="space-y-3 border-t border-[#27272a] pt-3 text-xs">
-                <span className="block text-indigo-400 font-extrabold text-[11px] uppercase tracking-wider">
-                  💼 {isRtl ? "محددات الراتب وعقد العمل والدقة والامتيازات:" : "Salary Regulations & Contractual Details:"}
-                </span>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23]">
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "رقم الهاتف المحمول" : "Phone Number"}</label>
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
+                      placeholder="0540000000"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
                   {/* Base Salary */}
                   <div>
-                    <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "الراتب الأساسي المعتاد (DZD)" : "Base Salary (DZD)"}
-                    </label>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "الراتب الأساسي المعتاد" : "Base Salary (DZD)"}</label>
                     <input
                       type="number"
                       value={baseSalary || ""}
@@ -1160,23 +1107,105 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                         setBaseSalary(val);
                         setMonthlySalary(val);
                       }}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
                     />
                   </div>
 
-                  {/* Daily hours */}
+                  {/* Daily Working Hours */}
                   <div>
-                    <label className="block text-slate-400 font-bold mb-1">
-                      {isRtl ? "ساعات العمل اليومية" : "Daily Working Hours"}
-                    </label>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "ساعات العمل اليومية" : "Daily Working Hours"}</label>
                     <input
                       type="number"
                       value={workingHoursPerDay || ""}
                       onChange={(e) => setWorkingHoursPerDay(Number(e.target.value))}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* بيانات الدخول (Login Credentials) */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-amber-500 border-b border-zinc-800 pb-1">
+                  {isRtl ? "بيانات الدخول إلى النظام" : "Login Credentials"}
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  
+                  {/* Username */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "اسم المستخدم للولوج (Username)" : "Username (Login Key)"}</label>
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""))}
+                      placeholder="mohamed.orders"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-emerald-400 font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
                     />
                   </div>
 
+                  {/* Email (Optional) */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "البريد الإلكتروني (اختياري)" : "Email (Optional Login Key)"}</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="name@corevia.dz"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Password input */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordRaw(!showPasswordRaw)}
+                        className="text-[10px] text-slate-400 hover:text-white"
+                      >
+                        {showPasswordRaw ? (isRtl ? "إخفاء" : "Hide") : (isRtl ? "إظهار" : "Show")}
+                      </button>
+                      <label className="block text-slate-400 font-bold">{isRtl ? "رمز المرور للولوج" : "Secret Password"}</label>
+                    </div>
+                    <input
+                      type={showPasswordRaw ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Account Status */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">{isRtl ? "حالة الحساب الميداني" : "Account Status"}</label>
+                    <select
+                      value={status}
+                      onChange={(e: any) => setStatus(e.target.value)}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs pr-7 text-right"
+                      disabled={session?.role === 'employee'}
+                    >
+                      <option value="Active">{isRtl ? "نشط - Active" : "Active"}</option>
+                      <option value="Read Only">{isRtl ? "عرض وقراءة فقط - Read Only" : "Read Only"}</option>
+                      <option value="Suspended">{isRtl ? "موقف وتجميد - Suspended" : "Suspended"}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 💼 محددات الراتب وعقد العمل والدقة والامتيازات */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-indigo-400 border-b border-zinc-800 pb-1">
+                  💼 {isRtl ? "محددات الراتب وعقد العمل والدقة والامتيازات:" : "Salary Regulations & Contractual Details:"}
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  
                   {/* Overtime rate per hour */}
                   <div>
                     <label className="block text-slate-400 font-bold mb-1">
@@ -1186,7 +1215,8 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       type="number"
                       value={overtimeHourRate || ""}
                       onChange={(e) => setOvertimeHourRate(Number(e.target.value))}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
                     />
                   </div>
 
@@ -1200,81 +1230,155 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       step="0.1"
                       value={absenceDeductionRate || ""}
                       onChange={(e) => setAbsenceDeductionRate(Number(e.target.value))}
-                      className="w-full p-2 bg-[#121214] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right"
+                      disabled={session?.role === 'employee'}
+                    />
+                  </div>
+
+                  {/* Contract Notes */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 font-bold mb-1">
+                      {isRtl ? "شروط أو ملاحظات العقد الخاصة:" : "Special Contractual/Compensation Notes:"}
+                    </label>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder={isRtl ? "مثال: مبيعات الهاتف + 1% عمولة أرباح، حوافز دقة الحضور الموصى بها..." : "e.g. Phone support agent + 1% revenue share, quarterly arrival incentives..."}
+                      rows={2}
+                      className="w-full p-2 bg-[#040406] border border-zinc-800 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650 resize-none"
+                      disabled={session?.role === 'employee'}
                     />
                   </div>
                 </div>
-
-                {/* Internal Contract Notes */}
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">
-                    {isRtl ? "شروط أو ملاحظات العقد الخاصة:" : "Special Contractual/Compensation Notes:"}
-                  </label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder={isRtl ? "مثال: مبيعات الهاتف + 1% عمولة أرباح، حوافز دقة الحضور الموصى بها..." : "e.g. Phone support agent + 1% revenue share, quarterly arrival incentives..."}
-                    rows={2}
-                    className="w-full p-2 bg-[#0a0a0c] border border-[#27272a] text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650 resize-none"
-                  />
-                </div>
               </div>
 
-              {/* Shareable login URL generator inside the Modal */}
-              <div className="bg-slate-950/60 border border-[#27272a] p-3 rounded-xl flex items-center justify-between gap-3 text-xs my-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const loginKey = email.trim() || phone.trim();
-                    if (!password.trim()) {
-                      onTriggerNotification(
-                        isRtl 
-                          ? "⚠️ يرجى ملء كلمة المرور أولاً." 
-                          : "⚠️ Please fill in a password first."
-                      );
-                      return;
-                    }
-                    if (!phone.trim()) {
-                      onTriggerNotification(
-                        isRtl 
-                          ? "⚠️ يرجى كتابة الهاتف أولاً (كمفتاح دخول الأساسي)." 
-                          : "⚠️ Please enter the phone number first."
-                      );
-                      return;
-                    }
-                    try {
-                      const url = `${window.location.origin}/?email=${encodeURIComponent(loginKey)}&pass=${encodeURIComponent(password.trim())}`;
-                      navigator.clipboard.writeText(url);
-                      setCopiedId("modal-copied");
-                      onTriggerNotification(
-                        isRtl 
-                          ? `📋 تم نسخ رابط الولوج المباشر الخاص بـ (${fullName || "الموظف"}) بنجاح!` 
-                          : `📋 Shareable login link for (${fullName || "Employee"}) copied to clipboard!`
-                      );
-                      setTimeout(() => {
-                        setCopiedId(null);
-                      }, 3000);
-                    } catch (err) {
-                      console.warn("Failed to copy modal link:", err);
-                    }
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer select-none shrink-0 ${
-                    copiedId === "modal-copied" 
-                      ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-400" 
-                      : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-indigo-400 hover:text-indigo-300"
-                  }`}
-                >
-                  {copiedId === "modal-copied" ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied Link") : (isRtl ? "📋 نسخ الرابط" : "📋 Copy Link")}
-                </button>
-                <div className="text-right flex-1 select-none">
-                  <span className="block font-bold text-white text-[11px]">
-                    {isRtl ? "رابط تسجيل دخول مباشر للموظف" : "Pre-filled Login Link"}
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-tight">
-                    {isRtl 
-                      ? "رابط دخول سريع ومملوء مسبقاً ببيانات الموظف ليرسله له المالك لتخطي كتابة البيانات." 
-                      : "Pre-filled convenience URL that auto-fills email and password fields on click."}
-                  </span>
+              {/* الحساب المالي والجزاءات الفردية للفترة */}
+              <div className="bg-[#0a0a0c] p-3 rounded-xl border border-[#1f1f23] space-y-3">
+                <h4 className="text-xs font-bold text-amber-500 border-b border-zinc-800 pb-1">
+                  💰 {isRtl ? "الحساب المالي والجزاءات الفردية للفترة" : "Financial Calculation & Individual Penalties"}
+                </h4>
+
+                {/* 4.4 Overtime */}
+                <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 space-y-2">
+                  <strong className="text-[10px] text-emerald-400">4.4 {isRtl ? "الساعات الإضافية والتعويق (+)" : "Overtime Hours (+)"}</strong>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[9px] text-zinc-500 font-bold block mb-0.5">
+                        {isRtl ? "مكان كتابة عدد الساعات الإضافية:" : "Overtime Hours:"}
+                      </span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={overtimeHours}
+                        onChange={(e) => setOvertimeHours(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full bg-[#040406] text-center border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-zinc-500 font-bold block mb-0.5">
+                        {isRtl ? "أجر الساعة الإضافية (من العقد):" : "Overtime Rate:"}
+                      </span>
+                      <div className="w-full bg-[#040406] border border-zinc-800 rounded p-1.5 text-xs text-emerald-400 font-mono text-center opacity-70">
+                        {overtimeHourRate || 250} دج
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-emerald-500 font-mono bg-[#030304] px-2 py-1 rounded">
+                    <span>{isRtl ? "حسبة الساعات الإضافية:" : "Calculation:"}</span>
+                    <span>+{overtimeHours} ساعة × {overtimeHourRate || 250} دج = +{Math.round(overtimeHours * (overtimeHourRate || 250))} دج</span>
+                  </div>
+                </div>
+
+                {/* 4.5 Missing Hours */}
+                <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 space-y-1.5">
+                  <strong className="text-[10px] text-amber-400">4.5 {isRtl ? "ساعات تأخر منتقصة (-)" : "Missing Hours (-)"}</strong>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={missingHours}
+                      onChange={(e) => setMissingHours(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="flex-1 bg-[#040406] text-center border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-amber-500 outline-none"
+                    />
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {isRtl ? `خصم ${Math.round(missingHours * (baseSalary / 30 / (workingHoursPerDay || 8)))} دج` : `-${Math.round(missingHours * (baseSalary / 30 / (workingHoursPerDay || 8)))} DZD`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4.6 Absence Days */}
+                <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 space-y-1.5">
+                  <strong className="text-[10px] text-rose-400">4.6 {isRtl ? "غياب بالأيام (-)" : "Absence Days (-)"}</strong>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={absenceDays}
+                      onChange={(e) => setAbsenceDays(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="flex-1 bg-[#040406] text-center border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-rose-500 outline-none"
+                    />
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {isRtl ? `خصم ${Math.round(absenceDays * (baseSalary / 30))} دج` : `-${Math.round(absenceDays * (baseSalary / 30))} DZD`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Expenses */}
+                <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 space-y-2">
+                  <strong className="text-[10px] text-indigo-400">
+                    💳 {isRtl ? "مصاريف وسلفيات العقد الفردية" : "Expenses & Salary Advances"}
+                  </strong>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={newExpDesc}
+                      onChange={(e) => setNewExpDesc(e.target.value)}
+                      placeholder={isRtl ? "وصف المصروف..." : "Expense description..."}
+                      className="flex-1 bg-[#040406] border border-zinc-800 rounded p-1.5 text-xs text-white focus:border-indigo-500 outline-none"
+                    />
+                    <input
+                      type="number"
+                      value={newExpAmount || ""}
+                      onChange={(e) => setNewExpAmount(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      placeholder={isRtl ? "المبلغ" : "Amount"}
+                      className="w-20 bg-[#040406] border border-zinc-800 rounded p-1.5 text-xs text-white font-mono focus:border-indigo-500 outline-none text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newExpDesc.trim() || newExpAmount <= 0) return;
+                        setExpenses([...expenses, { id: `exp-${Date.now()}`, desc: newExpDesc.trim(), amount: newExpAmount }]);
+                        setNewExpDesc("");
+                        setNewExpAmount(0);
+                      }}
+                      className="px-2 py-1.5 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-lg text-[10px] font-bold"
+                    >
+                      + {isRtl ? "إضافة" : "Add"}
+                    </button>
+                  </div>
+                  {expenses.length > 0 && (
+                    <div className="space-y-1">
+                      {expenses.map((exp) => (
+                        <div key={exp.id} className="flex justify-between items-center bg-[#030304] px-2 py-1 rounded text-[10px]">
+                          <span className="text-zinc-400">{exp.desc}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-rose-400">-{exp.amount} دج</span>
+                            <button
+                              type="button"
+                              onClick={() => setExpenses(expenses.filter((e: any) => e.id !== exp.id))}
+                              className="text-zinc-600 hover:text-rose-400"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex justify-between text-[10px] text-rose-400 font-mono bg-[#030304] px-2 py-1 rounded">
+                        <span>{isRtl ? "إجمالي المصاريف:" : "Total Expenses:"}</span>
+                        <span>-{expenses.reduce((s: number, e: any) => s + e.amount, 0)} دج</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
