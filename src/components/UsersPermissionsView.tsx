@@ -7,7 +7,7 @@ import { LanguageType } from "../types";
 import { translations } from "../translations";
 import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
-import { getWorkers, saveWorkers, getOrders, saveOrders } from "../storageUtils";
+import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
 
 // Name & Phone smart normalizations for bulletproof Algerian/Arabic de-duplication
@@ -96,6 +96,10 @@ export default function UsersPermissionsView({
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
   const [passRevealId, setPassRevealId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // States for custom delete with option to retain/delete worker profile
+  const [userToDeleteRecord, setUserToDeleteRecord] = useState<Employee | null>(null);
+  const [linkedWorkerFound, setLinkedWorkerFound] = useState<any | null>(null);
 
   const handleCopyLink = (emp: Employee) => {
     try {
@@ -235,61 +239,88 @@ export default function UsersPermissionsView({
     }
   };
 
-  const handleDeleteEmployeeItem = async (emp: Employee) => {
-    const confirmMsg = isRtl
-      ? `هل أنت متأكد تماماً من حذف حساب الموظف "${emp.fullName}" بشكل نهائي؟`
-      : `Are you completely sure you want to permanently delete the account of employee "${emp.fullName}"?`;
-    
-    if (window.confirm(confirmMsg)) {
-      setIsLoading(true);
-      const success = await deleteEmployee(emp.id, companyId);
-      if (success) {
-        onTriggerNotification(
-          isRtl 
-            ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح`
-            : `✅ Successfully deleted employee (${emp.fullName})`
-        );
+  const handleDeleteEmployeeItem = (emp: Employee) => {
+    const allWorkers = getWorkers();
+    const match = allWorkers.find(
+      w => w.id === emp.id || 
+           (w.phone && emp.phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(emp.phone)) ||
+           cleanArabicName(w.name) === cleanArabicName(emp.fullName)
+    );
+    setUserToDeleteRecord(emp);
+    setLinkedWorkerFound(match || null);
+  };
 
-        // Keep order history intact but update creator label
-        try {
-          const currentOrders = getOrders();
-          let changed = false;
-          const updatedOrders = currentOrders.map(order => {
-            if (order.agentName === emp.fullName) {
-              changed = true;
-              return { ...order, agentName: `${emp.fullName} (Deleted User)` };
-            }
-            return order;
-          });
-          if (changed) {
-            saveOrders(updatedOrders);
-            if (companyId) {
-              await pushSingleDatasetToCloud(companyId, "orders", updatedOrders);
-            }
+  const handleExecuteDelete = async (deleteWorkerProfile: boolean) => {
+    if (!userToDeleteRecord) return;
+    const emp = userToDeleteRecord;
+
+    setIsLoading(true);
+    const success = await deleteEmployee(emp.id, companyId);
+    if (success) {
+      onTriggerNotification(
+        isRtl 
+          ? `✅ تم حذف حساب الموظف (${emp.fullName}) بنجاح.`
+          : `✅ Successfully deleted employee (${emp.fullName})`
+      );
+
+      // Keep order history intact but update creator label
+      try {
+        const currentOrders = getOrders();
+        let changed = false;
+        const updatedOrders = currentOrders.map(order => {
+          if (order.agentName === emp.fullName) {
+            changed = true;
+            return { ...order, agentName: `${emp.fullName} (Deleted User)` };
           }
-        } catch (err) {
-          console.error("Order history update error:", err);
-        }
-        
-        // Log delete activity
-        await logActivity({
-          companyId,
-          userName: session?.username || "Owner",
-          userId: session?.user_id || "owner_id",
-          jobTitle: session?.role === "admin" ? "Company Owner" : session?.jobTitle || "Employee",
-          actionType: "Delete User",
-          pageName: "Users & Permissions",
-          affectedRecord: `User: ${emp.fullName} (${emp.jobTitle})`,
-          previousValue: JSON.stringify(emp),
-          newValue: ""
+          return order;
         });
-
-        loadEmployeesData();
-      } else {
-        onTriggerNotification(isRtl ? "❌ فشل حذف الموظف من قاعدة البيانات" : "❌ Failed to delete employee");
+        if (changed) {
+          saveOrders(updatedOrders);
+          if (companyId) {
+            await pushSingleDatasetToCloud(companyId, "orders", updatedOrders);
+          }
+        }
+      } catch (err) {
+        console.error("Order history update error:", err);
       }
-      setIsLoading(false);
+
+      // If user selected to delete the entire worker file, do it too!
+      if (deleteWorkerProfile && linkedWorkerFound) {
+        deleteEntireWorkerProfileSoft(linkedWorkerFound.code);
+        onTriggerNotification(
+          isRtl
+            ? `✅ تم شطب وحذف ملف العامل (${linkedWorkerFound.name}) وسجلاته المالية بالكامل.`
+            : `✅ Successfully deleted linked worker profile and payroll sheets.`
+        );
+      } else if (linkedWorkerFound) {
+        onTriggerNotification(
+          isRtl
+            ? `ℹ️ تم الحفاظ على ملف العامل وسجل رواتبه لدقة الحسابات.`
+            : `ℹ️ Kept the worker financial profile intact.`
+        );
+      }
+
+      // Log delete activity
+      await logActivity({
+        companyId,
+        userName: session?.username || "Owner",
+        userId: session?.user_id || "owner_id",
+        jobTitle: session?.role === "admin" ? "Company Owner" : session?.jobTitle || "Employee",
+        actionType: deleteWorkerProfile ? "Delete User & Worker" : "Delete User Only",
+        pageName: "Users & Permissions",
+        affectedRecord: `User: ${emp.fullName} (${emp.jobTitle})${deleteWorkerProfile ? ' + Linked Worker Profile' : ''}`,
+        previousValue: JSON.stringify(emp),
+        newValue: ""
+      });
+
+      loadEmployeesData();
+    } else {
+      onTriggerNotification(isRtl ? "❌ فشل حذف الموظف من قاعدة البيانات" : "❌ Failed to delete employee");
     }
+
+    setIsLoading(false);
+    setUserToDeleteRecord(null);
+    setLinkedWorkerFound(null);
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -1225,6 +1256,118 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
             </form>
           </>
         )}
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM DELETION MODAL WITH WORKER RETENTION CHOICE */}
+      {userToDeleteRecord && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[1000] text-right animate-fade-in" dir="rtl">
+          <div className="w-full max-w-md bg-[#121214] border border-rose-950/40 shadow-2xl rounded-2xl p-6 relative overflow-hidden" id="custom-delete-decision-dialog">
+            
+            {/* Top warning ribbon */}
+            <div className="absolute top-0 inset-x-0 h-1 bg-rose-600" />
+            
+            <div className="flex items-start gap-3.5 mb-4 justify-end">
+              <div className="text-right flex-1">
+                <h3 className="text-sm font-black text-white">
+                  {isRtl ? `حذف حساب الموظف: ${userToDeleteRecord.fullName}` : `Delete Employee: ${userToDeleteRecord.fullName}`}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  {isRtl 
+                    ? "أنت على وشك إلغاء صلاحيات دخول هذا الموظف. يرجى اختيار الإجراء المطلوب للتعامل مع ملفه المالي في قسم العمال والرواتب:" 
+                    : "You are about to cancel this employee's access credentials. Please choose how to handle their financial payroll files:"}
+                </p>
+              </div>
+              <div className="p-2.5 bg-rose-500/10 border border-rose-500/25 text-rose-500 rounded-xl shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* Warning about linked worker if found */}
+            {linkedWorkerFound ? (
+              <div className="bg-[#18181b] border border-indigo-500/10 p-3.5 rounded-xl mb-4 space-y-1 text-right">
+                <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-indigo-400 justify-end">
+                  <span>💡 تم العثور على ملف عامل مسجل في كشوفات الرواتب:</span>
+                </div>
+                <div className="text-[10px] text-slate-300">
+                  • الاسم: <strong className="text-white">{linkedWorkerFound.name}</strong> ({linkedWorkerFound.code})
+                </div>
+                <div className="text-[10px] text-slate-400 leading-tight">
+                  هذا العامل لديه تاريخ دفع رواتب وسلف مسجل مسبقاً في النظام.
+                </div>
+              </div>
+            ) : (
+              <div className="bg-[#18181b] border border-[#27272a] p-3 rounded-xl mb-4 text-[10.5px] text-slate-400 leading-snug">
+                {isRtl 
+                  ? "لا يوجد ملف مالي أو كشفي رواتب مرتبط بهذا الموظف في مسرد العمال." 
+                  : "No linked financial worker profile was found in payroll for this employee."}
+              </div>
+            )}
+
+            {/* Dual action buttons verticalstack for clarity */}
+            <div className="space-y-2.5">
+              
+              {/* Option A: Delete Account ONLY (Preserve worker) */}
+              {linkedWorkerFound && (
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDelete(false)}
+                  className="w-full text-right p-3 bg-[#111114] hover:bg-indigo-950/30 border border-indigo-900/40 hover:border-indigo-500/40 rounded-xl transition-all cursor-pointer group"
+                >
+                  <div className="flex items-start justify-between">
+                    <span className="text-indigo-400 group-hover:-translate-x-0.5 transition-transform text-xs shrink-0 pl-2">📥</span>
+                    <div className="text-right">
+                      <span className="block font-bold text-xs text-white group-hover:text-indigo-350 transition-colors">
+                        {isRtl ? "١. حذف الحساب والولوج فقط (الاحتفاظ بملف العامل)" : "1. Delete Account Only (Retain worker details)"}
+                      </span>
+                      <span className="block text-[10px] text-slate-450 mt-1 leading-snug">
+                        {isRtl 
+                          ? "سيتم تجميد وحذف إمكانية تسجيل دخول الموظف، مع الإبقاء على ملفه بصفحة الموظفين والرواتب دون حذف تاريخ المبيعات/الرواتب." 
+                          : "Deletes credentials only. Keeps payroll logs and financial files untouched."}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {/* Option B: Delete Account & Worker Profile fully */}
+              <button
+                type="button"
+                onClick={() => handleExecuteDelete(!!linkedWorkerFound)}
+                className="w-full text-right p-3 bg-[#1c0d0f] hover:bg-rose-950/40 border border-rose-950/40 hover:border-rose-500/40 rounded-xl transition-all cursor-pointer group"
+              >
+                <div className="flex items-start justify-between">
+                  <span className="text-rose-400 group-hover:-translate-x-0.5 transition-transform text-xs shrink-0 pl-2">☠️</span>
+                  <div className="text-right col-span-11">
+                    <span className="block font-bold text-xs text-rose-400 group-hover:text-rose-300 transition-colors">
+                      {linkedWorkerFound 
+                        ? (isRtl ? "٢. شطب نهائي كلي (حذف الحساب + حذف ملف العامل المالي)" : "2. Complete Purge (Purge credentials + Delete payroll files)")
+                        : (isRtl ? "حذف حساب وصلاحيات الموظف نهائياً" : "Confirm Permanent Deletion")}
+                    </span>
+                    <span className="block text-[10px] text-slate-450 mt-1 leading-snug">
+                      {isRtl 
+                        ? "سيتم شطب حساب تسجيل دخول المستخدم ومحو ملفه بكشوف الرواتب وسلفياته تماماً من النظام (غير قابل للتراجع)." 
+                        : "Purges both credentials and completely sweeps their worker payroll database records."}
+                    </span>
+                  </div>
+                </div>
+              </button>
+
+              {/* Cancel Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setUserToDeleteRecord(null);
+                  setLinkedWorkerFound(null);
+                }}
+                className="w-full py-2 bg-[#1c1c1e] hover:bg-[#27272a] border border-[#27272a] text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer text-center"
+              >
+                {isRtl ? "تراجع وإلغاء الأمر" : "Dismiss / Cancel"}
+              </button>
+
+            </div>
+
           </div>
         </div>
       )}
