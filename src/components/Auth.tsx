@@ -78,12 +78,14 @@ export default function Auth({
           const cached = getLocalEmployees();
           const exists = cached.some(emp => emp.id === id);
           if (!exists) {
+            const phoneFromUrl = params.get("phone") || "";
+            const emailFromUrl = params.get("email") || "";
             cached.push({
               id,
               companyId: cid,
               fullName: name || user,
-              phone: params.get("phone") || "",
-              email: params.get("email") || "",
+              phone: phoneFromUrl,
+              email: emailFromUrl,
               username: user,
               jobTitle: title || "موظف",
               password: pass,
@@ -91,14 +93,13 @@ export default function Auth({
               status: "Active",
               createdAt: new Date().toISOString()
             });
-            // Save to localStorage (un-suffixed since no user is logged in yet)
             localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
           }
           
           setEmailInput(user);
           setPasswordInput(pass);
           
-          // Clear parameters from address bar to keep it elegant and clean
+          // Clear parameters from address bar
           try {
             window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
           } catch (histErr) {}
@@ -189,6 +190,13 @@ export default function Auth({
                 lastActivity: dbMatch.last_activity,
                 createdAt: dbMatch.created_at
               };
+              // Cache back locally for next login
+              const localList = getLocalEmployees();
+              const existsLocally = localList.some(e => e.id === matchingEmployee.id);
+              if (!existsLocally) {
+                localList.push(matchingEmployee);
+                localStorage.setItem("corevia_employees_list_v2", JSON.stringify(localList));
+              }
             }
           }
         } catch (e) {

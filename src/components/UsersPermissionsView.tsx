@@ -497,7 +497,7 @@ export default function UsersPermissionsView({
       });
 
       if (isNew) {
-        const loginUrl = `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`;
+        const loginUrl = `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&phone=${encodeURIComponent(phone.trim())}&email=${encodeURIComponent(email.trim() || "")}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`;
         
         // Auto-copy login URL to clipboard
         try {
