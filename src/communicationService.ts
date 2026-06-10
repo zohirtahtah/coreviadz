@@ -55,7 +55,6 @@ export async function getChatMessages(companyId: string): Promise<ChatMessage[]>
     }
     
     if (data && data.length > 0) {
-      // Structure fields nicely
       const mapped: ChatMessage[] = data.map((d: any) => ({
         id: d.id,
         companyId: d.company_id,
@@ -64,7 +63,8 @@ export async function getChatMessages(companyId: string): Promise<ChatMessage[]>
         senderJobTitle: d.sender_job_title,
         content: d.content || "",
         voiceUrl: d.voice_url || undefined,
-        createdAt: d.created_at
+        createdAt: d.created_at,
+        seenBy: d.seen_by || []
       }));
       
       // Save to local cache
@@ -85,7 +85,8 @@ export async function sendChatMessage(msg: Omit<ChatMessage, "id" | "createdAt">
   const fullMsg: ChatMessage = {
     ...msg,
     id: newId,
-    createdAt: now
+    createdAt: now,
+    seenBy: []
   };
   
   // Save locally first for instant reactive response
@@ -106,7 +107,8 @@ export async function sendChatMessage(msg: Omit<ChatMessage, "id" | "createdAt">
         sender_job_title: fullMsg.senderJobTitle,
         content: fullMsg.content,
         voice_url: fullMsg.voiceUrl || null,
-        created_at: fullMsg.createdAt
+        created_at: fullMsg.createdAt,
+        seen_by: fullMsg.seenBy || []
       }]);
       
     if (error) {
@@ -117,4 +119,23 @@ export async function sendChatMessage(msg: Omit<ChatMessage, "id" | "createdAt">
   }
   
   return fullMsg;
+}
+
+// Mark a message as seen by a user
+export async function markMessageAsSeen(messageId: string, userId: string, userName: string): Promise<void> {
+  const allLocal = getLocalChatMessages("");
+  const msg = allLocal.find(m => m.id === messageId);
+  if (!msg) return;
+  if (msg.seenBy?.some(s => s.userId === userId)) return;
+
+  const entry = { userId, userName, seenAt: new Date().toISOString() };
+  msg.seenBy = [...(msg.seenBy || []), entry];
+  saveLocalChatMessages([msg]);
+
+  if (!supabase) return;
+  try {
+    await supabase.from("corevia_chat_messages").update({ seen_by: msg.seenBy }).eq("id", messageId);
+  } catch (err) {
+    console.warn("Failed to update seen status in Supabase:", err);
+  }
 }

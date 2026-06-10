@@ -3,7 +3,8 @@ import { UserSession, LanguageType, ChatMessage } from "../types";
 import { 
   getChatMessages, 
   sendChatMessage,
-  saveLocalChatMessages
+  saveLocalChatMessages,
+  markMessageAsSeen
 } from "../communicationService";
 import { supabase } from "../supabaseClient";
 import { 
@@ -37,6 +38,12 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
   const [textInput, setTextInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+
+  // Typing / Recording indicators
+  const [typingUsers, setTypingUsers] = useState<{ userId: string; userName: string; isRecording: boolean }[]>([]);
+  const typingTimeoutRef = useRef<any>(null);
+  const typingChannelRef = useRef<any>(null);
+  const currentUserId = session.user_id || session.userId || "staff_owner";
 
   // Audio Recording States
   const [isRecording, setIsRecording] = useState(false);
@@ -79,7 +86,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
         const formatted = data.map((m: any) => ({
           id: m.id, companyId: m.company_id, senderId: m.sender_id, senderName: m.sender_name,
           senderJobTitle: m.sender_job_title, content: m.content || "", voiceUrl: m.voice_url || undefined,
-          createdAt: m.created_at
+          createdAt: m.created_at, seenBy: m.seen_by || []
         }));
         saveLocalChatMessages(formatted);
         setMessages(formatted);
@@ -87,11 +94,28 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     };
 
     let channel: any = null;
+    let typingChannel: any = null;
     if (supabase) {
       channel = supabase.channel(`chat-realtime-${session.company_id}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "corevia_chat_messages", filter: `company_id=eq.${session.company_id}` }, pullChatFromSupabase)
         .subscribe();
+      // Typing indicator broadcast channel
+      typingChannel = supabase.channel(`chat-typing-${session.company_id}`, {
+        config: { broadcast: { self: false } }
+      });
+      typingChannel.on("broadcast", { event: "typing" }, (payload: any) => {
+        setTypingUsers(prev => {
+          const filtered = prev.filter(u => u.userId !== payload.payload.userId);
+          if (!payload.payload.isTyping && !payload.payload.isRecording) return filtered;
+          return [...filtered, { userId: payload.payload.userId, userName: payload.payload.userName, isRecording: payload.payload.isRecording || false }];
+        });
+        // Auto-clear after 5 seconds of no update
+        setTimeout(() => {
+          setTypingUsers(prev => prev.filter(u => u.userId !== payload.payload.userId));
+        }, 5000);
+      }).subscribe();
     }
+    typingChannelRef.current = typingChannel;
 
     // Fallback polling every 10 seconds
     const interval = setInterval(() => {
@@ -101,8 +125,21 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     return () => {
       clearInterval(interval);
       if (channel) supabase.removeChannel(channel);
+      if (typingChannel) supabase.removeChannel(typingChannel);
     };
   }, [session.company_id]);
+
+  // Mark messages as seen when they appear in the list
+  useEffect(() => {
+    if (!session.user_id && !session.userId) return;
+    const myId = session.user_id || session.userId || "";
+    const myName = session.username || "Employee";
+    messages.forEach(m => {
+      if (m.senderId !== myId && !m.seenBy?.some(s => s.userId === myId)) {
+        markMessageAsSeen(m.id, myId, myName);
+      }
+    });
+  }, [messages.length, session.user_id, session.userId, session.username]);
 
   // Scroll on messages change
   useEffect(() => {
@@ -128,7 +165,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       setTextInput("");
       const result = await sendChatMessage({
         companyId: session.company_id,
-        senderId: session.userId || "staff_owner",
+        senderId: session.user_id || session.userId || "staff_owner",
         senderName: session.username || "Staff User",
         senderJobTitle: session.jobTitle || getsLabel("مدير الشركة", "Dirigeant", "Company ExecutiveOffice"),
         content: trimmed
@@ -141,7 +178,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
         await logActivity({
           companyId: session.company_id,
           userName: session.username || "Staff User",
-          userId: session.userId || "staff_owner",
+          userId: session.user_id || session.userId || "staff_owner",
           jobTitle: session.jobTitle || "Executive",
           actionType: "SEND_CHAT_MESSAGE",
           pageName: "Communication Hub / المراسلات المشتركة",
@@ -180,7 +217,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
           try {
             const voiceResult = await sendChatMessage({
               companyId: session.company_id,
-              senderId: session.userId || "staff_owner",
+              senderId: session.user_id || session.userId || "staff_owner",
               senderName: session.username || "Staff User",
               senderJobTitle: session.jobTitle || "Executive",
               content: getsLabel("🎙️ رسالة صوتية مرسلة", "🎙️ Message vocal envoyé", "🎙️ Voice note dispatched"),
@@ -198,7 +235,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
               await logActivity({
                 companyId: session.company_id,
                 userName: session.username || "Staff User",
-                userId: session.userId || "staff_owner",
+                userId: session.user_id || session.userId || "staff_owner",
                 jobTitle: session.jobTitle || "Executive",
                 actionType: "SEND_VOICE_MESSAGE",
                 pageName: "Communication Hub / المراسلات المشتركة",
@@ -218,6 +255,14 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       recorder.start();
       setMediaRecorder(recorder);
       setIsRecording(true);
+      // Broadcast recording indicator
+      if (supabase && typingChannelRef.current) {
+        typingChannelRef.current.send({
+          type: "broadcast",
+          event: "typing",
+          payload: { userId: currentUserId, userName: session.username || "Employee", isTyping: false, isRecording: true }
+        });
+      }
 
       recordingTimer.current = setInterval(() => {
         setRecordDuration(prev => prev + 1);
@@ -259,6 +304,14 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       sendSimulatedVoiceNote();
     }
     setIsRecording(false);
+    // Clear recording indicator
+    if (supabase && typingChannelRef.current) {
+      typingChannelRef.current.send({
+        type: "broadcast",
+        event: "typing",
+        payload: { userId: currentUserId, userName: session.username || "Employee", isTyping: false, isRecording: false }
+      });
+    }
   };
 
   const sendSimulatedVoiceNote = async () => {
@@ -267,7 +320,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     try {
       const result = await sendChatMessage({
         companyId: session.company_id,
-        senderId: session.userId || "staff_owner",
+        senderId: session.user_id || session.userId || "staff_owner",
         senderName: session.username || "Staff User",
         senderJobTitle: session.jobTitle || "Executive",
         content: getsLabel("🎙️ رسالة صوتية مرسلة", "🎙️ Message vocal", "🎙️ Voice note uploaded (Mock Mic Mode)"),
@@ -399,7 +452,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
           </div>
         ) : (
           filteredMessages.map((m) => {
-            const isMe = m.senderId === (session.userId || "staff_owner");
+            const isMe = m.senderId === (session.user_id || session.userId || "staff_owner");
             const av = getAvatarAttributes(m.senderName);
             const isOwner = m.senderJobTitle?.includes("مدير") || m.senderJobTitle === "Executive";
             
@@ -468,6 +521,16 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                   {/* Message Bottom Date Display */}
                   <div className={`text-[9px] text-zinc-600 font-mono ${isMe ? 'text-right' : 'text-left'}`}>
                     {formatMsgDate(m.createdAt)}
+                    {m.seenBy && m.seenBy.length > 0 && (
+                      <span className="relative group inline-flex ml-1 align-middle cursor-help">
+                        <span className="text-[8px] text-emerald-500">✓✓</span>
+                        <span className="absolute bottom-full mb-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-[9px] text-zinc-300 whitespace-nowrap z-50 shadow-xl">
+                          {m.seenBy.map(s => (
+                            <span key={s.userId}>{s.userName} · {new Date(s.seenAt).toLocaleTimeString()}</span>
+                          ))}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -477,6 +540,21 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
         {/* Scroll anchor target */}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Typing / Recording Indicators */}
+      {typingUsers.length > 0 && (
+        <div className="px-4 py-1.5 text-[11px] text-zinc-500 italic">
+          {typingUsers.map(u => (
+            <span key={u.userId} className="mr-2">
+              {u.isRecording ? (
+                <span>🎙️ {u.userName} {getsLabel("يسجل الآن...", "enregistre...", "is recording...")}</span>
+              ) : (
+                <span>✏️ {u.userName} {getsLabel("يكتب...", "écrit...", "is typing...")}</span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* 3. Messaging Controls Panel (Input block) */}
       <div className="bg-[#09090b] p-3 border-t border-zinc-900 absolute bottom-0 left-0 right-0" dir={isRtl ? "rtl" : "ltr"}>
@@ -521,7 +599,27 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
               className="flex-1 bg-[#040406] border border-zinc-850 rounded-xl px-4 text-xs text-white placeholder-slate-550 outline-none focus:border-indigo-650 transition-colors"
               placeholder={getsLabel("اكتب رسالتك لجميع الزملاء هنا...", "Tapez un message pour l'équipe...", "Broadcast a secure team message here...")}
               value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
+              onChange={(e) => {
+                setTextInput(e.target.value);
+                // Broadcast typing indicator
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                if (supabase && typingChannelRef.current) {
+                  typingChannelRef.current.send({
+                    type: "broadcast",
+                    event: "typing",
+                    payload: { userId: currentUserId, userName: session.username || "Employee", isTyping: true, isRecording: false }
+                  });
+                }
+                typingTimeoutRef.current = setTimeout(() => {
+                  if (supabase && typingChannelRef.current) {
+                    typingChannelRef.current.send({
+                      type: "broadcast",
+                      event: "typing",
+                      payload: { userId: currentUserId, userName: session.username || "Employee", isTyping: false, isRecording: false }
+                    });
+                  }
+                }, 3000);
+              }}
             />
 
             {/* Submit */}

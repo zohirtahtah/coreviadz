@@ -46,7 +46,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
     // 1. Locate matching Worker record
     const allWorkers = getWorkers();
     const match = allWorkers.find(
-      w => w.id === session.userId || 
+      w => w.id === session.user_id || session.userId || 
            (w.phone && session.phone && w.phone.replace(/[^0-9]/g, "") === session.phone.replace(/[^0-9]/g, "")) ||
            w.name.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
     );
@@ -59,7 +59,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       const data = await getSubmissions(session.company_id);
       // Filter for this specific employee
       const filtered = data.filter(
-        s => s.employeeId === session.userId || 
+        s => s.employeeId === session.user_id || session.userId || 
              s.employeeName.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
       );
       setSubmissions(filtered);
@@ -74,7 +74,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       // Re-read worker profile from localStorage (updated by real-time subscriptions)
       const allWorkers = getWorkers();
       const match = allWorkers.find(
-        w => w.id === session.userId || 
+        w => w.id === session.user_id || session.userId || 
              (w.phone && session.phone && w.phone.replace(/[^0-9]/g, "") === session.phone.replace(/[^0-9]/g, "")) ||
              w.name.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
       );
@@ -84,7 +84,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       try {
         const data = await getSubmissions(session.company_id);
         const filtered = data.filter(
-          s => s.employeeId === session.userId || 
+          s => s.employeeId === session.user_id || session.userId || 
                s.employeeName.toLowerCase().trim() === (session.username || "").toLowerCase().trim()
         );
         setSubmissions(filtered);
@@ -121,7 +121,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       const newSub: EmployeeSubmission = {
         id: "SUB-" + Math.random().toString(36).substring(2, 9).toUpperCase(),
         companyId: session.company_id,
-        employeeId: session.userId || "EMP-" + Math.random().toString(36).substring(2, 5),
+        employeeId: session.user_id || session.userId || "EMP-" + Math.random().toString(36).substring(2, 5),
         employeeName: session.username || "Employee Name",
         type: subType,
         amount: Number(amount),
@@ -144,7 +144,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
         await logActivity({
           companyId: session.company_id,
           userName: session.username || "Employee",
-          userId: session.userId || "Employee",
+          userId: session.user_id || session.userId || "Employee",
           jobTitle: session.jobTitle || "Employee Account",
           actionType: "CREATE_REPORT",
           pageName: "My Profile / ملفي الشخصي",
@@ -178,7 +178,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
         await logActivity({
           companyId: session.company_id,
           userName: session.username || "Employee",
-          userId: session.userId || "Employee",
+          userId: session.user_id || session.userId || "Employee",
           jobTitle: session.jobTitle || "Employee Account",
           actionType: "DELETE_REPORT",
           pageName: "My Profile / ملفي الشخصي",
@@ -280,7 +280,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
           <div className="bg-[#09090b] border border-[#27272a] rounded-3xl p-5 space-y-4">
             
             <div className="flex justify-between items-center border-b border-[#27272a] pb-3">
-              <span className="text-[10px] text-slate-500 font-mono">ID: {session.userId?.substring(0, 8) || "N/A"}</span>
+              <span className="text-[10px] text-slate-500 font-mono">ID: {session.user_id || session.userId?.substring(0, 8) || "N/A"}</span>
               <h3 className="text-xs font-black text-white flex items-center gap-2 justify-end">
                 <span>{isRtl ? "تفاصيل التعويض والمستحقات (تحت العقد)" : "Salary Regulations & Compensation Details"}</span>
                 <HeartHandshake className="text-emerald-450 w-4 h-4" />

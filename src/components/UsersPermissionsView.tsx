@@ -144,8 +144,10 @@ export default function UsersPermissionsView({
     }
   };
 
-  // Available Pages list (all 13 specified in product specification)
+  // Available Pages list
   const availablePagesList = [
+    { id: "my-profile", labelEn: "My Profile", labelAr: "ملفي التعاقدي" },
+    { id: "communication", labelEn: "Communication", labelAr: "الرسائل والتواصل" },
     { id: "dashboard", labelEn: "Dashboard", labelAr: "لوحة التحكم الرئيسية" },
     { id: "orders", labelEn: "Orders", labelAr: "الطلبيات والمبيعات" },
     { id: "suppliers", labelEn: "Customers", labelAr: "الموردين والزبائن (العملاء)" },
@@ -156,6 +158,7 @@ export default function UsersPermissionsView({
     { id: "expenses", labelEn: "Expenses", labelAr: "سجل المصاريف والإعلانات" },
     { id: "workers", labelEn: "Workers & Payrolls", labelAr: "الموظفين والعمال والرواتب" },
     { id: "profit", labelEn: "Reports (Profit)", labelAr: "ملخص الأرباح والمالية" },
+    { id: "yearly", labelEn: "Yearly", labelAr: "التقرير السنوي" },
     { id: "activity-log", labelEn: "Activity Log", labelAr: "سجل عمليات الشركة" },
     { id: "settings", labelEn: "Settings", labelAr: "إعدادات النظام وعلامة الألوان" },
     { id: "users-permissions", labelEn: "Users & Permissions", labelAr: "إدارة المستخدمين والصلاحيات" },

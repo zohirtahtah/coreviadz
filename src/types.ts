@@ -396,5 +396,6 @@ export interface ChatMessage {
   content: string;
   voiceUrl?: string;
   createdAt: string;
+  seenBy?: { userId: string; userName: string; seenAt: string }[];
 }
 

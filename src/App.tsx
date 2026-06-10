@@ -374,9 +374,10 @@ export default function App() {
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
   // automatically redirect them to the first allowed page in their list.
+  // "my-profile" and "communication" are always exempt (hardcoded in Sidebar as always-allowed for employees).
   useEffect(() => {
     if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
-      if (!session.allowedPages.includes(activeTab)) {
+      if (activeTab !== "my-profile" && activeTab !== "communication" && !session.allowedPages.includes(activeTab)) {
         const firstAllowed = session.allowedPages[0];
         if (firstAllowed) {
           setActiveTab(firstAllowed);
