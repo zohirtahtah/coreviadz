@@ -34,6 +34,9 @@ import WorkersView from "./components/WorkersView";
 import ExpensesView from "./components/ExpensesView";
 import ProfitView from "./components/ProfitView";
 import YearlyView from "./components/YearlyView";
+
+// Module-level flag to prevent Supabase Auth session from overwriting employee auto-login
+let _employeeAutoLoginFlag = false;
 import TrashView from "./components/TrashView";
 import SettingsView from "./components/SettingsView";
 import SuperAdminView from "./components/SuperAdminView";
@@ -232,6 +235,8 @@ export default function App() {
 
   // Unified Handler when Supabase session changes (Syncs, Caches, Seeds)
   const handleAuthSessionChange = async (supabaseSession: any) => {
+    // Never overwrite an employee auto-login with a Supabase Auth session
+    if (_employeeAutoLoginFlag) return;
     if (!supabaseSession?.user) return;
     const user = supabaseSession.user;
     setIsSyncingOnAuth(true);
@@ -356,7 +361,11 @@ export default function App() {
             cached.push({ id, companyId: cid, fullName: name || user, phone: "", email: "", username: user, jobTitle: title || "موظف", password: pass, allowedPages: pagesArr, status: "Active", createdAt: new Date().toISOString() });
             localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
           }
+          // Sign out from Supabase Auth to prevent it from overwriting employee session
+          if (supabase) { supabase.auth.signOut().catch(() => {}); }
+
           // Create session and auto-login
+          _employeeAutoLoginFlag = true;
           const employeeSession: UserSession = {
             username: name || user,
             email: user,
@@ -365,6 +374,7 @@ export default function App() {
           };
           setSession(employeeSession);
           saveUserSession(employeeSession);
+          setTimeout(() => { _employeeAutoLoginFlag = false; }, 5000);
           // Clean URL
           window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
         }
