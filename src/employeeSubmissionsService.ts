@@ -70,11 +70,22 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Merge and save locally
+      // Cache back locally for stability, matching DB elements and preserving client elements not in database
       const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
-      saveLocalSubmissions([...otherCompaniesObj, ...mapped]);
+      
+      const mergedList = [...localList];
+      mapped.forEach(dbSub => {
+        const idx = mergedList.findIndex(s => s.id === dbSub.id);
+        if (idx !== -1) {
+          mergedList[idx] = dbSub;
+        } else {
+          mergedList.push(dbSub);
+        }
+      });
 
-      return mapped;
+      saveLocalSubmissions([...otherCompaniesObj, ...mergedList]);
+
+      return mergedList;
     }
   } catch (err) {
     console.warn("Failed to fetch employee submissions from Supabase, returning local store:", err);
@@ -119,13 +130,13 @@ export async function saveSubmission(submission: EmployeeSubmission): Promise<bo
       .upsert(dbPayload);
 
     if (error) {
-      console.warn("Failed to save employee submission in Supabase:", error);
-      return false;
+      console.warn("Failed to save employee submission in Supabase (locally saved anyway):", error);
+      return true;
     }
     return true;
   } catch (err) {
-    console.warn("Network offline during submission save:", err);
-    return false;
+    console.warn("Network offline during submission save (locally saved anyway):", err);
+    return true;
   }
 }
 

@@ -580,6 +580,19 @@ create table if not exists corevia_company_users (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+create table if not exists corevia_employee_submissions (
+  id text primary key,
+  company_id text default 'cop_default',
+  employee_id text not null,
+  employee_name text not null,
+  type text not null,
+  amount numeric not null,
+  description text,
+  date text not null,
+  status text default 'pending',
+  created_at text
+);
+
 create table if not exists corevia_saas_users (
   user_id text primary key,
   company_id text references corevia_companies(id) on delete set null,
@@ -1532,6 +1545,19 @@ create table if not exists corevia_company_users (
   status text default 'Active',
   last_activity text,
   created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_employee_submissions (
+  id text primary key,
+  company_id text default 'cop_default',
+  employee_id text not null,
+  employee_name text not null,
+  type text not null,
+  amount numeric not null,
+  description text,
+  date text not null,
+  status text default 'pending',
+  created_at text
 );
 
 create table if not exists corevia_saas_users (
