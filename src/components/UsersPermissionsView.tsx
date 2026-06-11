@@ -35,6 +35,7 @@ interface UsersPermissionsViewProps {
   onTriggerNotification: (msg: string) => void;
   seatsLimit?: number;
   onDeleteEntireWorkerProfile?: (code: string) => void;
+  workers?: any[];
 }
 
 export default function UsersPermissionsView({
@@ -42,10 +43,12 @@ export default function UsersPermissionsView({
   session,
   onTriggerNotification,
   seatsLimit = 5,
-  onDeleteEntireWorkerProfile
+  onDeleteEntireWorkerProfile,
+  workers = []
 }: UsersPermissionsViewProps) {
   const isRtl = lang === "ar";
   const companyId = session?.company_id || "cop_default";
+  const allWorkers = (workers && workers.length > 0) ? workers : getWorkers();
 
   // State Management
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -206,8 +209,6 @@ export default function UsersPermissionsView({
     setSelectedPages(emp.allowedPages || ["dashboard"]);
     setShowPasswordRaw(false);
 
-    // Sync from Worker profile state
-    const allWorkers = getWorkers();
     const match = allWorkers.find(
       w => w.id === emp.id || 
            (w.phone && emp.phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(emp.phone)) ||
@@ -242,7 +243,6 @@ export default function UsersPermissionsView({
   };
 
   const handleDeleteEmployeeItem = (emp: Employee) => {
-    const allWorkers = getWorkers();
     const match = allWorkers.find(
       w => w.id === emp.id || 
            (w.phone && emp.phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(emp.phone)) ||
@@ -847,7 +847,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       const wId = e.target.value;
                       setSelectedWorkerId(wId);
                       if (wId) {
-                        const allW = getWorkers();
+                        const allW = allWorkers;
                         const chosen = allW.find(w => w.id === wId);
                         if (chosen) {
                           setFullName(chosen.name);
@@ -886,7 +886,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                   >
                     <option value="">{isRtl ? "-- اطلب من قائمة العمال المسجلين مسبقاً --" : "-- Select from existing worker list --"}</option>
                     {(() => {
-                      const allW = getWorkers();
+                      const allW = allWorkers;
                       const seen = new Set<string>();
                       const unique: typeof allW = [];
                       allW.forEach(x => {

@@ -7,7 +7,7 @@ import { useState, useEffect } from "react";
 import { 
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
-  Globe, Sun, Moon, Bell, Lock, KeyRound, Eye, EyeOff, LogOut, Check,
+  Globe, Sun, Moon, Bell, Lock, Unlock, KeyRound, Eye, EyeOff, LogOut, Check,
   Shield, History, Menu, X, MessageSquare, UserCheck
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
@@ -26,6 +26,7 @@ interface SidebarProps {
   isLocked: boolean;
   unlockedTabs: string[];
   onUnlockTab: (tab: string) => void;
+  onLockTab?: (tab: string) => void;
   onLogout: () => void;
   notifications: string[];
   clearNotifications: () => void;
@@ -44,6 +45,7 @@ export default function Sidebar({
   isLocked,
   unlockedTabs,
   onUnlockTab,
+  onLockTab,
   onLogout,
   notifications,
   clearNotifications,
@@ -333,6 +335,17 @@ export default function Sidebar({
                     </span>
                   ) : item.isRestricted && !isItemUnlocked ? (
                     <Lock className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
+                  ) : item.isRestricted && isLocked && isItemUnlocked ? (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onLockTab) onLockTab(item.id);
+                      }}
+                      className="p-1 hover:bg-rose-950/40 rounded text-emerald-400 hover:text-rose-500 transition-colors cursor-pointer select-none inline-flex items-center justify-center"
+                      title={isRtl ? "إعادة إقفال هذه الصفحة" : "Re-lock this page"}
+                    >
+                      <Unlock className="w-3.5 h-3.5" />
+                    </span>
                   ) : null}
                 </button>
               );

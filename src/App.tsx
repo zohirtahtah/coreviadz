@@ -136,7 +136,10 @@ export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const saved = localStorage.getItem("corevia_active_tab_v1");
+    return saved && saved !== "super-admin" ? saved : "dashboard";
+  });
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
   // ==========================================
@@ -200,8 +203,30 @@ export default function App() {
   const [customColorsList, setCustomColorsList] = useState<string[]>([]);
 
   // Security credentials challenges
-  const [isLocked, setIsLocked] = useState<boolean>(true);
-  const [unlockedTabs, setUnlockedTabs] = useState<string[]>([]);
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    const saved = sessionStorage.getItem("corevia_is_locked_v1");
+    return saved !== null ? saved === "true" : true;
+  });
+  const [unlockedTabs, setUnlockedTabs] = useState<string[]>(() => {
+    try {
+      const saved = sessionStorage.getItem("corevia_unlocked_tabs_v1");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("corevia_active_tab_v1", activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    sessionStorage.setItem("corevia_is_locked_v1", String(isLocked));
+  }, [isLocked]);
+
+  useEffect(() => {
+    sessionStorage.setItem("corevia_unlocked_tabs_v1", JSON.stringify(unlockedTabs));
+  }, [unlockedTabs]);
 
   // Instant notification toasts
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1748,6 +1773,7 @@ export default function App() {
         isLocked={isLocked}
         unlockedTabs={unlockedTabs}
         onUnlockTab={(tab) => setUnlockedTabs(prev => [...prev, tab])}
+        onLockTab={(tab) => setUnlockedTabs(prev => prev.filter(t => t !== tab))}
         onLogout={handleLogout}
         notifications={dynamicAlerts}
         clearNotifications={handleClearNotifications}
@@ -1908,6 +1934,7 @@ export default function App() {
             onTriggerNotification={triggerToast}
             seatsLimit={seatsLimit}
             onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+            workers={workers}
           />
         )}
 

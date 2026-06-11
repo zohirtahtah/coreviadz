@@ -1140,6 +1140,14 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
     setFormMonth(newM);
 
+    // Sync editId so changing months works reactively as edit or insert
+    const exist = workers.find(w => w.code === formCode && (w as any).month === newM && (w as any).year === yearFilter);
+    if (exist) {
+      setEditId(exist.id);
+    } else {
+      setEditId(null);
+    }
+
     const targetKey = `${formCode}-${newM}`;
     const cachedItem = formCache.current[targetKey];
     if (cachedItem) {
@@ -1149,8 +1157,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       setFormAbsenceDays(cachedItem.absenceDays);
       setFormExpenses(cachedItem.expenses || []);
     } else {
-      // Find stored worker
-      const exist = workers.find(w => w.code === formCode && (w as any).month === newM && (w as any).year === yearFilter);
       if (exist) {
         setFormOvertimeHours((exist as any).overtimeHours || 0);
         setFormOvertimeRate((exist as any).overtimeRate || 250);
