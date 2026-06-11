@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Lock, Unlock, Mail, User, Eye, EyeOff, Globe, Sun, Moon, Check, 
   AlertCircle, ShieldAlert, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, KeyRound
@@ -40,8 +40,6 @@ export default function Auth({
   // Form input states
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
-  const formRef = useRef<HTMLFormElement>(null);
-  const autoLoginRef = useRef(false);
   const [nameInput, setNameInput] = useState("");
   
   // UI states
@@ -99,7 +97,6 @@ export default function Auth({
           
           setEmailInput(user);
           setPasswordInput(pass);
-          autoLoginRef.current = true;
           
           // Clear parameters from address bar to keep it elegant and clean
           try {
@@ -108,38 +105,52 @@ export default function Auth({
           
           onTriggerNotification(
             isRtl 
-              ? "📋 تم تهيئة بيانات الموظف بنجاح، جاري تسجيل الدخول التلقائي..." 
-              : "📋 Employee credentials prefilled, auto-logging in...", 
+              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء" 
+              : "📋 Employee credentials prefilled, click Login to proceed", 
             "success"
           );
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
         const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
-        if (urlEmail) {
-          setEmailInput(decodeURIComponent(urlEmail));
-        }
-        if (urlPass) {
-          setPasswordInput(decodeURIComponent(urlPass));
+        if (urlEmail && urlPass) {
+          const decEmail = decodeURIComponent(urlEmail);
+          const decPass = decodeURIComponent(urlPass);
+          setEmailInput(decEmail);
+          setPasswordInput(decPass);
+
+          // Clear parameters from address bar to keep it elegant and clean
+          try {
+            window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+          } catch (histErr) {}
+
+          onTriggerNotification(
+            isRtl 
+              ? "⚡ جاري تسجيل الدخول التلقائي لحساب الموظف..." 
+              : "⚡ Connecting to employee account automatically...", 
+            "info"
+          );
+
+          // Auto-trigger submitting sequence
+          setTimeout(() => {
+            const btn = document.getElementById("auth-submit-btn");
+            if (btn) {
+              btn.click();
+            }
+          }, 350);
+        } else {
+          if (urlEmail) {
+            setEmailInput(decodeURIComponent(urlEmail));
+          }
+          if (urlPass) {
+            setPasswordInput(decodeURIComponent(urlPass));
+          }
         }
       }
     } catch (e) {
       console.warn("Error prefilling auth credentials:", e);
     }
   }, []);
-
-  // Auto-login when credentials are prefilled from URL params
-  useEffect(() => {
-    if (autoLoginRef.current && emailInput && passwordInput && !isSubmitting) {
-      autoLoginRef.current = false;
-      const timer = setTimeout(() => {
-        if (formRef.current) {
-          formRef.current.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        }
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [emailInput, passwordInput, isSubmitting]);
 
   // Toggle Theme
   const handleToggleTheme = () => {
@@ -234,6 +245,7 @@ export default function Auth({
           isApproved: true,
           isSuspended: false,
           user_id: matchingEmployee.id,
+          userId: matchingEmployee.id,
           company_id: matchingEmployee.companyId,
           role: "employee",
           allowedPages: matchingEmployee.allowedPages,
@@ -347,6 +359,7 @@ export default function Auth({
             isApproved: true,
             isSuspended: false,
             user_id: adminUserId,
+            userId: adminUserId,
             company_id: `cop_${adminUserId.substring(0, 15)}`,
             role: "super_admin"
           };
@@ -363,6 +376,7 @@ export default function Auth({
             isApproved: true,
             isSuspended: false,
             user_id: uId,
+            userId: uId,
             company_id: sessionUser ? `cop_${uId.substring(0, 15)}` : undefined,
             role: isSuperAdminEmail ? "super_admin" : "admin"
           };
@@ -383,7 +397,8 @@ export default function Auth({
             isRegistered: true,
             isApproved: true,
             isSuspended: false,
-            user_id: isSuperAdminEmail ? adminUserId : "usr_mock",
+            user_id: adminUserId,
+            userId: adminUserId,
             company_id: isSuperAdminEmail ? `cop_${adminUserId.substring(0, 15)}` : "cop_mock",
             role: isSuperAdminEmail ? "super_admin" : "admin"
           };
@@ -428,6 +443,7 @@ export default function Auth({
           isApproved: true,
           isSuspended: false,
           user_id: data.user?.id,
+          userId: data.user?.id,
           company_id: data.user ? `cop_${data.user.id.substring(0, 15)}` : undefined
         };
 
@@ -454,6 +470,7 @@ export default function Auth({
           isApproved: true,
           isSuspended: false,
           user_id: "usr_mock",
+          userId: "usr_mock",
           company_id: "cop_mock"
         };
         onAuthSuccess(sessionRecord);
@@ -639,7 +656,7 @@ export default function Auth({
 
           {/* LOGIN VIEW TEMPLATE */}
           {authMode === "login" && (
-            <form ref={formRef} onSubmit={handleSubmit} className="space-y-4" id="login_form">
+            <form onSubmit={handleSubmit} className="space-y-4" id="login_form">
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-300">
                   {isRtl ? "البريد الإلكتروني أو الهاتف أو اسم المستخدم" : "Email, Phone, or Username"}
@@ -694,6 +711,7 @@ export default function Auth({
               </div>
 
               <button
+                id="auth-submit-btn"
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full relative group overflow-hidden bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:via-indigo-400 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg shadow-indigo-500/20 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-indigo-400/10"

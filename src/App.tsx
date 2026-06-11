@@ -13,9 +13,6 @@ import {
   deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft, deleteEntireWorkerProfileSoft,
   restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft
 } from "./storageUtils";
-import { saveLocalEmployees } from "./employeeService";
-import { saveLocalSubmissions } from "./employeeSubmissionsService";
-import { saveLocalChatMessages } from "./communicationService";
 import { 
   BusinessProfile, Order, Product, BasicInventoryItem, SubInventoryItem, 
   ReturnInventoryItem, Supplier, SupplierInvoice, Worker, Expense, TrashItem 
@@ -34,9 +31,6 @@ import WorkersView from "./components/WorkersView";
 import ExpensesView from "./components/ExpensesView";
 import ProfitView from "./components/ProfitView";
 import YearlyView from "./components/YearlyView";
-
-// Module-level flag to prevent Supabase Auth session from overwriting employee auto-login
-let _employeeAutoLoginFlag = false;
 import TrashView from "./components/TrashView";
 import SettingsView from "./components/SettingsView";
 import SuperAdminView from "./components/SuperAdminView";
@@ -56,6 +50,7 @@ import {
   fetchUserSaaSMeta, 
   saveOnboardingCompletionInCloud, 
   pushSingleDatasetToCloud, 
+  pullMultiTenantData, 
   pushFullTenantData,
   cleanSlateResetSandbox
 } from "./supabaseSync";
@@ -141,7 +136,7 @@ export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
-  const [activeTab, setActiveTab] = useState<string>(() => localStorage.getItem("corevia_active_tab") || "dashboard");
+  const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
   // ==========================================
@@ -192,27 +187,13 @@ export default function App() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // Custom visual colors choices
   const [customColorsList, setCustomColorsList] = useState<string[]>([]);
 
-  // Persist activeTab across refreshes
-  useEffect(() => {
-    localStorage.setItem("corevia_active_tab", activeTab);
-  }, [activeTab]);
-
-  // Security credentials challenges - persist across refreshes
-  const [isLocked, setIsLocked] = useState<boolean>(() => localStorage.getItem("corevia_is_locked") !== "false");
-  const [unlockedTabs, setUnlockedTabs] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("corevia_unlocked_tabs") || "[]"); } catch { return []; }
-  });
-  useEffect(() => {
-    localStorage.setItem("corevia_is_locked", String(isLocked));
-  }, [isLocked]);
-  useEffect(() => {
-    localStorage.setItem("corevia_unlocked_tabs", JSON.stringify(unlockedTabs));
-  }, [unlockedTabs]);
+  // Security credentials challenges
+  const [isLocked, setIsLocked] = useState<boolean>(true);
+  const [unlockedTabs, setUnlockedTabs] = useState<string[]>([]);
 
   // Instant notification toasts
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -235,8 +216,6 @@ export default function App() {
 
   // Unified Handler when Supabase session changes (Syncs, Caches, Seeds)
   const handleAuthSessionChange = async (supabaseSession: any) => {
-    // Never overwrite an employee auto-login with a Supabase Auth session
-    if (_employeeAutoLoginFlag) return;
     if (!supabaseSession?.user) return;
     const user = supabaseSession.user;
     setIsSyncingOnAuth(true);
@@ -267,7 +246,10 @@ export default function App() {
       setSession(activeSession);
 
       if (userMeta.hasCompletedOnboarding) {
-        // Load from local storage only (cloud is backup-only, never auto-pull)
+        // Download all cloud records instantly
+        const pullSuccess = await pullMultiTenantData(userMeta.companyId);
+        
+        // Load the pulled values to memory
         const currentProfile = getBusinessProfile();
         setProfile(currentProfile);
         if (currentProfile) {
@@ -340,50 +322,6 @@ export default function App() {
     }
   }, []);
 
-  // Process employee invite link at App level (works regardless of login state)
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("setup_worker") === "true") {
-        const id = params.get("id");
-        const cid = params.get("cid");
-        const name = params.get("name") ? decodeURIComponent(params.get("name")!) : "";
-        const user = params.get("user") ? decodeURIComponent(params.get("user")!) : "";
-        const pass = params.get("pass") ? decodeURIComponent(params.get("pass")!) : "";
-        const title = params.get("title") ? decodeURIComponent(params.get("title")!) : "";
-        const pagesStr = params.get("pages") ? decodeURIComponent(params.get("pages")!) : "[]";
-        if (id && cid && user && pass) {
-          let pagesArr: string[] = [];
-          try { pagesArr = JSON.parse(pagesStr); } catch (e) {}
-          // Save to localStorage
-          const cached = (() => { try { return JSON.parse(localStorage.getItem("corevia_employees_list_v2") || "[]"); } catch (e) { return []; } })();
-          if (!cached.some((emp: any) => emp.id === id)) {
-            cached.push({ id, companyId: cid, fullName: name || user, phone: "", email: "", username: user, jobTitle: title || "موظف", password: pass, allowedPages: pagesArr, status: "Active", createdAt: new Date().toISOString() });
-            localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
-          }
-          // Sign out from Supabase Auth to prevent it from overwriting employee session
-          if (supabase) { supabase.auth.signOut().catch(() => {}); }
-
-          // Create session and auto-login
-          _employeeAutoLoginFlag = true;
-          const employeeSession: UserSession = {
-            username: name || user,
-            email: user,
-            isRegistered: true, isApproved: true, isSuspended: false,
-            user_id: id, company_id: cid, role: "employee", allowedPages: pagesArr, jobTitle: title || "موظف"
-          };
-          setSession(employeeSession);
-          saveUserSession(employeeSession);
-          setTimeout(() => { _employeeAutoLoginFlag = false; }, 5000);
-          // Clean URL
-          window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
-        }
-      }
-    } catch (e) {
-      console.warn("Error processing setup_worker link:", e);
-    }
-  }, []);
-
   // Helper to load localized database and configuration records from local cache
   const loadStateFromLocal = () => {
     const profObj = getBusinessProfile();
@@ -419,15 +357,41 @@ export default function App() {
 
   // 2. Local database loader triggered whenever active tenant session resolves
   useEffect(() => {
+    // 1. Instantly load offline database cache so the app is immediately interactive for the user
     loadStateFromLocal();
+
+    // 2. Hydrate from Cloud in background if there's an active SaaS company session
+    if (session?.company_id && supabase) {
+      const profObj = getBusinessProfile();
+      const hasPreExistingData = !!(profObj && profObj.businessName);
+      
+      // Only show full screen loader if we have no local cache at all
+      if (!hasPreExistingData) {
+        setIsSyncingOnAuth(true);
+      }
+
+      pullMultiTenantData(session.company_id)
+        .then((success) => {
+          if (success) {
+            console.log("Successfully hydrated multi-tenant workspace from the cloud.");
+            // Hot reload the active records to React state
+            loadStateFromLocal();
+          }
+        })
+        .catch((e) => {
+          console.warn("Could not sync cloud records on login:", e);
+        })
+        .finally(() => {
+          setIsSyncingOnAuth(false);
+        });
+    }
   }, [session]);
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
   // automatically redirect them to the first allowed page in their list.
-  // "my-profile" and "communication" are always exempt (hardcoded in Sidebar as always-allowed for employees).
   useEffect(() => {
     if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
-      if (activeTab !== "my-profile" && activeTab !== "communication" && !session.allowedPages.includes(activeTab)) {
+      if (!session.allowedPages.includes(activeTab)) {
         const firstAllowed = session.allowedPages[0];
         if (firstAllowed) {
           setActiveTab(firstAllowed);
@@ -436,204 +400,39 @@ export default function App() {
     }
   }, [session, activeTab]);
 
-  // Real-time Subscriptions — pull fresh data from Supabase on changes (not from localStorage)
+  // 3. Periodic cloud sync to keep both Admin & Employees 100% interconnected in real-time
   useEffect(() => {
-    if (!supabase || !session?.company_id) return;
+    if (!session?.company_id || !supabase) return;
 
-    let channels: any[] = [];
+    // Run custom pull background sync every 5 seconds which handles orders, products, workers, suppliers, expenses, salary sheets.
+    const interval = setInterval(async () => {
+      try {
+        const companyId = session.company_id;
+        const success = await pullMultiTenantData(companyId);
+        if (success) {
+          // Quietly update memory states inside App.tsx so changes are instantly reflected on all pages
+          setOrders(getOrders());
+          setProducts(getProducts());
+          setBasicInventory(getBasicInventory());
+          setSubInventory(getSubInventory());
+          setReturnInventory(getReturnInventory());
+          setSuppliers(getSuppliers());
+          setInvoices(getSupplierInvoices());
+          setWorkers(getWorkers());
+          setTrashItems(getTrashItems());
 
-    const pullOrders = async () => {
-      const { data } = await supabase.from("corevia_orders").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((o: any) => ({
-          id: o.id, date: o.date, customerName: o.customer_name, phone: o.phone,
-          wilaya: o.wilaya, commune: o.commune, deliveryLocation: o.delivery_location || "Home",
-          deliveryCompany: o.delivery_company || "Yalidine Express", deliveryType: o.delivery_type || "Home",
-          deliveryPrice: o.delivery_price || 0, items: o.items || [], totalPrice: o.total_price || 0,
-          paidAmount: o.paid_amount || 0, discount: o.discount || 0,
-          customerPaysDelivery: Boolean(o.customer_pays_delivery), isExchange: Boolean(o.is_exchange),
-          exchangeOrderRef: o.exchange_order_ref || undefined, agentName: o.agent_name || "Owner",
-          source: o.source || "1", status: o.status || "pending",
-          returnCost: o.return_cost || undefined, returnDate: o.return_date || undefined,
-          notes: o.notes || undefined, deletedAt: o.deleted_at || undefined,
-          createdBy: o.created_by || undefined, updatedBy: o.updated_by || undefined,
-          createdDate: o.created_date || undefined, createdTime: o.created_time || undefined,
-          updatedDate: o.updated_date || undefined, updatedTime: o.updated_time || undefined
-        }));
-        saveOrders(formatted); setOrders(formatted);
-        setRefreshKey(k => k + 1);
-        console.log("[REALTIME] Synced orders from Supabase");
+          const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
+          let parsedExpenses = [];
+          try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
+          setExpenses(parsedExpenses);
+        }
+      } catch (err) {
+        console.warn("[Realtime Polling Sync] Background ERP sync failed:", err);
       }
-    };
+    }, 5000); // 5 seconds polling matches communication chat polling speed seamlessly!
 
-    const pullProducts = async () => {
-      const { data } = await supabase.from("corevia_products").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((p: any) => ({
-          id: p.id, name: p.name, wholesaleCostPrice: p.wholesale_cost_price || 0,
-          wholesalePercentage: p.wholesale_percentage || 0, wholesalePrice: p.wholesale_price || 0,
-          retailCostPrice: p.retail_cost_price || 0, retailPercentage: p.retail_percentage || 0,
-          retailPrice: p.retail_price || 0, colors: p.colors || [], sizes: p.sizes || [],
-          createdAt: p.created_at || new Date().toISOString(),
-          createdBy: p.created_by || undefined, updatedBy: p.updated_by || undefined,
-          createdDate: p.created_date || undefined, createdTime: p.created_time || undefined,
-          updatedDate: p.updated_date || undefined, updatedTime: p.updated_time || undefined
-        }));
-        saveProducts(formatted); setProducts(formatted);
-        setRefreshKey(k => k + 1);
-        console.log("[REALTIME] Synced products from Supabase");
-      }
-    };
-
-    const pullWorkers = async () => {
-      const { data } = await supabase.from("corevia_workers").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        // Expand base workers + their payrolls into monthly records
-        const expanded: any[] = [];
-        data.forEach((w: any) => {
-          const base = {
-            id: w.id, name: w.name, code: w.code || "W-" + w.id.substring(0, 4),
-            phone: w.phone || "", baseSalary: w.base_salary || 0, dailyHours: w.daily_hours || 8,
-            overtimeRate: w.overtime_rate || 250, role: w.role || "Employee",
-            monthlySalary: w.monthly_salary || w.base_salary || 0,
-            payrolls: w.payrolls || [], createdAt: w.created_at || new Date().toISOString(),
-            workingDaysPerMonth: w.working_days_per_month || undefined,
-            absenceDeductionRate: w.absence_deduction_rate || undefined,
-            notes: w.notes || undefined,
-            createdBy: w.created_by || undefined, updatedBy: w.updated_by || undefined,
-            createdDate: w.created_date || undefined, createdTime: w.created_time || undefined,
-            updatedDate: w.updated_date || undefined, updatedTime: w.updated_time || undefined
-          };
-          const payrolls: any[] = w.payrolls || [];
-          if (payrolls.length > 0) {
-            payrolls.forEach((p: any) => {
-              expanded.push({
-                ...base, id: `${w.id}-${p.month ?? 0}-${p.year ?? 0}`,
-                month: p.month, year: p.year,
-                overtimeHours: p.overtimeHours || 0, missingHours: p.missingHours || 0,
-                absenceDays: p.absenceDays || 0, expenses: p.expenses || [],
-                paid: p.paid || false, paymentAmount: p.paymentAmount || 0,
-                paymentDate: p.paymentDate || ""
-              });
-            });
-          } else {
-            expanded.push(base);
-          }
-        });
-        saveWorkers(expanded); setWorkers(expanded);
-        setRefreshKey(k => k + 1);
-        console.log("[REALTIME] Synced workers from Supabase");
-      }
-    };
-
-    const pullSuppliers = async () => {
-      const { data } = await supabase.from("corevia_suppliers").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((s: any) => ({
-          id: s.id, name: s.name, phone: s.phone || "", address: s.address || "",
-          email: s.email || "", createdAt: s.created_at || new Date().toISOString(),
-          createdBy: s.created_by || undefined, updatedBy: s.updated_by || undefined,
-          createdDate: s.created_date || undefined, createdTime: s.created_time || undefined,
-          updatedDate: s.updated_date || undefined, updatedTime: s.updated_time || undefined
-        }));
-        saveSuppliers(formatted); setSuppliers(formatted);
-        setRefreshKey(k => k + 1);
-      }
-    };
-
-    const pullExpenses = async () => {
-      const { data } = await supabase.from("corevia_expenses").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((e: any) => {
-          if (e.type === "fixed") {
-            return { id: e.id, title: e.name || "Fixed Expense", type: "fixed", amount: e.amount || 0, date: e.date || new Date().toISOString().split("T")[0], createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
-          } else if (e.type === "variable") {
-            return { id: e.id, title: e.name || "Variable Expense", type: "variable", amount: e.amount || 0, date: e.date || new Date().toISOString().split("T")[0], monthYear: e.month_year || new Date().toISOString().substring(0, 7), createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
-          } else {
-            return { id: e.id, title: e.name || `Campaign: ${e.platform}`, type: "ads", amount: e.amount_currency || 0, date: e.start_date || new Date().toISOString().split("T")[0], isUSD: true, usdAmount: e.amount_usd || 0, exchangeRate: e.exchange_rate || 0, notes: e.notes || "", platform: e.platform || "Facebook", monthYear: e.month_year || new Date().toISOString().substring(0, 7), startDate: e.start_date, endDate: e.end_date, createdAt: e.created_at || new Date().toISOString(), createdBy: e.created_by || undefined, updatedBy: e.updated_by || undefined };
-          }
-        });
-        localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(formatted));
-        setExpenses(formatted);
-        setRefreshKey(k => k + 1);
-      }
-    };
-
-    const pullEmployees = async () => {
-      const { data } = await supabase.from("corevia_company_users").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((e: any) => ({
-          id: e.id, companyId: e.company_id, fullName: e.full_name, phone: e.phone || "",
-          email: e.email || "", username: e.username || "", jobTitle: e.job_title || "",
-          password: e.password || "", allowedPages: typeof e.allowed_pages === "string" ? JSON.parse(e.allowed_pages) : (e.allowed_pages || []),
-          assignedResponsibilities: e.assigned_responsibilities || "", status: e.status || "Active",
-          lastActivity: e.last_activity || null, createdAt: e.created_at || new Date().toISOString()
-        }));
-        saveLocalEmployees(formatted);
-        setRefreshKey(k => k + 1);
-      }
-    };
-
-    const pullSubmissions = async () => {
-      const { data } = await supabase.from("corevia_employee_submissions").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((s: any) => ({
-          id: s.id, companyId: s.company_id, employeeId: s.employee_id, employeeName: s.employee_name,
-          type: s.type, amount: s.amount || 0, description: s.description || "", date: s.date || "",
-          status: s.status || "pending", createdAt: s.created_at || new Date().toISOString()
-        }));
-        saveLocalSubmissions(formatted);
-        setRefreshKey(k => k + 1);
-      }
-    };
-
-    const pullChatMessages = async () => {
-      const { data } = await supabase.from("corevia_chat_messages").select("*").eq("company_id", session.company_id);
-      if (data && data.length > 0) {
-        const formatted = data.map((m: any) => ({
-          id: m.id, companyId: m.company_id, senderId: m.sender_id, senderName: m.sender_name,
-          senderJobTitle: m.sender_job_title, content: m.content || "", voiceUrl: m.voice_url || undefined,
-          createdAt: m.created_at
-        }));
-        saveLocalChatMessages(formatted);
-        setRefreshKey(k => k + 1);
-      }
-    };
-
-    const setupRealtime = () => {
-      const ordersChannel = supabase.channel(`orders-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_orders", filter: `company_id=eq.${session.company_id}` }, pullOrders)
-        .subscribe();
-      const productsChannel = supabase.channel(`products-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_products", filter: `company_id=eq.${session.company_id}` }, pullProducts)
-        .subscribe();
-      const workersChannel = supabase.channel(`workers-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_workers", filter: `company_id=eq.${session.company_id}` }, pullWorkers)
-        .subscribe();
-      const suppliersChannel = supabase.channel(`suppliers-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_suppliers", filter: `company_id=eq.${session.company_id}` }, pullSuppliers)
-        .subscribe();
-      const expensesChannel = supabase.channel(`expenses-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_expenses", filter: `company_id=eq.${session.company_id}` }, pullExpenses)
-        .subscribe();
-      const employeesChannel = supabase.channel(`employees-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_company_users", filter: `company_id=eq.${session.company_id}` }, pullEmployees)
-        .subscribe();
-      const submissionsChannel = supabase.channel(`submissions-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_employee_submissions", filter: `company_id=eq.${session.company_id}` }, pullSubmissions)
-        .subscribe();
-      const chatChannel = supabase.channel(`chat-${session.company_id}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "corevia_chat_messages", filter: `company_id=eq.${session.company_id}` }, pullChatMessages)
-        .subscribe();
-      channels = [ordersChannel, productsChannel, workersChannel, suppliersChannel, expensesChannel, employeesChannel, submissionsChannel, chatChannel];
-    };
-
-    setupRealtime();
-
-    return () => {
-      channels.forEach(ch => { supabase.removeChannel(ch); });
-    };
-  }, [session?.company_id, supabase]);
+    return () => clearInterval(interval);
+  }, [session]);
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {
@@ -2025,18 +1824,17 @@ export default function App() {
         )}
 
         {activeTab === "workers" && (
-        <WorkersView
-          workers={workers}
-          onSaveWorkers={saveWorkersAndPersist}
-          lang={lang}
-          onSoftDeleteWorker={handleSoftDeleteWorker}
-          onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-          onTriggerNotification={triggerToast}
-          orders={orders}
-          onSectionChange={setActiveTab}
-          session={session}
-          refreshKey={refreshKey}
-        />
+          <WorkersView
+            workers={workers}
+            onSaveWorkers={saveWorkersAndPersist}
+            lang={lang}
+            onSoftDeleteWorker={handleSoftDeleteWorker}
+            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+            onTriggerNotification={triggerToast}
+            orders={orders}
+            onSectionChange={setActiveTab}
+            session={session}
+          />
         )}
 
         {activeTab === "expenses" && (
@@ -2096,14 +1894,13 @@ export default function App() {
         )}
 
         {activeTab === "users-permissions" && (
-        <UsersPermissionsView
-          lang={lang}
-          session={session}
-          onTriggerNotification={triggerToast}
-          seatsLimit={seatsLimit}
-          onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-          refreshKey={refreshKey}
-        />
+          <UsersPermissionsView
+            lang={lang}
+            session={session}
+            onTriggerNotification={triggerToast}
+            seatsLimit={seatsLimit}
+            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+          />
         )}
 
         {activeTab === "activity-log" && (
@@ -2115,21 +1912,18 @@ export default function App() {
         )}
 
         {activeTab === "communication" && (
-        <CommunicationView
-          session={session}
-          lang={lang}
-          onTriggerNotification={triggerToast}
-          refreshKey={refreshKey}
-        />
+          <CommunicationView
+            session={session}
+            lang={lang}
+            onTriggerNotification={triggerToast}
+          />
         )}
 
         {activeTab === "my-profile" && (
-        <MyProfileView
-          session={session}
-          lang={lang}
-          onTriggerNotification={triggerToast}
-          refreshKey={refreshKey}
-        />
+          <MyProfileView
+            session={session}
+            lang={lang}
+          />
         )}
 
         {activeTab === "super-admin" && (

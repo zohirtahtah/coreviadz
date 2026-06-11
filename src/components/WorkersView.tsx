@@ -20,7 +20,6 @@ interface WorkersViewProps {
   orders?: Order[];
   onSectionChange?: (tab: string) => void;
   session?: any;
-  refreshKey?: number;
 }
 
 // 2.1 الدوال المساعدة العامة
@@ -100,54 +99,10 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   onTriggerNotification,
   orders = [],
   onSectionChange,
-  session,
-  refreshKey = 0
+  session
 }) => {
   const isRtl = lang === "ar";
   const currencyLabel = "دج";
-
-  // Helper functions
-  const getsLabel = (ar: string, fr: string, en: string) => {
-    if (lang === "ar") return ar;
-    if (lang === "fr") return fr;
-    return en;
-  };
-
-  const getMonthName = (m: number) => {
-    if (lang === "ar") return monthNamesAr[m] || "";
-    if (lang === "fr") return monthNamesFr[m] || "";
-    return monthNamesEn[m] || "";
-  };
-
-  const getNextCode = () => {
-    const existing = workers.filter(w => !(w as any).month);
-    const maxCode = existing.reduce((max, w) => {
-      const num = parseInt(w.code?.replace(/\D/g, "") || "0", 10);
-      return num > max ? num : max;
-    }, 0);
-    return `W-${String(maxCode + 1).padStart(3, "0")}`;
-  };
-
-  const fillDates = (year: number, month: number) => {
-    return new Date(year, month + 1, 0).getDate();
-  };
-
-  const syncExpensesWithGeneralLedger = (code: string, name: string, expenses: any[], month: number, year: number) => {
-    try {
-      const stored = localStorage.getItem("corevia_unified_expenses_v1");
-      if (!stored) return;
-      const allExpenses = JSON.parse(stored);
-      const workerLabel = `[${code}] ${name}`;
-      const filtered = allExpenses.filter((e: any) => e.title && e.title.includes(workerLabel));
-      const otherExpenses = allExpenses.filter((e: any) => !e.title || !e.title.includes(workerLabel));
-      const updatedExpenses = [...otherExpenses, ...expenses.map((exp: any) => ({
-        ...exp, title: exp.title || `${workerLabel} - ${exp.desc || "Expense"}`
-      }))];
-      localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(updatedExpenses));
-    } catch (e) {
-      console.warn("Failed to sync worker expenses with general ledger", e);
-    }
-  };
 
   // Filter values
   const today = new Date();
@@ -174,23 +129,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const [showYearlySummary, setShowYearlySummary] = useState(false);
   const [lastDeletedWorker, setLastDeletedWorker] = useState<any | null>(null);
 
-  // Form state for adding/editing workers
-  const [formCode, setFormCode] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formPhone, setFormPhone] = useState("");
-  const [formRole, setFormRole] = useState("Sales Handler");
-  const [formMonth, setFormMonth] = useState<number>(today.getMonth());
-  const [formBaseSalary, setFormBaseSalary] = useState<number>(35000);
-  const [formDailyHours, setFormDailyHours] = useState<number>(8);
-  const [formOvertimeHours, setFormOvertimeHours] = useState<number>(0);
-  const [formOvertimeRate, setFormOvertimeRate] = useState<number>(250);
-  const [formMissingHours, setFormMissingHours] = useState<number>(0);
-  const [formAbsenceDays, setFormAbsenceDays] = useState<number>(0);
-  const [formExpenses, setFormExpenses] = useState<any[]>([]);
-  const [formPaid, setFormPaid] = useState(false);
-  const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
-  const [formPaymentDate, setFormPaymentDate] = useState("");
-
   // Employee approval workflow states
   const [showEmployeeFilings, setShowEmployeeFilings] = useState(false);
   const [employeeSubmissions, setEmployeeSubmissions] = useState<any[]>([]);
@@ -216,7 +154,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
   useEffect(() => {
     loadAllSubmissions();
-  }, [showEmployeeFilings, refreshKey]);
+  }, [showEmployeeFilings]);
 
   useEffect(() => {
     if (deleteConfirm) {
@@ -398,10 +336,103 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   // References
   const formCache = useRef<Record<string, any>>({});
   const prevWorkerCode = useRef<string | null>(null);
+  const autoCreated = useRef(false);
+
+  // Form Field State Values
+  const [formCode, setFormCode] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formRole, setFormRole] = useState("Sales Handler");
+  const [formMonth, setFormMonth] = useState<number>(today.getMonth());
+  const [formBaseSalary, setFormBaseSalary] = useState<number>(35000);
+  const [formDailyHours, setFormDailyHours] = useState<number>(8);
+  const [formOvertimeHours, setFormOvertimeHours] = useState<number>(0);
+  const [formOvertimeRate, setFormOvertimeRate] = useState<number>(250);
+  const [formMissingHours, setFormMissingHours] = useState<number>(0);
+  const [formAbsenceDays, setFormAbsenceDays] = useState<number>(0);
+  const [formExpenses, setFormExpenses] = useState<any[]>([]);
+  const [formPaid, setFormPaid] = useState(false);
+  const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
+  const [formPaymentDate, setFormPaymentDate] = useState("");
+
+  // Labels helper
+  const getsLabel = (lblAr: string, lblFr: string, lblEn: string) => {
+    return lang === "ar" ? lblAr : lang === "fr" ? lblFr : lblEn;
+  };
+
+  const getMonthName = (idx: number) => {
+    return getsLabel(monthNamesAr[idx], monthNamesFr[idx], monthNamesEn[idx]);
+  };
+
+  // Helper date fill
+  const fillDates = (m: number, y: number) => {
+    const firstDay = new Date(y, m, 1);
+    const lastDay = new Date(y, m + 1, 0);
+    const formatDate = (d: Date) => {
+      const yearStr = d.getFullYear();
+      const mStr = String(d.getMonth() + 1).padStart(2, "0");
+      const dStr = String(d.getDate()).padStart(2, "0");
+      return `${yearStr}-${mStr}-${dStr}`;
+    };
+    return {
+      start: formatDate(firstDay),
+      end: formatDate(lastDay),
+      days: lastDay.getDate()
+    };
+  };
+
+  // Code Generator
+  const getNextCode = () => {
+    let max = 0;
+    workers.forEach(w => {
+      const num = parseInt(w.code.replace(/\D/g, ""), 10);
+      if (!isNaN(num) && num > max) {
+        max = num;
+      }
+    });
+    return String(max + 1).padStart(3, "0");
+  };
+
+  // Synchronize expenses with `/expenses` tab
+  const syncExpensesWithGeneralLedger = (
+    workerCode: string, 
+    workerName: string, 
+    expensesList: any[],
+    mIdx: number,
+    yVal: number
+  ) => {
+    try {
+      const stored = localStorage.getItem("corevia_unified_expenses_v1");
+      let list: Expense[] = stored ? JSON.parse(stored) : [];
+      
+      const prefix = `wexp-sync-${workerCode}-`;
+      // Remove all synced expenses for this worker
+      list = list.filter(ex => !ex.id.startsWith(prefix));
+
+      // Append newer entries
+      const targetDates = fillDates(mIdx, yVal);
+      const newEntries: Expense[] = expensesList.map(e => ({
+        id: `${prefix}${e.id}`,
+        title: `خصم/سلفة عامل - ${workerName} - ${e.desc}`,
+        type: "variable",
+        amount: e.amount,
+        date: e.date || targetDates.start,
+        notes: `كود العامل: ${workerCode} | ${monthNamesAr[mIdx]} ${yVal}`,
+        createdAt: new Date().toISOString()
+      }));
+
+      const merged = [...newEntries, ...list];
+      localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(merged));
+      window.dispatchEvent(new Event("storage"));
+    } catch (err) {
+      console.error("Expense synchronization error", err);
+    }
+  };
+
+  // 9.2 الإنشاء التلقائي (auto-created)
   useEffect(() => {
-    const autoCreatedKey = "corevia_workers_auto_created";
-    if (localStorage.getItem(autoCreatedKey) === "true") return;
-    localStorage.setItem(autoCreatedKey, "true");
+    if (autoCreated.current) return;
+    autoCreated.current = true;
 
     // Default filters alignment
     const currentM = today.getMonth();

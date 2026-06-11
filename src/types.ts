@@ -39,6 +39,7 @@ export interface UserSession {
   isApproved: boolean;
   isSuspended: boolean;
   user_id?: string;
+  userId?: string;
   company_id?: string;
   role?: string;
   allowedPages?: string[];
@@ -396,6 +397,5 @@ export interface ChatMessage {
   content: string;
   voiceUrl?: string;
   createdAt: string;
-  seenBy?: { userId: string; userName: string; seenAt: string }[];
 }
 
