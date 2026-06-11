@@ -50,6 +50,23 @@ export default function UsersPermissionsView({
   const companyId = session?.company_id || "cop_default";
   const allWorkers = (workers && workers.length > 0) ? workers : getWorkers();
 
+  // Early access-denied guard for employee accounts
+  if (session?.role === "employee") {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center bg-[#09090b] rounded-xl border border-[#27272a] m-4 p-8">
+        <Shield className="w-16 h-16 text-rose-500/60 mb-4" />
+        <h2 className="text-lg font-black text-white mb-2">
+          {isRtl ? "⛔ وصول غير مصرح به" : "⛔ Access Denied"}
+        </h2>
+        <p className="text-sm text-slate-400 max-w-md">
+          {isRtl
+            ? "حسابك لا يمتلك صلاحيات الوصول إلى إدارة المستخدمين والصلاحيات. هذه الصفحة مخصصة لمالك الشركة فقط."
+            : "Your account does not have permission to access User & Permissions management. This page is restricted to company owners."}
+        </p>
+      </div>
+    );
+  }
+
   // State Management
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(false);

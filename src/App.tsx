@@ -137,14 +137,20 @@ export default function App() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
+    // Read path for SPA routing (Vercel rewrites all paths to index.html)
     try {
-      const path = window.location.pathname;
-      if (path === "/super-admin" || path.endsWith("/super-admin")) {
-        return "super-admin";
+      const path = window.location.pathname.replace(/^\/|\/$/g, "");
+      const validTabs = [
+        "dashboard", "orders", "inventory", "products", "suppliers",
+        "workers", "expenses", "profit", "yearly", "trash",
+        "settings", "users-permissions", "activity-log",
+        "communication", "my-profile", "super-admin"
+      ];
+      if (path && validTabs.includes(path)) {
+        return path;
       }
-      if (path === "/purchases" || path.endsWith("/purchases")) {
-        return "suppliers";
-      }
+      // Legacy aliases
+      if (path === "purchases") return "suppliers";
     } catch (e) {}
     const saved = localStorage.getItem("corevia_active_tab_v1");
     return saved ? saved : "dashboard";
@@ -230,12 +236,7 @@ export default function App() {
     
     // Unified SPA routing history sync
     try {
-      let desiredPath = "/";
-      if (activeTab === "super-admin") {
-        desiredPath = "/super-admin";
-      } else if (activeTab === "suppliers") {
-        desiredPath = "/purchases";
-      }
+      const desiredPath = activeTab === "dashboard" ? "/" : `/${activeTab}`;
       if (window.location.pathname !== desiredPath) {
         window.history.pushState({}, "", desiredPath);
       }
