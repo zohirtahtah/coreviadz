@@ -105,6 +105,38 @@ export default function UsersPermissionsView({
   // States for custom delete with option to retain/delete worker profile
   const [userToDeleteRecord, setUserToDeleteRecord] = useState<Employee | null>(null);
   const [linkedWorkerFound, setLinkedWorkerFound] = useState<any | null>(null);
+  const [subTab, setSubTab] = useState<"accounts" | "salary_profiles">("accounts");
+
+  const handleCreateAccountForWorker = (worker: any) => {
+    setEditingEmployee(null);
+    setSelectedWorkerId(worker.id);
+    setFullName(worker.name);
+    setPhone(worker.phone || "");
+    setEmail("");
+    
+    // Auto generate clean username from phone or code
+    const cleanNum = worker.phone ? worker.phone.replace(/\D/g, "") : "";
+    const suffix = cleanNum.length >= 6 ? cleanNum.slice(-6) : Math.floor(1000 + Math.random() * 9000).toString();
+    setUsername(`worker_${suffix}`);
+    
+    setJobTitle(worker.role || "موظف");
+    setPassword(Math.floor(100000 + Math.random() * 900000).toString());
+    setStatus("Active");
+    setAssignedResponsibilities("");
+    setSelectedPages(["dashboard"]);
+    setShowPasswordRaw(true);
+    
+    // Set financial parameters
+    setBaseSalary(worker.baseSalary || 35000);
+    setMonthlySalary(worker.monthlySalary || worker.baseSalary || 35000);
+    setWorkingHoursPerDay(worker.dailyHours || 8);
+    setWorkingDaysPerMonth(22);
+    setOvertimeHourRate(worker.overtimeRate || 1.5);
+    setAbsenceDeductionRate(1.0);
+    setNotes(worker.notes || "");
+    
+    setIsModalOpen(true);
+  };
 
   const handleCopyLink = (emp: Employee) => {
     try {
@@ -511,186 +543,344 @@ export default function UsersPermissionsView({
         </div>
       </div>
 
-      {/* Employees Table Grid */}
-      {isLoading && employees.length === 0 ? (
-        <div className="text-center py-12 bg-[#09090b] rounded-xl border border-[#27272a]">
-          <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto mb-3" />
-          <p className="text-xs text-slate-400">{isRtl ? "جاري تحميل وتزامن قائمة الموظفين..." : "Loading employee accounts roster..."}</p>
-        </div>
-      ) : employees.length === 0 ? (
-        <div className="text-center py-16 bg-[#09090b] rounded-xl border border-[#27272a] p-6 space-y-3">
-          <Users className="w-12 h-12 text-slate-600 mx-auto" />
-          <h3 className="text-sm font-bold text-white">{isRtl ? "لا يوجد موظفون مقيدون حالياً" : "No employee accounts declared"}</h3>
-          <p className="text-xs text-slate-450 max-w-sm mx-auto">
-            {isRtl 
-              ? "لم تقم بتسجيل أي موظف لشركتك بعد. اضغط على الزر بالأعلى لمنحهم تراخيص ERP للعمل."
-              : "Your corporate account does not have any employees listed. Create one above to grant customized secure login gateways."}
-          </p>
-          <button
-            onClick={handleOpenCreateModal}
-            className="mx-auto px-4 py-2 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-          >
-            {isRtl ? "إضافة أول موظف الآن" : "Add Your First Employee"}
-          </button>
-        </div>
-      ) : (
-        <div className="bg-[#09090b] rounded-xl border border-[#27272a] overflow-hidden">
-          <div className="p-3 border-b border-[#27272a] bg-[#0c0c0e] flex justify-between items-center">
-            <span className="text-[10px] text-slate-400 font-bold">
-              {employees.length} {isRtl ? "موظفين نشطين / مسجلين" : "Active employees listed"}
-            </span>
+      {/* Sub tabs selector */}
+      <div className="flex border-b border-[#27272a] gap-2 p-1 bg-[#09090b] rounded-lg">
+        <button
+          onClick={() => setSubTab("accounts")}
+          className={`flex-1 py-1.5 px-3 text-center rounded-md font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            subTab === "accounts"
+              ? "bg-[#18181b] text-white border border-[#27272a] shadow font-black"
+              : "text-slate-450 hover:text-slate-200 hover:bg-[#121214]/50"
+          }`}
+        >
+          <span>👤</span>
+          <span>{isRtl ? "حسابات دخول ERP وصلاحيات الموظفين" : "ERP System User Accounts"}</span>
+        </button>
+        <button
+          onClick={() => setSubTab("salary_profiles")}
+          className={`flex-1 py-1.5 px-3 text-center rounded-md font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            subTab === "salary_profiles"
+              ? "bg-[#18181b] text-white border border-[#27272a] shadow font-black"
+              : "text-slate-450 hover:text-slate-200 hover:bg-[#121214]/50"
+          }`}
+        >
+          <span>💼</span>
+          <span>{isRtl ? "الملفات المالية للموظفين والرواتب" : "Company Workers & Salary Profiles"}</span>
+        </button>
+      </div>
 
-            {/* Quick reload */}
-            <button 
-              onClick={loadEmployeesData} 
-              className="p-1 hover:bg-[#1a1a1e] rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+      {/* Employees Table Grid */}
+      {subTab === "accounts" && (
+        isLoading && employees.length === 0 ? (
+          <div className="text-center py-12 bg-[#09090b] rounded-xl border border-[#27272a]">
+            <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto mb-3" />
+            <p className="text-xs text-slate-400">{isRtl ? "جاري تحميل وتزامن قائمة الموظفين..." : "Loading employee accounts roster..."}</p>
+          </div>
+        ) : employees.length === 0 ? (
+          <div className="text-center py-16 bg-[#09090b] rounded-xl border border-[#27272a] p-6 space-y-3">
+            <Users className="w-12 h-12 text-slate-600 mx-auto" />
+            <h3 className="text-sm font-bold text-white">{isRtl ? "لا يوجد موظفون مقيدون حالياً" : "No employee accounts declared"}</h3>
+            <p className="text-xs text-slate-450 max-w-sm mx-auto">
+              {isRtl 
+                ? "لم تقم بتسجيل أي موظف لشركتك بعد. اضغط على الزر بالأعلى لمنحهم تراخيص ERP للعمل."
+                : "Your corporate account does not have any employees listed. Create one above to grant customized secure login gateways."}
+            </p>
+            <button
+              onClick={handleOpenCreateModal}
+              className="mx-auto px-4 py-2 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              {isRtl ? "إضافة أول موظف الآن" : "Add Your First Employee"}
             </button>
           </div>
+        ) : (
+          <div className="bg-[#09090b] rounded-xl border border-[#27272a] overflow-hidden">
+            <div className="p-3 border-b border-[#27272a] bg-[#0c0c0e] flex justify-between items-center">
+              <span className="text-[10px] text-slate-400 font-bold">
+                {employees.length} {isRtl ? "موظفين نشطين / مسجلين" : "Active employees listed"}
+              </span>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-right border-collapse" style={{ direction: isRtl ? "rtl" : "ltr" }}>
-              <thead>
-                <tr className="border-b border-[#27272a] text-slate-400 bg-slate-950/40">
-                  <th className="p-3 font-semibold text-center">{isRtl ? "الموظف" : "Employee"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "المنصب / اللقب" : "Job Title"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "بيانات الدخول" : "Auth Credentials"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "الحالة" : "Status"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "الصفحات المرخصة" : "Pages Allowed"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "النشاط الأخير" : "Last Active Time"}</th>
-                  <th className="p-3 font-semibold text-center">{isRtl ? "التحكم" : "Actions"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {employees.map((emp) => {
-                  const hasEmail = !!emp.email;
-                  return (
-                    <tr key={emp.id} className="border-b border-[#1f1f23] hover:bg-white/[0.01] transition-colors">
-                      {/* Name Card */}
-                      <td className="p-3 font-bold text-white text-center">
-                        <div className="flex flex-col items-center">
-                          <span>{emp.fullName}</span>
-                          <span className="text-[9px] text-slate-400 font-normal">Created: {new Date(emp.createdAt).toLocaleDateString()}</span>
-                        </div>
-                      </td>
+              {/* Quick reload */}
+              <button 
+                onClick={loadEmployeesData} 
+                className="p-1 hover:bg-[#1a1a1e] rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-                      {/* Job Title */}
-                      <td className="p-3 text-slate-200 text-center">
-                        <span className="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-900/30 rounded-full font-semibold text-[10px]">
-                          {emp.jobTitle}
-                        </span>
-                      </td>
-
-                      {/* Credentials */}
-                      <td className="p-3 text-center space-y-1">
-                        <div className="text-slate-300 font-mono text-[11px]">
-                          📱 {emp.phone}
-                        </div>
-                        {hasEmail && (
-                          <div className="text-slate-400 text-[10px] font-mono">
-                            ✉️ {emp.email}
-                          </div>
-                        )}
-                        {emp.username && (
-                          <div className="text-emerald-400 font-mono text-[10px] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 inline-block my-1 font-bold">
-                            👤 {emp.username}
-                          </div>
-                        )}
-                        
-                        {/* Reveal Password Hook */}
-                        <div className="flex items-center justify-center gap-1 text-[10px]">
-                          <span className="text-slate-500">{isRtl ? "كلمة المرور:" : "Password:"}</span>
-                          <span className="font-mono text-slate-200 font-bold bg-[#141416] px-1.5 py-0.5 rounded border border-[#27272a]">
-                            {passRevealId === emp.id ? emp.password : "••••••"}
-                          </span>
-                          <button
-                            onClick={() => setPassRevealId(passRevealId === emp.id ? null : emp.id)}
-                            className="text-slate-400 hover:text-white p-0.5"
-                          >
-                            {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                          </button>
-                        </div>
-
-                        {/* Direct shareable login link button */}
-                        <div className="pt-1 select-none">
-                          <button
-                            onClick={() => handleCopyLink(emp)}
-                            className={`px-2 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer inline-flex items-center gap-1 ${
-                              copiedId === emp.id 
-                                ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-450" 
-                                : "bg-[#161618] hover:bg-indigo-950/40 border-[#27272a] hover:border-indigo-500/40 text-indigo-400 hover:text-indigo-300"
-                            }`}
-                            title={isRtl ? "نسخ رابط تسجيل دخول تلقائي ببيانات الموظف" : "Copy pre-filled login URL"}
-                          >
-                            <span>{copiedId === emp.id ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied URL") : (isRtl ? "📋 نسخ رابط الدخول" : "📋 Copy Login Link")}</span>
-                          </button>
-                        </div>
-                      </td>
-
-                      {/* Status badge */}
-                      <td className="p-3 text-center">
-                        {emp.status === "Active" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-900/40 rounded-full text-[10px] font-bold">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            <span>{isRtl ? "نشط" : "Active"}</span>
-                          </span>
-                        ) : emp.status === "Read Only" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-950 text-amber-400 border border-amber-900/40 rounded-full text-[10px] font-bold">
-                            <span>{isRtl ? "عرض وقراءة فقط" : "Read Only"}</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-950 text-rose-400 border border-rose-900/40 rounded-full text-[10px] font-bold animate-pulse">
-                            <span>{isRtl ? "موقوف" : "Suspended"}</span>
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Permissions List counts */}
-                      <td className="p-3 text-center">
-                        <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-300 font-bold rounded-lg font-mono">
-                          {emp.allowedPages?.length || 0} / 13 {isRtl ? "صفحات" : "pages"}
-                        </span>
-                      </td>
-
-                      {/* Last seen */}
-                      <td className="p-3 text-center text-slate-400 font-semibold font-mono text-[10px]">
-                        {emp.lastActivity ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-right border-collapse" style={{ direction: isRtl ? "rtl" : "ltr" }}>
+                <thead>
+                  <tr className="border-b border-[#27272a] text-slate-400 bg-slate-950/40">
+                    <th className="p-3 font-semibold text-center">{isRtl ? "الموظف" : "Employee"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "المنصب / اللقب" : "Job Title"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "بيانات الدخول" : "Auth Credentials"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "الحالة" : "Status"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "الصفحات المرخصة" : "Pages Allowed"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "النشاط الأخير" : "Last Active Time"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "التحكم" : "Actions"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((emp) => {
+                    const hasEmail = !!emp.email;
+                    return (
+                      <tr key={emp.id} className="border-b border-[#1f1f23] hover:bg-white/[0.01] transition-colors">
+                        {/* Name Card */}
+                        <td className="p-3 font-bold text-white text-center">
                           <div className="flex flex-col items-center">
-                            <span className="text-white">⏱️ {emp.lastActivity}</span>
+                            <span>{emp.fullName}</span>
+                            <span className="text-[9px] text-slate-400 font-normal">Created: {new Date(emp.createdAt).toLocaleDateString()}</span>
                           </div>
-                        ) : (
-                          <span>{isRtl ? "-- لم ينشط بعد --" : "-- Haven't logged in yet --"}</span>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Controls */}
-                      <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleOpenEditModal(emp)}
-                            className="p-1.5 bg-[#141416] hover:bg-slate-800 border border-[#27272a] text-amber-500 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
-                            title={isRtl ? "تعديل الصلاحيات وكلمة المرور" : "Edit Permissions & Settings"}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Job Title */}
+                        <td className="p-3 text-slate-200 text-center">
+                          <span className="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-900/30 rounded-full font-semibold text-[10px]">
+                            {emp.jobTitle}
+                          </span>
+                        </td>
+
+                        {/* Credentials */}
+                        <td className="p-3 text-center space-y-1">
+                          <div className="text-slate-300 font-mono text-[11px]">
+                            📱 {emp.phone}
+                          </div>
+                          {hasEmail && (
+                            <div className="text-slate-400 text-[10px] font-mono">
+                              ✉️ {emp.email}
+                            </div>
+                          )}
+                          {emp.username && (
+                            <div className="text-emerald-400 font-mono text-[10px] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 inline-block my-1 font-bold">
+                              👤 {emp.username}
+                            </div>
+                          )}
                           
-                          <button
-                            onClick={() => handleDeleteEmployeeItem(emp)}
-                            className="p-1.5 bg-[#141416] hover:bg-rose-950/40 border border-[#27272a] text-rose-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
-                            title={isRtl ? "حذف الموظف نهائياً" : "Delete Roster Account"}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          {/* Reveal Password Hook */}
+                          <div className="flex items-center justify-center gap-1 text-[10px]">
+                            <span className="text-slate-500">{isRtl ? "كلمة المرور:" : "Password:"}</span>
+                            <span className="font-mono text-slate-200 font-bold bg-[#141416] px-1.5 py-0.5 rounded border border-[#27272a]">
+                              {passRevealId === emp.id ? emp.password : "••••••"}
+                            </span>
+                            <button
+                              onClick={() => setPassRevealId(passRevealId === emp.id ? null : emp.id)}
+                              className="text-slate-400 hover:text-white p-0.5"
+                            >
+                              {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                          </div>
+
+                          {/* Direct shareable login link button */}
+                          <div className="pt-1 select-none">
+                            <button
+                              onClick={() => handleCopyLink(emp)}
+                              className={`px-2 py-1 rounded text-[10px] font-bold transition-all border cursor-pointer inline-flex items-center gap-1 ${
+                                copiedId === emp.id 
+                                  ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-450" 
+                                  : "bg-[#161618] hover:bg-indigo-950/40 border-[#27272a] hover:border-indigo-500/40 text-indigo-400 hover:text-indigo-300"
+                              }`}
+                              title={isRtl ? "نسخ رابط تسجيل دخول تلقائي ببيانات الموظف" : "Copy pre-filled login URL"}
+                            >
+                              <span>{copiedId === emp.id ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied URL") : (isRtl ? "📋 نسخ رابط الدخول" : "📋 Copy Login Link")}</span>
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Status badge */}
+                        <td className="p-3 text-center">
+                          {emp.status === "Active" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-900/40 rounded-full text-[10px] font-bold">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              <span>{isRtl ? "نشط" : "Active"}</span>
+                            </span>
+                          ) : emp.status === "Read Only" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-950 text-amber-400 border border-amber-900/40 rounded-full text-[10px] font-bold">
+                              <span>{isRtl ? "عرض وقراءة فقط" : "Read Only"}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-950 text-rose-400 border border-rose-900/40 rounded-full text-[10px] font-bold animate-pulse">
+                              <span>{isRtl ? "موقوف" : "Suspended"}</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Permissions List counts */}
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-300 font-bold rounded-lg font-mono">
+                            {emp.allowedPages?.length || 0} / 13 {isRtl ? "صفحات" : "pages"}
+                          </span>
+                        </td>
+
+                        {/* Last seen */}
+                        <td className="p-3 text-center text-slate-400 font-semibold font-mono text-[10px]">
+                          {emp.lastActivity ? (
+                            <div className="flex flex-col items-center">
+                              <span className="text-white">⏱️ {emp.lastActivity}</span>
+                            </div>
+                          ) : (
+                            <span>{isRtl ? "-- لم ينشط بعد --" : "-- Haven't logged in yet --"}</span>
+                          )}
+                        </td>
+
+                        {/* Controls */}
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => handleOpenEditModal(emp)}
+                              className="p-1.5 bg-[#141416] hover:bg-slate-800 border border-[#27272a] text-amber-500 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                              title={isRtl ? "تعديل الصلاحيات وكلمة المرور" : "Edit Permissions & Settings"}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            
+                            <button
+                              onClick={() => handleDeleteEmployeeItem(emp)}
+                              className="p-1.5 bg-[#141416] hover:bg-rose-950/40 border border-[#27272a] text-rose-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+                              title={isRtl ? "حذف الموظف نهائياً" : "Delete Roster Account"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )
+      )}
+
+      {/* Salary Profiles of Company Workers Tab */}
+      {subTab === "salary_profiles" && (
+        allWorkers.length === 0 ? (
+          <div className="text-center py-16 bg-[#09090b] rounded-xl border border-[#27272a] p-6 space-y-3">
+            <Users className="w-12 h-12 text-slate-605 mx-auto" />
+            <h3 className="text-sm font-bold text-white">{isRtl ? "لا يوجد عمال مسجلين في كشوفات الرواتب بعد" : "No staff payroll profiles logged yet"}</h3>
+            <p className="text-xs text-slate-450 max-w-sm mx-auto">
+              {isRtl 
+                ? "انتقل إلى صفحة 'الموظفين والعمال والرواتب' من القائمة الجانبية لتسجيل أول عامل بالشركة، أو أنشئ له حساب دخول ERP من هنا مباشرة."
+                : "Your payroll files are empty. Visit the 'Workers & Payrolls' section in the sidebar to add workers."}
+            </p>
+          </div>
+        ) : (
+          <div className="bg-[#09090b] rounded-xl border border-[#27272a] overflow-hidden animate-fade-in">
+            <div className="p-3.5 border-b border-[#27272a] bg-[#0c0c0e] flex justify-between items-center">
+              <span className="text-[10px] text-slate-400 font-bold font-mono">
+                {allWorkers.length} {isRtl ? "بطاقة عامل مسجل ومقيد مالياً بالشركة" : "Registered staff records"}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-right border-collapse" style={{ direction: isRtl ? "rtl" : "ltr" }}>
+                <thead>
+                  <tr className="border-b border-[#27272a] text-slate-400 bg-slate-950/40">
+                    <th className="p-3 font-semibold text-center">{isRtl ? "العامل / الموظف" : "Worker / Employee"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "كود التعريف" : "Worker Code"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "المنصب الوظيفي" : "Corporate Role"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "الراتب المالي الأساسي" : "Base Salary"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "ساعات يومياً" : "Daily Hours"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "معدل الإضافي" : "Overtime Rate"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "الارتباط بحساب ERP" : "ERP Login Gate link"}</th>
+                    <th className="p-3 font-semibold text-center">{isRtl ? "إجراءات" : "Actions"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allWorkers.map((w: any) => {
+                    const linkedAccount = employees.find(
+                      emp => emp.id === w.id ||
+                             (emp.phone && w.phone && cleanPhoneDigits(emp.phone) === cleanPhoneDigits(w.phone)) ||
+                             (emp.fullName && w.name && cleanArabicName(emp.fullName) === cleanArabicName(w.name))
+                    );
+
+                    return (
+                      <tr key={w.id} className="border-b border-[#1f1f23] hover:bg-white/[0.01] transition-colors">
+                        {/* Name & Phone */}
+                        <td className="p-3 text-center font-bold text-white">
+                          <div className="flex flex-col items-center">
+                            <span>{w.name}</span>
+                            {w.phone && <span className="text-[9.5px] text-slate-400 font-mono font-normal">📞 {w.phone}</span>}
+                          </div>
+                        </td>
+
+                        {/* ID Code */}
+                        <td className="p-3 text-center">
+                          <span className="font-mono text-slate-400 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded font-bold">
+                            {w.code}
+                          </span>
+                        </td>
+
+                        {/* Role */}
+                        <td className="p-3 text-center">
+                          <span className="px-2.5 py-0.5 bg-slate-900 text-slate-300 border border-slate-800 rounded-full font-semibold text-[10px]">
+                            {w.role || (isRtl ? "موظف" : "Worker")}
+                          </span>
+                        </td>
+
+                        {/* Base Salary */}
+                        <td className="p-3 text-center text-emerald-400 font-bold font-mono">
+                          {w.baseSalary?.toLocaleString() || w.monthlySalary?.toLocaleString() || w.base_salary?.toLocaleString() || "0"} <span className="text-[10px] text-slate-400 font-normal">{isRtl ? "دج" : "DZD"}</span>
+                        </td>
+
+                        {/* Hours */}
+                        <td className="p-3 text-center text-slate-350 font-mono">
+                          {w.dailyHours || w.daily_hours || 8} {isRtl ? "ساعات" : "hours"}
+                        </td>
+
+                        {/* Overtime Rate */}
+                        <td className="p-3 text-center text-slate-350 font-mono">
+                          {w.overtimeRate || w.overtime_rate || 250} {isRtl ? "دج/ساعة" : "DZD/hr"}
+                        </td>
+
+                        {/* Linked ERP Acc status */}
+                        <td className="p-3 text-center">
+                          {linkedAccount ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${
+                                linkedAccount.status === "Active" 
+                                  ? "bg-emerald-950/60 border-emerald-500/30 text-emerald-400" 
+                                  : "bg-amber-950/60 border-amber-500/30 text-amber-400"
+                              }`}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                <span>{isRtl ? `✓ مرتبط بالحساب: ${linkedAccount.username}` : `✓ Linked as: ${linkedAccount.username}`}</span>
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-[#1b1214] border border-[#3b1c1e] text-amber-500 rounded-md text-[9.5px] font-bold">
+                              <span>⚠️ {isRtl ? "كشف مالي فقط - بدون حساب دخول" : "Offline billing - No login"}</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="p-3 text-center">
+                          {linkedAccount ? (
+                            <button
+                              onClick={() => handleOpenEditModal(linkedAccount)}
+                              className="px-2 py-1 bg-[#1a1c1e] hover:bg-slate-850 border border-[#27272a] hover:border-indigo-500/45 text-indigo-400 rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+                            >
+                              {isRtl ? "⚙️ ضبط الصلاحيات" : "⚙️ Edit Permissions"}
+                            </button>
+                      ) : (
+                            <button
+                              onClick={() => handleCreateAccountForWorker(w)}
+                              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[10px] font-bold cursor-pointer shadow-sm shadow-amber-600/10 transition-all flex items-center gap-1 mx-auto"
+                            >
+                              <span>🔑</span>
+                              <span>{isRtl ? "إنشاء حساب دخول فوري" : "Activate ERP Login"}</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
       )}
 
       {/* CONFIDENTIAL RESPONSIBILITIES OWNER EXPANSE */}
