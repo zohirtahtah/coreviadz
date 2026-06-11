@@ -429,79 +429,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     }
   };
 
-  // 9.2 الإنشاء التلقائي (auto-created)
-  useEffect(() => {
-    if (autoCreated.current) return;
-    autoCreated.current = true;
-
-    // Default filters alignment
-    const currentM = today.getMonth();
-    const currentY = today.getFullYear();
-
-    const uniqueCodes = Array.from(new Set(workers.map(w => w.code)));
-    const listCopy = [...workers];
-    let isChanged = false;
-
-    uniqueCodes.forEach(code => {
-      const exists = listCopy.some(w => w.code === code && (w as any).month === currentM && (w as any).year === currentY);
-      if (!exists) {
-        const matching = listCopy.filter(w => w.code === code);
-        matching.sort((a,b) => ((b as any).year - (a as any).year) || ((b as any).month - (a as any).month));
-        const latest = matching[0];
-        if (latest) {
-          const dates = fillDates(currentM, currentY);
-          const newId = `work-auto-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-          const netVal = Math.round(latest.baseSalary || 35000);
-
-          const newRecord: any = {
-            id: newId,
-            name: latest.name,
-            code: latest.code,
-            phone: latest.phone || "",
-            role: latest.role || "Sales Handler",
-            baseSalary: latest.baseSalary || 35500,
-            dailyHours: latest.dailyHours || 8,
-            overtimeRate: latest.overtimeRate || 250,
-            month: currentM,
-            year: currentY,
-            payPeriodStart: dates.start,
-            payPeriodEnd: dates.end,
-            overtimeHours: 0,
-            missingHours: 0,
-            absenceDays: 0,
-            expenses: [],
-            paid: false,
-            paymentAmount: 0,
-            paymentDate: "",
-            createdAt: new Date().toISOString()
-          };
-
-          newRecord.payrolls = [{
-            id: `pay-${newRecord.id}`,
-            payPeriod: `${monthNamesEn[currentM]} ${currentY}`,
-            datePaid: "",
-            baseSalary: newRecord.baseSalary,
-            overtimeHours: 0,
-            overtimeEarned: 0,
-            bonus: 0,
-            absenceDays: 0,
-            absenceDeductions: 0,
-            cashAdvances: 0,
-            otherDeductions: 0,
-            netSalary: netVal,
-            released: false
-          }];
-
-          listCopy.push(newRecord);
-          isChanged = true;
-        }
-      }
-    });
-
-    if (isChanged) {
-      onSaveWorkers(listCopy);
-    }
-  }, [workers]);
+  // 9.2 Automatic background month creation disabled to prevent unwanted "Registered Months" increment on page refresh
+  // Months are now created strictly via user request (e.g. clicking the "Next Month" button) or when manually adding/editing.
 
   // 11. حسابات الإحصائيات (Calculated Stats)
   const stats = useMemo(() => {
