@@ -81,9 +81,20 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
 
       // Cache back locally for stability, sorting by creation date
       const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
-      saveLocalEmployees([...otherCompaniesObj, ...mapped]);
+      
+      const mergedList = [...localList];
+      mapped.forEach(dbEmp => {
+        const idx = mergedList.findIndex(e => e.id === dbEmp.id);
+        if (idx !== -1) {
+          mergedList[idx] = dbEmp;
+        } else {
+          mergedList.push(dbEmp);
+        }
+      });
 
-      return mapped;
+      saveLocalEmployees([...otherCompaniesObj, ...mergedList]);
+
+      return mergedList;
     }
   } catch (e) {
     console.warn("Failed to fetch employees from Supabase, reverting to local cache:", e);

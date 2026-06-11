@@ -503,6 +503,24 @@ export default function UsersPermissionsView({
     setIsLoading(false);
   };
 
+  if (session?.role === "employee") {
+    return (
+      <div className="text-center py-24 bg-[#09090b] rounded-2xl border border-zinc-800 p-8 max-w-lg mx-auto my-12" id="unauthorized_access_view">
+        <div className="w-16 h-16 bg-red-950/40 border border-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-lg font-bold text-white mb-2">
+          {isRtl ? "غير مصرح به - وصول مرفوض" : "Unauthorized Access - Entry Denied"}
+        </h3>
+        <p className="text-xs text-slate-450 leading-relaxed">
+          {isRtl 
+            ? "عذراً، هذه الصفحة مخصصة لمالكي وإداريي الشركة فقط. لا تمتلك صلاحيات كافية لاستعراض وإدارة حسابات الموظفين."
+            : "Sorry, this page is restricted to Company Owners and Admins only. You do not possess authorized privileges to manage corporate user accounts."}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4" id="users_and_permissions_section">
       

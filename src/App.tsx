@@ -137,8 +137,17 @@ export default function App() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
+    try {
+      const path = window.location.pathname;
+      if (path === "/super-admin" || path.endsWith("/super-admin")) {
+        return "super-admin";
+      }
+      if (path === "/purchases" || path.endsWith("/purchases")) {
+        return "suppliers";
+      }
+    } catch (e) {}
     const saved = localStorage.getItem("corevia_active_tab_v1");
-    return saved && saved !== "super-admin" ? saved : "dashboard";
+    return saved ? saved : "dashboard";
   });
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
@@ -218,6 +227,21 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("corevia_active_tab_v1", activeTab);
+    
+    // Unified SPA routing history sync
+    try {
+      let desiredPath = "/";
+      if (activeTab === "super-admin") {
+        desiredPath = "/super-admin";
+      } else if (activeTab === "suppliers") {
+        desiredPath = "/purchases";
+      }
+      if (window.location.pathname !== desiredPath) {
+        window.history.pushState({}, "", desiredPath);
+      }
+    } catch (e) {
+      console.warn("Could not sync pathname:", e);
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -1430,8 +1454,8 @@ export default function App() {
     );
   }
 
-  // If onboarding is not completed, we display Onboarding screen with the global topbar controls (employees bypass this setup completely)
-  if ((!profile || !profile.businessName) && session?.role !== "employee") {
+  // If onboarding is not completed, we display Onboarding screen with the global topbar controls (employees & super admin bypass this setup completely)
+  if ((!profile || !profile.businessName) && session?.role !== "employee" && session?.role !== "super_admin") {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center p-4 bg-slate-950 dark:bg-slate-950 font-sans leading-relaxed text-right transition-colors" id="onboarding_wrapper_layout">
