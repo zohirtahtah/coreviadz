@@ -62,7 +62,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
       throw error;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       const mapped: Employee[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,

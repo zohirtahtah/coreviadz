@@ -444,18 +444,38 @@ export default function App() {
     }
   }, [session]);
 
-  // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
-  // automatically redirect them to the first allowed page in their list.
+  // Automated safety check: If an employee is logged in, redirect them away from
+  // pages they don't have permission to access (admin-only pages or non-allowed pages).
+  const adminOnlyPages = ["settings", "users-permissions", "trash", "activity-log", "super-admin"];
   useEffect(() => {
-    if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
-      if (!session.allowedPages.includes(activeTab)) {
-        const firstAllowed = session.allowedPages[0];
-        if (firstAllowed) {
-          setActiveTab(firstAllowed);
+    if (session?.role === "employee") {
+      if (adminOnlyPages.includes(activeTab)) {
+        const firstAllowed = session.allowedPages?.[0] || "dashboard";
+        setActiveTab(firstAllowed);
+      } else if (session.allowedPages && session.allowedPages.length > 0) {
+        if (!session.allowedPages.includes(activeTab)) {
+          const firstAllowed = session.allowedPages[0];
+          if (firstAllowed) setActiveTab(firstAllowed);
         }
       }
     }
   }, [session, activeTab]);
+
+  // Path-based routing for SPA navigation (e.g. /super-admin, /users-permissions)
+  // Vercel rewrites all paths to index.html, then we read the pathname here.
+  useEffect(() => {
+    const path = window.location.pathname.replace("/", "");
+    if (path) {
+      setActiveTab(path);
+    }
+  }, []);
+
+  useEffect(() => {
+    const path = window.location.pathname.replace("/", "");
+    if (activeTab !== path) {
+      window.history.replaceState(null, "", "/" + activeTab);
+    }
+  }, [activeTab]);
 
   // 3. Periodic cloud sync to keep both Admin & Employees 100% interconnected in real-time
   useEffect(() => {
@@ -1928,7 +1948,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "trash" && (
+        {activeTab === "trash" && (session?.role === "admin" || session?.role === "super_admin") && (
           <TrashView
             trashItems={trashItems}
             onRestoreItem={handleRestoreItem}
@@ -1937,7 +1957,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "settings" && (
+        {activeTab === "settings" && (session?.role === "admin" || session?.role === "super_admin") && (
           <SettingsView
             profile={profile}
             onSaveProfile={saveProfileAndPersist}
@@ -1951,7 +1971,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "users-permissions" && (
+        {activeTab === "users-permissions" && (session?.role === "admin" || session?.role === "super_admin") && (
           <UsersPermissionsView
             lang={lang}
             session={session}
@@ -1962,7 +1982,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "activity-log" && (
+        {activeTab === "activity-log" && (session?.role === "admin" || session?.role === "super_admin") && (
           <ActivityLogView
             lang={lang}
             session={session}
@@ -1982,10 +2002,11 @@ export default function App() {
           <MyProfileView
             session={session}
             lang={lang}
+            onTriggerNotification={triggerToast}
           />
         )}
 
-        {activeTab === "super-admin" && (
+        {activeTab === "super-admin" && session?.role === "super_admin" && (
           <SuperAdminView
             lang={lang}
             onTriggerNotification={triggerToast}

@@ -56,7 +56,7 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
       throw error;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       const mapped: EmployeeSubmission[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
