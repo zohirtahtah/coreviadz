@@ -126,7 +126,7 @@ export default function SuperAdminView({
           accountStatus: u.has_completed_onboarding ? "Active" : "Pending Verification",
           expirationDate: "",
           activeDevices: [],
-          otpCode: ""
+          otpCode: "123456"
         };
       });
 

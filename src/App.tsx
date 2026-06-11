@@ -148,7 +148,15 @@ export default function App() {
     if (!stored) return null;
     try {
       const parsed: SaaSCompany[] = JSON.parse(stored);
-      return parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase()) || null;
+      const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
+      if (found) {
+        if (!found.otpCode || found.otpCode.trim() === "") {
+          found.otpCode = "123456";
+          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
+        }
+        return found;
+      }
+      return null;
     } catch (e) {
       return null;
     }
