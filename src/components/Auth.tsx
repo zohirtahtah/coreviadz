@@ -101,28 +101,40 @@ export default function Auth({
           
           setEmailInput(user);
           setPasswordInput(pass);
-          
-          // Delayed URL cleaning so that react state batching & dual useEffect cycles don't wipe params prematurely
+
+          // Build session and log in immediately! No waiting for button clicks or closure state update delays
+          const directSession: UserSession = {
+            username: name || user,
+            email: user,
+            isRegistered: true,
+            isApproved: true,
+            isSuspended: false,
+            user_id: id,
+            userId: id,
+            company_id: cid,
+            role: "employee",
+            allowedPages: pagesArr,
+            jobTitle: title || "موظف",
+            isReadOnly: false
+          };
+
+          onAuthSuccess(directSession);
+
+          onTriggerNotification(
+            isRtl 
+              ? `⚡ تم تسجيل الدخول التلقائي لحساب الموظف الرقمي بنجاح: ${name || user}` 
+              : `⚡ Connected to your digital employee account automatically: ${name || user}`, 
+            "success"
+          );
+
+          // Clear parameters from search bar after a tiny delay
           setTimeout(() => {
             try {
               window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
             } catch (histErr) {}
           }, 1500);
-          
-          onTriggerNotification(
-            isRtl 
-              ? "⚡ جاري جلب لوحة العمل وتسجيل الدخول التلقائي لحساب الموظف الرقمي..." 
-              : "⚡ Connecting to your digital employee account automatically...", 
-            "success"
-          );
 
-          // Auto-trigger submitting sequence with robust timing fallback
-          setTimeout(() => {
-            const btn = document.getElementById("auth-submit-btn");
-            if (btn) {
-              btn.click();
-            }
-          }, 450);
+          return; // Skip further prefilling setup check
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
@@ -178,13 +190,30 @@ export default function Auth({
     setIsSubmitting(true);
 
     if (authMode === "login") {
-      if (!emailInput.trim() || !passwordInput.trim()) {
+      let finalEmail = emailInput.trim();
+      let finalPassword = passwordInput;
+
+      // Fail-safe URL credential recovery to completely bypass synchronous React state closure latencies
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlEmail = params.get("email") || params.get("login_email") || params.get("username") || params.get("user");
+        const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
+        if ((!finalEmail || !finalPassword) && urlEmail && urlPass) {
+          finalEmail = decodeURIComponent(urlEmail).trim();
+          finalPassword = decodeURIComponent(urlPass);
+          
+          setEmailInput(finalEmail);
+          setPasswordInput(finalPassword);
+        }
+      } catch (err) {}
+
+      if (!finalEmail || !finalPassword) {
         onTriggerNotification(isRtl ? "يرجى ملء جميع الحقول المطلوبة" : "Please fill in all fields", "info");
         setIsSubmitting(false);
         return;
       }
 
-      if (emailInput.toLowerCase().includes("suspend") && !emailInput.toLowerCase().includes("coreviadz")) {
+      if (finalEmail.toLowerCase().includes("suspend") && !finalEmail.toLowerCase().includes("coreviadz")) {
         setAuthMode("suspended");
         onTriggerNotification(isRtl ? "هذا الحساب معطل حالياً" : "This account is suspended", "info");
         setIsSubmitting(false);
@@ -195,17 +224,17 @@ export default function Auth({
       const cachedEmployees = getLocalEmployees();
       let matchingEmployee: any = cachedEmployees.find(
         emp => (
-          (emp.email?.toLowerCase().trim() === emailInput.toLowerCase().trim() ||
-           emp.phone?.trim() === emailInput.trim() ||
-           emp.username?.toLowerCase().trim() === emailInput.toLowerCase().trim()) &&
-          emp.password === passwordInput
+          (emp.email?.toLowerCase().trim() === finalEmail.toLowerCase() ||
+           emp.phone?.trim() === finalEmail ||
+           emp.username?.toLowerCase().trim() === finalEmail.toLowerCase()) &&
+          emp.password === finalPassword
         )
       );
 
       // If we are online, query credentials from Supabase with separate direct lookups (prevents .or parsing/spaces/syntax syntax errors in old/new clients)
       if (!matchingEmployee && supabase) {
         try {
-          const searchVal = emailInput.trim();
+          const searchVal = finalEmail;
           let dbEmps: any[] = [];
           
           if (searchVal) {
@@ -232,7 +261,7 @@ export default function Auth({
           }
 
           if (dbEmps.length > 0) {
-            const dbMatch = dbEmps.find(e => e.password === passwordInput);
+            const dbMatch = dbEmps.find(e => e.password === finalPassword);
             if (dbMatch) {
               matchingEmployee = {
                 id: dbMatch.id,
@@ -275,7 +304,7 @@ export default function Auth({
 
         const employeeSession: UserSession = {
           username: matchingEmployee.fullName,
-          email: matchingEmployee.email || emailInput,
+          email: matchingEmployee.email || finalEmail,
           isRegistered: true,
           isApproved: true,
           isSuspended: false,
@@ -320,8 +349,8 @@ export default function Auth({
         }
 
         const isSuperAdminBypass =
-          emailInput.toLowerCase().trim() === "coreviadz@gmail.com" &&
-          passwordInput === "zohir1904tahtah";
+          finalEmail.toLowerCase().trim() === "coreviadz@gmail.com" &&
+          finalPassword === "zohir1904tahtah";
 
         let data: any = null;
         let bypassAuth = false;
@@ -344,8 +373,8 @@ export default function Auth({
         } else {
           // Try standard authentication
           const { data: standardData, error: standardError } = await supabase.auth.signInWithPassword({
-            email: emailInput,
-            password: passwordInput,
+            email: finalEmail,
+            password: finalPassword,
           });
 
           if (standardError) {
