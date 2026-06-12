@@ -74,34 +74,40 @@ export default function Auth({
             pagesArr = JSON.parse(pagesStr);
           } catch(e) {}
           
-          // Import or update local cache list
+          // Import or update local cache list (Always upsert to handle stale records or password updates!)
           const cached = getLocalEmployees();
-          const exists = cached.some(emp => emp.id === id);
-          if (!exists) {
-            cached.push({
-              id,
-              companyId: cid,
-              fullName: name || user,
-              phone: params.get("phone") || "",
-              email: params.get("email") || "",
-              username: user,
-              jobTitle: title || "موظف",
-              password: pass,
-              allowedPages: pagesArr,
-              status: "Active",
-              createdAt: new Date().toISOString()
-            });
-            // Save to localStorage (un-suffixed since no user is logged in yet)
-            localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
+          const index = cached.findIndex(emp => emp.id === id);
+          const freshEmp = {
+            id,
+            companyId: cid,
+            fullName: name || user,
+            phone: params.get("phone") || "",
+            email: params.get("email") || "",
+            username: user,
+            jobTitle: title || "موظف",
+            password: pass,
+            allowedPages: pagesArr,
+            status: "Active" as const,
+            createdAt: new Date().toISOString()
+          };
+
+          if (index !== -1) {
+            cached[index] = { ...cached[index], ...freshEmp };
+          } else {
+            cached.push(freshEmp);
           }
+          // Save to localStorage
+          localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
           
           setEmailInput(user);
           setPasswordInput(pass);
           
-          // Clear parameters from address bar to keep it elegant and clean
-          try {
-            window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
-          } catch (histErr) {}
+          // Delayed URL cleaning so that react state batching & dual useEffect cycles don't wipe params prematurely
+          setTimeout(() => {
+            try {
+              window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+            } catch (histErr) {}
+          }, 1500);
           
           onTriggerNotification(
             isRtl 
@@ -110,13 +116,13 @@ export default function Auth({
             "success"
           );
 
-          // Auto-trigger submitting sequence
+          // Auto-trigger submitting sequence with robust timing fallback
           setTimeout(() => {
             const btn = document.getElementById("auth-submit-btn");
             if (btn) {
               btn.click();
             }
-          }, 350);
+          }, 450);
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
@@ -127,10 +133,11 @@ export default function Auth({
           setEmailInput(decEmail);
           setPasswordInput(decPass);
 
-          // Clear parameters from address bar to keep it elegant and clean
-          try {
-            window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
-          } catch (histErr) {}
+          setTimeout(() => {
+            try {
+              window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+            } catch (histErr) {}
+          }, 1500);
 
           onTriggerNotification(
             isRtl 
@@ -145,7 +152,7 @@ export default function Auth({
             if (btn) {
               btn.click();
             }
-          }, 350);
+          }, 450);
         } else {
           if (urlEmail) {
             setEmailInput(decodeURIComponent(urlEmail));
@@ -195,16 +202,36 @@ export default function Auth({
         )
       );
 
-      // If we are online, query credentials from Supabase
+      // If we are online, query credentials from Supabase with separate direct lookups (prevents .or parsing/spaces/syntax syntax errors in old/new clients)
       if (!matchingEmployee && supabase) {
         try {
-          // Look up user by email, phone, or username fields
-          const { data: dbEmps } = await supabase
-            .from("corevia_company_users")
-            .select("*")
-            .or(`email.eq.${emailInput.trim()},phone.eq.${emailInput.trim()},username.eq.${emailInput.trim()}`);
+          const searchVal = emailInput.trim();
+          let dbEmps: any[] = [];
           
-          if (dbEmps && dbEmps.length > 0) {
+          if (searchVal) {
+            // Option A: Username lookup
+            const { data: userMatch } = await supabase
+              .from("corevia_company_users")
+              .select("*")
+              .eq("username", searchVal);
+            if (userMatch) dbEmps.push(...userMatch);
+
+            // Option B: Email lookup
+            const { data: emailMatch } = await supabase
+              .from("corevia_company_users")
+              .select("*")
+              .eq("email", searchVal);
+            if (emailMatch) dbEmps.push(...emailMatch);
+
+            // Option C: Phone lookup
+            const { data: phoneMatch } = await supabase
+              .from("corevia_company_users")
+              .select("*")
+              .eq("phone", searchVal);
+            if (phoneMatch) dbEmps.push(...phoneMatch);
+          }
+
+          if (dbEmps.length > 0) {
             const dbMatch = dbEmps.find(e => e.password === passwordInput);
             if (dbMatch) {
               matchingEmployee = {
