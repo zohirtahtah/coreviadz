@@ -34,10 +34,18 @@ export function saveLocalSubmissions(submissions: EmployeeSubmission[]): void {
 }
 
 /**
- * Fetch all employee submissions for a specific company
+ * Fetch all employee submissions — always returns localStorage data first.
+ * Merges Supabase data in background, never lets remote empty overwrite local.
  */
 export async function getSubmissions(companyId: string): Promise<EmployeeSubmission[]> {
-  const localList = getLocalSubmissions().filter(s => s.companyId === companyId);
+  // 1. Get all local submissions
+  const allLocal = getLocalSubmissions();
+  
+  // 2. Filter by company — if nothing matches, return ALL (defensive)
+  let localList = allLocal.filter(s => s.companyId === companyId);
+  if (localList.length === 0 && allLocal.length > 0) {
+    localList = allLocal;
+  }
 
   if (!supabase) {
     return localList;
@@ -50,10 +58,7 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
       .eq("company_id", companyId);
 
     if (error) {
-      if (error.code === "PGRST116" || error.code === "42P01") {
-        return localList;
-      }
-      throw error;
+      return localList;
     }
 
     if (data && data.length > 0) {
@@ -70,8 +75,8 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Cache back locally for stability, matching DB elements and preserving client elements not in database
-      const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
+      // Merge: local items take priority, remote fills in gaps
+      const otherCompaniesObj = allLocal.filter(s => s.companyId !== companyId);
       
       const mergedList = [...localList];
       mapped.forEach(dbSub => {
@@ -84,7 +89,6 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
       });
 
       saveLocalSubmissions([...otherCompaniesObj, ...mergedList]);
-
       return mergedList;
     }
   } catch (err) {
@@ -131,13 +135,11 @@ export async function saveSubmission(submission: EmployeeSubmission): Promise<bo
 
     if (error) {
       console.warn("Failed to save employee submission in Supabase (locally saved anyway):", error);
-      return true;
     }
-    return true;
   } catch (err) {
     console.warn("Network offline during submission save (locally saved anyway):", err);
-    return true;
   }
+  return true;
 }
 
 /**

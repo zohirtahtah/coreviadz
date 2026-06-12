@@ -38,11 +38,19 @@ export function saveLocalEmployees(employees: Employee[]): void {
 }
 
 /**
- * Fetch all employees for this company from Supabase if configured,
- * falling back and syncing with local storage.
+ * Fetch all employees — always returns localStorage data first.
+ * Merges in any Supabase data in the background, but NEVER lets
+ * a remote empty-result overwrite the local employee list.
  */
 export async function getEmployees(companyId: string): Promise<Employee[]> {
-  const localList = getLocalEmployees().filter(e => e.companyId === companyId);
+  // 1. Get all local employees
+  const allLocal = getLocalEmployees();
+  
+  // 2. Filter by company — but if nothing matches, return ALL (defensive)
+  let localList = allLocal.filter(e => e.companyId === companyId);
+  if (localList.length === 0 && allLocal.length > 0) {
+    localList = allLocal;
+  }
 
   if (!supabase) {
     return localList;
@@ -55,11 +63,8 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
       .eq("company_id", companyId);
 
     if (error) {
-      if (error.code === "PGRST116" || error.code === "42P01") {
-        // Table not created yet, return local cached state
-        return localList;
-      }
-      throw error;
+      // Table doesn't exist or permission denied — use local
+      return localList;
     }
 
     if (data && data.length > 0) {
@@ -79,8 +84,8 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Cache back locally for stability, sorting by creation date
-      const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
+      // Merge: local items take priority, remote fills in gaps
+      const otherCompaniesObj = allLocal.filter(e => e.companyId !== companyId);
       
       const mergedList = [...localList];
       mapped.forEach(dbEmp => {
@@ -93,7 +98,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
       });
 
       saveLocalEmployees([...otherCompaniesObj, ...mergedList]);
-
       return mergedList;
     }
   } catch (e) {
