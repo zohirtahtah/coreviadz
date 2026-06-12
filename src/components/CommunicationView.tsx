@@ -9,6 +9,7 @@ import {
   Trash2, UserCheck, Calendar, ShieldCheck, Sparkles, ArrowDown
 } from "lucide-react";
 import { logActivity } from "../activityLogService";
+import { supabase } from "../supabaseClient";
 
 interface CommunicationViewProps {
   session: UserSession;
@@ -66,14 +67,55 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
     }
   };
 
-  // Setup polling for direct messaging sync
+  // Setup polling and real-time subscription for direct messaging sync
   useEffect(() => {
     loadMessages();
+
+    // 1. Establish Real-time Channel listener
+    let chatChannel: any = null;
+    if (supabase) {
+      chatChannel = supabase
+        .channel(`chat_comm_${session.company_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "corevia_chat_messages",
+            filter: `company_id=eq.${session.company_id}`
+          },
+          (payload) => {
+            const newItem = payload.new;
+            const mapped: ChatMessage = {
+              id: newItem.id,
+              companyId: newItem.company_id,
+              senderId: newItem.sender_id,
+              senderName: newItem.sender_name,
+              senderJobTitle: newItem.sender_job_title,
+              content: newItem.content || "",
+              voiceUrl: newItem.voice_url || undefined,
+              createdAt: newItem.created_at
+            };
+            setMessages(prev => {
+              if (prev.some(m => m.id === mapped.id)) return prev;
+              return [...prev, mapped].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            });
+          }
+        )
+        .subscribe();
+    }
+
+    // 2. Poll every 5 seconds as a reliable network dropout fallback
     const interval = setInterval(() => {
       loadMessages(true);
-    }, 3000); // Poll every 3 seconds for extremely quick updates
+    }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (supabase && chatChannel) {
+        supabase.removeChannel(chatChannel);
+      }
+    };
   }, [session.company_id]);
 
   // Scroll on messages change
@@ -144,11 +186,39 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       recorder.onstop = async () => {
         const audioBlob = new Blob(chunks, { type: "audio/webm" });
         
-        // Convert Blob to Base64 Url to load into database
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Audio = reader.result as string;
-          
+        let voiceUrl = "";
+        
+        if (supabase) {
+          try {
+            const yyyy = new Date().getFullYear();
+            const mm = String(new Date().getMonth() + 1).padStart(2, "0");
+            const fileName = `voice_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webm`;
+            const filePath = `${session.company_id}/chat/${yyyy}/${mm}/${fileName}`;
+            
+            // Upload directly to Supabase Storage bucket 'company-voice-messages'
+            const { data, error } = await supabase.storage
+              .from("company-voice-messages")
+              .upload(filePath, audioBlob, {
+                contentType: "audio/webm",
+                cacheControl: "3600",
+                upsert: false
+              });
+              
+            if (!error && data) {
+              const { data: publicData } = supabase.storage
+                .from("company-voice-messages")
+                .getPublicUrl(filePath);
+              voiceUrl = publicData.publicUrl;
+              console.log("Uploaded voice message to Supabase storage:", voiceUrl);
+            } else {
+              console.warn("Supabase Storage error (bucket might not exist), falling back:", error);
+            }
+          } catch (storageErr) {
+            console.warn("Supabase Storage exception, using base64 fallback:", storageErr);
+          }
+        }
+        
+        const finalSendAndAppend = async (finalUrl: string) => {
           try {
             const voiceResult = await sendChatMessage({
               companyId: session.company_id,
@@ -156,11 +226,14 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
               senderName: session.username || "Staff User",
               senderJobTitle: session.jobTitle || "Executive",
               content: getsLabel("🎙️ رسالة صوتية مرسلة", "🎙️ Message vocal envoyé", "🎙️ Voice note dispatched"),
-              voiceUrl: base64Audio
+              voiceUrl: finalUrl
             });
 
             if (voiceResult) {
-              setMessages(prev => [...prev, voiceResult]);
+              setMessages(prev => {
+                if (prev.some(m => m.id === voiceResult.id)) return prev;
+                return [...prev, voiceResult];
+              });
               onTriggerNotification(
                 getsLabel("🎤 تم إرسال رسالتك الصوتية بنجاح بنبضات ترميز الغلاف!", "Vocal transmis!", "Voice note uploaded!"),
                 "success"
@@ -178,10 +251,21 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
               });
             }
           } catch (er) {
-            console.warn("Base64 upload failed:", er);
+            console.warn("Failed ending chat transmission:", er);
           }
         };
-        reader.readAsDataURL(audioBlob);
+
+        if (voiceUrl) {
+          await finalSendAndAppend(voiceUrl);
+        } else {
+          // Robust base64 fallback so local/preview environments are fully functional
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const base64Audio = reader.result as string;
+            await finalSendAndAppend(base64Audio);
+          };
+          reader.readAsDataURL(audioBlob);
+        }
         
         // Stop all audio capture tracks to release Microphone safely from browser
         stream.getTracks().forEach(track => track.stop());

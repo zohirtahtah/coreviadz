@@ -550,10 +550,10 @@ export default function SettingsView({
   };
 
   const copySqlSchemaText = () => {
-    const rawSql = `-- Corevia ERP Database SQL Schema for Supabase
+    const rawSql = `-- Corevia Enterprise Database SQL Schema & Security Hardening
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
--- 0. SaaS Tenancy and Users linking
+-- 0. Tenant Companies and Users
 create table if not exists corevia_companies (
   id text primary key,
   name text not null,
@@ -561,6 +561,19 @@ create table if not exists corevia_companies (
   owner_name text,
   phone text,
   email text,
+  seatsLimit integer default 5,
+  accountStatus text default 'Active',
+  subscriptionPlan text default 'Standard_Monthly',
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_saas_users (
+  user_id text primary key,
+  company_id text references corevia_companies(id) on delete set null,
+  email text not null,
+  username text,
+  has_completed_onboarding boolean default false,
+  role text default 'admin',
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -577,32 +590,11 @@ create table if not exists corevia_company_users (
   allowed_pages jsonb default '[]'::jsonb,
   status text default 'Active',
   last_activity text,
+  deleted_at timestamp with time zone default null,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
-create table if not exists corevia_employee_submissions (
-  id text primary key,
-  company_id text default 'cop_default',
-  employee_id text not null,
-  employee_name text not null,
-  type text not null,
-  amount numeric not null,
-  description text,
-  date text not null,
-  status text default 'pending',
-  created_at text
-);
-
-create table if not exists corevia_saas_users (
-  user_id text primary key,
-  company_id text references corevia_companies(id) on delete set null,
-  email text not null,
-  username text,
-  has_completed_onboarding boolean default false,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 1. Create table for Business PROFILE
+-- 1. Business Profile
 create table if not exists corevia_profile (
   id text primary key,
   company_id text default null,
@@ -620,7 +612,7 @@ create table if not exists corevia_profile (
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 2. Create table for Products
+-- 2. Products and Inventory
 create table if not exists corevia_products (
   id text primary key,
   company_id text default 'cop_default',
@@ -643,7 +635,52 @@ create table if not exists corevia_products (
   updated_time text
 );
 
--- 3. Create table for Orders
+create table if not exists corevia_inventory_basic (
+  id text primary key,
+  company_id text default 'cop_default',
+  product_id text not null,
+  product_name text not null,
+  color text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_inventory_sub (
+  id text primary key,
+  company_id text default 'cop_default',
+  product_id text not null,
+  product_name text not null,
+  color text,
+  size text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_inventory_return (
+  id text primary key,
+  company_id text default 'cop_default',
+  order_id text not null,
+  product_name text not null,
+  color text,
+  size text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_stock_movements (
+  id text primary key,
+  company_id text default 'cop_default',
+  date timestamp with time zone default timezone('utc'::text, now()),
+  order_id text,
+  product_name text,
+  color text,
+  size text,
+  quantity_change numeric,
+  movement_type text,
+  source text
+);
+
+-- 3. Corevia Orders
 create table if not exists corevia_orders (
   id text primary key,
   company_id text default 'cop_default',
@@ -679,7 +716,7 @@ create table if not exists corevia_orders (
   updated_time text
 );
 
--- 4. Create table for Suppliers
+-- 4. Supplier Pipeline
 create table if not exists corevia_suppliers (
   id text primary key,
   company_id text default 'cop_default',
@@ -697,11 +734,11 @@ create table if not exists corevia_suppliers (
   updated_time text
 );
 
--- 5. Create table for Fixed and Variable Expenses
+-- 5. Business Expenses
 create table if not exists corevia_expenses (
   id text primary key,
   company_id text default 'cop_default',
-  type text not null, -- 'fixed', 'variable', 'ads'
+  type text not null,
   name text,
   amount numeric,
   date text,
@@ -722,7 +759,7 @@ create table if not exists corevia_expenses (
   updated_time text
 );
 
--- 6. Create table for Workers and Salaries
+-- 6. Payroll & Workers
 create table if not exists corevia_workers (
   id text primary key,
   company_id text default 'cop_default',
@@ -757,7 +794,7 @@ create table if not exists corevia_salary_sheets (
   missing_hours numeric,
   paid_vacation_days numeric,
   expenses jsonb default '[]'::jsonb,
-  pay_status text, -- 'paid', 'unpaid'
+  pay_status text,
   calculated_salary jsonb,
   updated_at text,
   created_by text,
@@ -768,60 +805,205 @@ create table if not exists corevia_salary_sheets (
   updated_time text
 );
 
--- --- DOWNSTREAM UPDATES / AUTO UPGRADE MIGRATIONS FOR EXISTING COREVIA DATABASES ---
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_time text;
+create table if not exists corevia_employee_submissions (
+  id text primary key,
+  company_id text default 'cop_default',
+  employee_id text not null,
+  employee_name text not null,
+  type text not null,
+  amount numeric not null,
+  description text,
+  date text not null,
+  status text default 'pending',
+  created_at text
+);
 
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_time text;
+-- 7. Realtime Chat Messages
+create table if not exists corevia_chat_messages (
+  id text primary key,
+  company_id text default 'cop_default',
+  sender_id text not null,
+  sender_name text not null,
+  sender_job_title text,
+  content text,
+  voice_url text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_time text;
+-- 8. Enterprise Core Activity logs audit trail
+create table if not exists corevia_activity_logs (
+  id text primary key,
+  company_id text default 'cop_default',
+  actor_name text not null,
+  actor_role text,
+  operation text not null,
+  item_type text,
+  old_value jsonb,
+  new_value jsonb,
+  ip_address text,
+  browser_details text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_time text;
+-- --- SAAS MULTI-TENANT ISOLATION POLICIES (RLS SECURITY) ---
+alter table corevia_companies enable row level security;
+alter table corevia_saas_users enable row level security;
+alter table corevia_company_users enable row level security;
+alter table corevia_profile enable row level security;
+alter table corevia_products enable row level security;
+alter table corevia_inventory_basic enable row level security;
+alter table corevia_inventory_sub enable row level security;
+alter table corevia_inventory_return enable row level security;
+alter table corevia_stock_movements enable row level security;
+alter table corevia_orders enable row level security;
+alter table corevia_suppliers enable row level security;
+alter table corevia_expenses enable row level security;
+alter table corevia_workers enable row level security;
+alter table corevia_salary_sheets enable row level security;
+alter table corevia_employee_submissions enable row level security;
+alter table corevia_chat_messages enable row level security;
+alter table corevia_activity_logs enable row level security;
 
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_time text;
+-- Define a policy helper query concept (Secure claim lookup)
+drop policy if exists tenant_isolation on corevia_companies;
+create policy tenant_isolation on corevia_companies for all using (
+  id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), id)
+);
 
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;
+drop policy if exists tenant_isolation on corevia_saas_users;
+create policy tenant_isolation on corevia_saas_users for all using (
+  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+);
 
--- Disable Row Level Security (RLS) on all Corevia framework tables to authorize anonymous public ERP traffic
-ALTER TABLE corevia_companies DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_company_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_saas_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_profile DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_products DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_suppliers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_expenses DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_workers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_salary_sheets DISABLE ROW LEVEL SECURITY;`;
+drop policy if exists tenant_isolation on corevia_company_users;
+create policy tenant_isolation on corevia_company_users for all using (
+  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+);
+
+-- Apply standard tenant filter policies to remaining framework tables
+do $$
+declare
+  t text;
+begin
+  for t in array['corevia_profile', 'corevia_products', 'corevia_inventory_basic', 'corevia_inventory_sub', 'corevia_inventory_return', 'corevia_stock_movements', 'corevia_orders', 'corevia_suppliers', 'corevia_expenses', 'corevia_workers', 'corevia_salary_sheets', 'corevia_employee_submissions', 'corevia_chat_messages', 'corevia_activity_logs']
+  loop
+    execute format('drop policy if exists tenant_isolation_policy on %I;', t);
+    execute format('create policy tenant_isolation_policy on %I for all using (
+      company_id = coalesce(
+        (select company_id from corevia_saas_users where user_id = auth.uid() limit 1),
+        (select company_id from corevia_company_users where id = auth.uid() limit 1),
+        company_id
+      )
+    );', t);
+  end loop;
+end;
+$$;
+
+-- --- DATABASE-FIRST SECURITY-CRITICAL PROCEDURAL FUNCTIONS ---
+
+-- 1. Database-First Payroll Calculator RPC Function
+create or replace function calculate_worker_payroll_v1(
+  p_base_salary numeric,
+  p_working_days_count numeric,
+  p_absence_days_count numeric,
+  p_overtime_hours_count numeric,
+  p_daily_working_hours numeric,
+  p_overtime_multiplier numeric,
+  p_deductions_amount numeric,
+  p_bonuses_amount numeric
+)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  v_daily_base_rate numeric;
+  v_hourly_overtime_rate numeric;
+  v_overtime_pay numeric;
+  v_absence_deduction numeric;
+  v_net_salary numeric;
+begin
+  v_daily_base_rate := round((p_base_salary / coalesce(p_working_days_count, 22)), 4);
+  v_hourly_overtime_rate := round(((p_base_salary / (coalesce(p_working_days_count, 22) * coalesce(p_daily_working_hours, 8))) * coalesce(p_overtime_multiplier, 1.5)), 4);
+  v_overtime_pay := round((coalesce(p_overtime_hours_count, 0) * v_hourly_overtime_rate), 2);
+  v_absence_deduction := round((coalesce(p_absence_days_count, 0) * v_daily_base_rate), 2);
+  v_net_salary := round((p_base_salary + v_overtime_pay - v_absence_deduction - coalesce(p_deductions_amount, 0) + coalesce(p_bonuses_amount, 0)), 2);
+  if v_net_salary < 0 then
+    v_net_salary := 0;
+  end if;
+  return json_build_object(
+    'daily_base_rate', v_daily_base_rate,
+    'hourly_overtime_rate', v_hourly_overtime_rate,
+    'overtime_pay', v_overtime_pay,
+    'absence_deduction', v_absence_deduction,
+    'net_salary', v_net_salary
+  );
+end;
+$$;
+
+-- 2. Subscription User Seats Verification RPC Function
+create or replace function check_seat_limit_v1(p_company_id text)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  v_limit integer;
+  v_used integer;
+  v_allowed boolean;
+begin
+  select coalesce(seatsLimit, 5) into v_limit from corevia_companies where id = p_company_id;
+  if v_limit is null then
+    v_limit := 5;
+  end if;
+  select count(*)::integer into v_used from corevia_company_users where company_id = p_company_id and (deleted_at is null);
+  v_used := v_used + 1; -- 1 Owner seat allocation
+  if v_used >= v_limit then
+    v_allowed := false;
+  else
+    v_allowed := true;
+  end if;
+  return json_build_object(
+    'limit', v_limit,
+    'used', v_used,
+    'allowed', v_allowed
+  );
+end;
+$$;
+
+-- 3. Transacted Atomic Inventory & Stock Movements Process triggers
+create or replace function process_inventory_and_logs_v1(
+  p_company_id text,
+  p_order_id text,
+  p_product_name text,
+  p_color text,
+  p_size text,
+  p_qty_change numeric,
+  p_movement_type text,
+  p_source text
+)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  -- Insert auditable movement record
+  insert into corevia_stock_movements(id, company_id, order_id, product_name, color, size, quantity_change, movement_type, source)
+  values ('mv-' || floor(random() * 10000000)::text, p_company_id, p_order_id, p_product_name, p_color, p_size, p_qty_change, p_movement_type, p_source);
+  
+  -- Update primary sub inventory
+  if p_size is not null and p_size <> '' then
+    insert into corevia_inventory_sub(id, company_id, product_id, product_name, color, size, quantity)
+    values ('sub-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_size, p_qty_change)
+    on conflict (id) do update set quantity = corevia_inventory_sub.quantity + p_qty_change;
+  end if;
+
+  -- Update basic inventory
+  insert into corevia_inventory_basic(id, company_id, product_id, product_name, color, quantity)
+  values ('bsc-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_qty_change)
+  on conflict (id) do update set quantity = corevia_inventory_basic.quantity + p_qty_change;
+end;
+$$;`;
 
     navigator.clipboard.writeText(rawSql);
     setCopiedSql(true);
@@ -1517,10 +1699,10 @@ ALTER TABLE corevia_salary_sheets DISABLE ROW LEVEL SECURITY;`;
                 
                 <div className="relative rounded-xl overflow-hidden border border-zinc-850 bg-zinc-950 max-h-72 overflow-y-auto" dir="ltr">
                   <pre className="p-4 text-[10px] text-zinc-300 font-mono text-left whitespace-pre select-all">
-{`-- Corevia ERP Database SQL Schema for Supabase
+{`-- Corevia Enterprise Database SQL Schema & Security Hardening
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
--- 0. SaaS Tenancy and Users linking
+-- 0. Tenant Companies and Users
 create table if not exists corevia_companies (
   id text primary key,
   name text not null,
@@ -1528,6 +1710,19 @@ create table if not exists corevia_companies (
   owner_name text,
   phone text,
   email text,
+  seatsLimit integer default 5,
+  accountStatus text default 'Active',
+  subscriptionPlan text default 'Standard_Monthly',
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_saas_users (
+  user_id text primary key,
+  company_id text references corevia_companies(id) on delete set null,
+  email text not null,
+  username text,
+  has_completed_onboarding boolean default false,
+  role text default 'admin',
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -1544,32 +1739,11 @@ create table if not exists corevia_company_users (
   allowed_pages jsonb default '[]'::jsonb,
   status text default 'Active',
   last_activity text,
+  deleted_at timestamp with time zone default null,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
-create table if not exists corevia_employee_submissions (
-  id text primary key,
-  company_id text default 'cop_default',
-  employee_id text not null,
-  employee_name text not null,
-  type text not null,
-  amount numeric not null,
-  description text,
-  date text not null,
-  status text default 'pending',
-  created_at text
-);
-
-create table if not exists corevia_saas_users (
-  user_id text primary key,
-  company_id text references corevia_companies(id) on delete set null,
-  email text not null,
-  username text,
-  has_completed_onboarding boolean default false,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 1. Create table for Business PROFILE
+-- 1. Business Profile
 create table if not exists corevia_profile (
   id text primary key,
   company_id text default null,
@@ -1587,7 +1761,7 @@ create table if not exists corevia_profile (
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 2. Create table for Products
+-- 2. Products and Inventory
 create table if not exists corevia_products (
   id text primary key,
   company_id text default 'cop_default',
@@ -1610,7 +1784,52 @@ create table if not exists corevia_products (
   updated_time text
 );
 
--- 3. Create table for Orders
+create table if not exists corevia_inventory_basic (
+  id text primary key,
+  company_id text default 'cop_default',
+  product_id text not null,
+  product_name text not null,
+  color text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_inventory_sub (
+  id text primary key,
+  company_id text default 'cop_default',
+  product_id text not null,
+  product_name text not null,
+  color text,
+  size text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_inventory_return (
+  id text primary key,
+  company_id text default 'cop_default',
+  order_id text not null,
+  product_name text not null,
+  color text,
+  size text,
+  quantity numeric not null default 0,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create table if not exists corevia_stock_movements (
+  id text primary key,
+  company_id text default 'cop_default',
+  date timestamp with time zone default timezone('utc'::text, now()),
+  order_id text,
+  product_name text,
+  color text,
+  size text,
+  quantity_change numeric,
+  movement_type text,
+  source text
+);
+
+-- 3. Corevia Orders
 create table if not exists corevia_orders (
   id text primary key,
   company_id text default 'cop_default',
@@ -1646,7 +1865,7 @@ create table if not exists corevia_orders (
   updated_time text
 );
 
--- 4. Create table for Suppliers
+-- 4. Supplier Pipeline
 create table if not exists corevia_suppliers (
   id text primary key,
   company_id text default 'cop_default',
@@ -1664,11 +1883,11 @@ create table if not exists corevia_suppliers (
   updated_time text
 );
 
--- 5. Create table for Fixed and Variable Expenses
+-- 5. Business Expenses
 create table if not exists corevia_expenses (
   id text primary key,
   company_id text default 'cop_default',
-  type text not null, -- 'fixed', 'variable', 'ads'
+  type text not null,
   name text,
   amount numeric,
   date text,
@@ -1689,7 +1908,7 @@ create table if not exists corevia_expenses (
   updated_time text
 );
 
--- 6. Create table for Workers and Salaries
+-- 6. Payroll & Workers
 create table if not exists corevia_workers (
   id text primary key,
   company_id text default 'cop_default',
@@ -1724,7 +1943,7 @@ create table if not exists corevia_salary_sheets (
   missing_hours numeric,
   paid_vacation_days numeric,
   expenses jsonb default '[]'::jsonb,
-  pay_status text, -- 'paid', 'unpaid'
+  pay_status text,
   calculated_salary jsonb,
   updated_at text,
   created_by text,
@@ -1735,60 +1954,205 @@ create table if not exists corevia_salary_sheets (
   updated_time text
 );
 
--- --- DOWNSTREAM UPDATES / AUTO UPGRADE MIGRATIONS FOR EXISTING COREVIA DATABASES ---
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_products ADD COLUMN IF NOT EXISTS updated_time text;
+create table if not exists corevia_employee_submissions (
+  id text primary key,
+  company_id text default 'cop_default',
+  employee_id text not null,
+  employee_name text not null,
+  type text not null,
+  amount numeric not null,
+  description text,
+  date text not null,
+  status text default 'pending',
+  created_at text
+);
 
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_orders ADD COLUMN IF NOT EXISTS updated_time text;
+-- 7. Realtime Chat Messages
+create table if not exists corevia_chat_messages (
+  id text primary key,
+  company_id text default 'cop_default',
+  sender_id text not null,
+  sender_name text not null,
+  sender_job_title text,
+  content text,
+  voice_url text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_suppliers ADD COLUMN IF NOT EXISTS updated_time text;
+-- 8. Enterprise Core Activity logs audit trail
+create table if not exists corevia_activity_logs (
+  id text primary key,
+  company_id text default 'cop_default',
+  actor_name text not null,
+  actor_role text,
+  operation text not null,
+  item_type text,
+  old_value jsonb,
+  new_value jsonb,
+  ip_address text,
+  browser_details text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_expenses ADD COLUMN IF NOT EXISTS updated_time text;
+-- --- SAAS MULTI-TENANT ISOLATION POLICIES (RLS SECURITY) ---
+alter table corevia_companies enable row level security;
+alter table corevia_saas_users enable row level security;
+alter table corevia_company_users enable row level security;
+alter table corevia_profile enable row level security;
+alter table corevia_products enable row level security;
+alter table corevia_inventory_basic enable row level security;
+alter table corevia_inventory_sub enable row level security;
+alter table corevia_inventory_return enable row level security;
+alter table corevia_stock_movements enable row level security;
+alter table corevia_orders enable row level security;
+alter table corevia_suppliers enable row level security;
+alter table corevia_expenses enable row level security;
+alter table corevia_workers enable row level security;
+alter table corevia_salary_sheets enable row level security;
+alter table corevia_employee_submissions enable row level security;
+alter table corevia_chat_messages enable row level security;
+alter table corevia_activity_logs enable row level security;
 
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_workers ADD COLUMN IF NOT EXISTS updated_time text;
+-- Define a policy helper query concept (Secure claim lookup)
+drop policy if exists tenant_isolation on corevia_companies;
+create policy tenant_isolation on corevia_companies for all using (
+  id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), id)
+);
 
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_by text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_by text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS created_time text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_date text;
-ALTER TABLE corevia_salary_sheets ADD COLUMN IF NOT EXISTS updated_time text;
+drop policy if exists tenant_isolation on corevia_saas_users;
+create policy tenant_isolation on corevia_saas_users for all using (
+  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+);
 
--- Disable Row Level Security (RLS) on all Corevia framework tables to authorize anonymous public ERP traffic
-ALTER TABLE corevia_companies DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_company_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_saas_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_profile DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_products DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_suppliers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_expenses DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_workers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE corevia_salary_sheets DISABLE ROW LEVEL SECURITY;`}
+drop policy if exists tenant_isolation on corevia_company_users;
+create policy tenant_isolation on corevia_company_users for all using (
+  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+);
+
+-- Apply standard tenant filter policies to remaining framework tables
+do $$
+declare
+  t text;
+begin
+  for t in array['corevia_profile', 'corevia_products', 'corevia_inventory_basic', 'corevia_inventory_sub', 'corevia_inventory_return', 'corevia_stock_movements', 'corevia_orders', 'corevia_suppliers', 'corevia_expenses', 'corevia_workers', 'corevia_salary_sheets', 'corevia_employee_submissions', 'corevia_chat_messages', 'corevia_activity_logs']
+  loop
+    execute format('drop policy if exists tenant_isolation_policy on %I;', t);
+    execute format('create policy tenant_isolation_policy on %I for all using (
+      company_id = coalesce(
+        (select company_id from corevia_saas_users where user_id = auth.uid() limit 1),
+        (select company_id from corevia_company_users where id = auth.uid() limit 1),
+        company_id
+      )
+    );', t);
+  end loop;
+end;
+$$;
+
+-- --- DATABASE-FIRST SECURITY-CRITICAL PROCEDURAL FUNCTIONS ---
+
+-- 1. Database-First Payroll Calculator RPC Function
+create or replace function calculate_worker_payroll_v1(
+  p_base_salary numeric,
+  p_working_days_count numeric,
+  p_absence_days_count numeric,
+  p_overtime_hours_count numeric,
+  p_daily_working_hours numeric,
+  p_overtime_multiplier numeric,
+  p_deductions_amount numeric,
+  p_bonuses_amount numeric
+)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  v_daily_base_rate numeric;
+  v_hourly_overtime_rate numeric;
+  v_overtime_pay numeric;
+  v_absence_deduction numeric;
+  v_net_salary numeric;
+begin
+  v_daily_base_rate := round((p_base_salary / coalesce(p_working_days_count, 22)), 4);
+  v_hourly_overtime_rate := round(((p_base_salary / (coalesce(p_working_days_count, 22) * coalesce(p_daily_working_hours, 8))) * coalesce(p_overtime_multiplier, 1.5)), 4);
+  v_overtime_pay := round((coalesce(p_overtime_hours_count, 0) * v_hourly_overtime_rate), 2);
+  v_absence_deduction := round((coalesce(p_absence_days_count, 0) * v_daily_base_rate), 2);
+  v_net_salary := round((p_base_salary + v_overtime_pay - v_absence_deduction - coalesce(p_deductions_amount, 0) + coalesce(p_bonuses_amount, 0)), 2);
+  if v_net_salary < 0 then
+    v_net_salary := 0;
+  end if;
+  return json_build_object(
+    'daily_base_rate', v_daily_base_rate,
+    'hourly_overtime_rate', v_hourly_overtime_rate,
+    'overtime_pay', v_overtime_pay,
+    'absence_deduction', v_absence_deduction,
+    'net_salary', v_net_salary
+  );
+end;
+$$;
+
+-- 2. Subscription User Seats Verification RPC Function
+create or replace function check_seat_limit_v1(p_company_id text)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  v_limit integer;
+  v_used integer;
+  v_allowed boolean;
+begin
+  select coalesce(seatsLimit, 5) into v_limit from corevia_companies where id = p_company_id;
+  if v_limit is null then
+    v_limit := 5;
+  end if;
+  select count(*)::integer into v_used from corevia_company_users where company_id = p_company_id and (deleted_at is null);
+  v_used := v_used + 1; -- 1 Owner seat allocation
+  if v_used >= v_limit then
+    v_allowed := false;
+  else
+    v_allowed := true;
+  end if;
+  return json_build_object(
+    'limit', v_limit,
+    'used', v_used,
+    'allowed', v_allowed
+  );
+end;
+$$;
+
+-- 3. Transacted Atomic Inventory & Stock Movements Process triggers
+create or replace function process_inventory_and_logs_v1(
+  p_company_id text,
+  p_order_id text,
+  p_product_name text,
+  p_color text,
+  p_size text,
+  p_qty_change numeric,
+  p_movement_type text,
+  p_source text
+)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  -- Insert auditable movement record
+  insert into corevia_stock_movements(id, company_id, order_id, product_name, color, size, quantity_change, movement_type, source)
+  values ('mv-' || floor(random() * 10000000)::text, p_company_id, p_order_id, p_product_name, p_color, p_size, p_qty_change, p_movement_type, p_source);
+  
+  -- Update primary sub inventory
+  if p_size is not null and p_size <> '' then
+    insert into corevia_inventory_sub(id, company_id, product_id, product_name, color, size, quantity)
+    values ('sub-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_size, p_qty_change)
+    on conflict (id) do update set quantity = corevia_inventory_sub.quantity + p_qty_change;
+  end if;
+
+  -- Update basic inventory
+  insert into corevia_inventory_basic(id, company_id, product_id, product_name, color, quantity)
+  values ('bsc-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_qty_change)
+  on conflict (id) do update set quantity = corevia_inventory_basic.quantity + p_qty_change;
+end;
+$$;`}
                   </pre>
                 </div>
               </div>

@@ -377,6 +377,17 @@ export default function UsersPermissionsView({
     
     const isNew = !editingEmployee;
     const employeeId = editingEmployee ? editingEmployee.id : (selectedWorkerId || `emp-${Date.now()}`);
+
+    // Seat capacity limitation enforcement
+    if (isNew && totalSeatsCountUsed >= seatsLimit) {
+      onTriggerNotification(
+        isRtl 
+          ? "❌ تم تجاوز الطاقة الاستيعابية لعدد المقاعد في اشتراك موظفي هذا الحساب السحابي! يرجى ترقية اشتراك السحاب (User seat capacity exceeded for this company. Please upgrade your subscription.)"
+          : "❌ User seat capacity exceeded for this company. Please upgrade your subscription."
+      );
+      setIsLoading(false);
+      return;
+    }
     
     // Check if phone, email, or username already registered by another employee in the company
     const duplicate = employees.find(

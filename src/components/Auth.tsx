@@ -24,7 +24,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "pending_approval" | "suspended";
+type AuthMode = "login" | "register" | "forgot" | "pending_approval" | "suspended" | "update_password";
 
 export default function Auth({
   lang,
@@ -40,7 +40,11 @@ export default function Auth({
   // Form input states
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
   const [nameInput, setNameInput] = useState("");
+  const [companyNameInput, setCompanyNameInput] = useState("");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [countryInput, setCountryInput] = useState("Algeria");
   
   // UI states
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -50,6 +54,24 @@ export default function Auth({
   
   // Pending Session State to mock Waiting List
   const [pendingSession, setPendingSession] = useState<UserSession | null>(null);
+
+  // URL Hash Verification monitor for Password Recovery
+  useEffect(() => {
+    try {
+      const hash = window.location.hash;
+      if (hash && (hash.includes("type=recovery") || hash.includes("access_token="))) {
+        setAuthMode("update_password");
+        onTriggerNotification(
+          isRtl 
+            ? "🔑 تم رصد رمز استعادة الحساب بنجاح. يرجى إدخال كلمة المرور الجديدة الخاصة بك بالأسفل." 
+            : "🔑 Recovery token detected. Please establish your new secure password below.", 
+          "success"
+        );
+      }
+    } catch (e) {
+      console.warn("Could not check recovery router on hash change:", e);
+    }
+  }, []);
 
   // Auto pre-fill from query parameters for worker quick access links
   useEffect(() => {
@@ -479,8 +501,8 @@ export default function Auth({
       }
 
     } else if (authMode === "register") {
-      if (!nameInput.trim() || !emailInput.trim() || !passwordInput.trim()) {
-        onTriggerNotification(isRtl ? "يرجى ملء جميع الحقول" : "Please fill in all fields", "info");
+      if (!companyNameInput.trim() || !nameInput.trim() || !emailInput.trim() || !phoneInput.trim() || !passwordInput.trim()) {
+        onTriggerNotification(isRtl ? "يرجى ملء جميع الحقول لتأسيس النشاط" : "Please fill in all fields to register", "info");
         setIsSubmitting(false);
         return;
       }
@@ -488,6 +510,7 @@ export default function Auth({
       try {
         if (!supabase) throw new Error("Supabase is not initialized.");
 
+        // First register with Supabase Auth
         const { data, error } = await supabase.auth.signUp({
           email: emailInput,
           password: passwordInput,
@@ -500,45 +523,113 @@ export default function Auth({
 
         if (error) throw error;
 
-        const sessionRecord: UserSession = {
-          username: nameInput,
-          email: emailInput,
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false,
-          user_id: data.user?.id,
-          userId: data.user?.id,
-          company_id: data.user ? `cop_${data.user.id.substring(0, 15)}` : undefined
+        const userId = data.user?.id || `usr-${Date.now()}`;
+        const companyId = `cop_${userId.substring(0, 15)}`;
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // 1. Save company to corevia_companies
+        const { error: compErr } = await supabase.from("corevia_companies").upsert({
+          id: companyId,
+          name: companyNameInput.trim(),
+          business_type: "تجارة إلكترونية",
+          owner_name: nameInput.trim(),
+          phone: phoneInput.trim(),
+          email: emailInput.trim().toLowerCase(),
+          seatsLimit: 5,
+          accountStatus: "Pending Verification",
+          subscriptionPlan: "Trial",
+          created_at: new Date().toISOString() // Seed current time for 10-min OTP comparison & 7 days trial countdown
+        });
+        if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
+
+        // 2. Save company to compatibility companies table
+        const { error: comErr2 } = await supabase.from("companies").upsert({
+          id: companyId,
+          owner_id: userId,
+          company_name: companyNameInput.trim(),
+          email: emailInput.trim().toLowerCase(),
+          phone: phoneInput.trim(),
+          address: countryInput
+        });
+         if (comErr2) console.warn("Supabase compatibility companies upsert error during registration:", comErr2);
+
+        // 3. Save owner to corevia_saas_users table
+        const { error: saasUserErr } = await supabase.from("corevia_saas_users").upsert({
+          user_id: userId,
+          company_id: companyId,
+          email: emailInput.trim().toLowerCase(),
+          username: nameInput.trim(),
+          has_completed_onboarding: false,
+          role: "admin"
+        });
+        if (saasUserErr) console.warn("Supabase corevia_saas_users upsert error during registration:", saasUserErr);
+
+        // 4. Update corevia_saas_companies_v1 in localStorage to cache state immediately
+        const newCompanyObj: SaaSCompany = {
+          id: companyId,
+          companyName: companyNameInput.trim(),
+          ownerName: nameInput.trim(),
+          email: emailInput.trim().toLowerCase(),
+          phone: phoneInput.trim(),
+          country: countryInput,
+          registrationDate: new Date().toISOString().split("T")[0],
+          lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
+          emailVerified: false,
+          subscriptionPlan: "Trial",
+          seatsLimit: 5,
+          seatsUsed: 1,
+          accountStatus: "Pending Verification",
+          expirationDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Trial end Date (7 days)
+          activeDevices: [],
+          otpCode
         };
 
-        if (data.session) {
-          onAuthSuccess(sessionRecord);
-          onTriggerNotification(isRtl ? "تم تسجيل حسابك وتفعيله بنجاح!" : "Account registered and logged in successfully!", "success");
+        const stored = localStorage.getItem("corevia_saas_companies_v1");
+        let list: SaaSCompany[] = [];
+        try { if (stored) list = JSON.parse(stored); } catch (e) {}
+        const existingIdx = list.findIndex(c => c.id === companyId || c.email.toLowerCase() === emailInput.trim().toLowerCase());
+        if (existingIdx !== -1) {
+          list[existingIdx] = { ...list[existingIdx], ...newCompanyObj };
         } else {
-          // If email confirmation is required and no session is returned immediately
-          onAuthSuccess(sessionRecord);
-          onTriggerNotification(
-            isRtl 
-              ? "تم تسجيل حسابك بنجاح! تم الدخول تلقائياً (يرجى مراجعة بريدك لتأكيده لاحقاً)." 
-              : "Account registered successfully! Auto-logged-in (please confirm email if required).",
-            "success"
-          );
+          list.push(newCompanyObj);
         }
-      } catch (err: any) {
-        console.error("Auth register error:", err);
-        // Fallback
+        localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+
+        // Create log notification inside Supabase activity log for Super Admin
+        await supabase.from("corevia_activity_logs").insert({
+          id: `log-${Date.now()}`,
+          company_id: companyId,
+          actor_name: nameInput.trim(),
+          actor_role: "SaaS Tenant Owner",
+          operation: "تسجيل شركة جديدة",
+          item_type: "saas_creation",
+          new_value: {
+            companyName: companyNameInput.trim(),
+            ownerName: nameInput.trim(),
+            email: emailInput.trim().toLowerCase(),
+            plan: "Trial"
+          },
+          ip_address: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+        }).then(() => console.log("New registration logged to Supabase logs"));
+
         const sessionRecord: UserSession = {
-          username: nameInput,
-          email: emailInput,
+          username: nameInput.trim(),
+          email: emailInput.trim().toLowerCase(),
           isRegistered: true,
           isApproved: true,
           isSuspended: false,
-          user_id: "usr_mock",
-          userId: "usr_mock",
-          company_id: "cop_mock"
+          user_id: userId,
+          userId: userId,
+          company_id: companyId,
+          role: "admin"
         };
+
         onAuthSuccess(sessionRecord);
-        onTriggerNotification(isRtl ? "تم تسجيل الحساب بنجاح (وضع المحاكاة!)" : "Registered successfully (Simulated mode!)", "success");
+        onTriggerNotification(isRtl ? "تم تسجيل الحساب بنجاح! تم الدخول وبانتظار التحقق بـ OTP البريد الإلكتروني." : "Tenant created successfully! Awaiting email verification OTP link.", "success");
+
+      } catch (err: any) {
+        console.error("Auth register error:", err);
+        onTriggerNotification(isRtl ? `خطأ في التسجيل: ${err.message || err}` : `Registration error: ${err.message || err}`, "info");
       } finally {
         setIsSubmitting(false);
       }
@@ -570,6 +661,46 @@ export default function Auth({
         );
       } finally {
         setIsSubmitting(false);
+      }
+    } else if (authMode === "update_password") {
+      if (!passwordInput) {
+        onTriggerNotification(isRtl ? "الرجاء إدخال كلمة المرور الجديدة" : "Please enter your new password", "info");
+        setIsSubmitting(false);
+        return;
+      }
+      if (passwordInput !== confirmPasswordInput) {
+        onTriggerNotification(isRtl ? "كلمات المرور غير متطابقة" : "Passwords do not match", "info");
+        setIsSubmitting(false);
+        return;
+      }
+
+      try {
+        if (!supabase) throw new Error("Supabase is not initialized.");
+        const { error } = await supabase.auth.updateUser({ password: passwordInput });
+
+        if (error) throw error;
+
+        onTriggerNotification(
+          isRtl ? "تم تحديث كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة." : "Password updated successfully! You can now log in using your new password.",
+          "success"
+        );
+
+        setPasswordInput("");
+        setConfirmPasswordInput("");
+        setAuthMode("login");
+
+        // Clear the URL recovery hash safely
+        try {
+          window.history.replaceState(null, "", window.location.origin + window.location.pathname);
+        } catch (hErr) {}
+
+      } catch (err: any) {
+        onTriggerNotification(
+          isRtl ? `خطأ أثناء تحديث كلمة المرور: ${err.message}` : `Error updating password: ${err.message}`,
+          "info"
+        );
+      } finally {
+         setIsSubmitting(false);
       }
     }
   };
@@ -805,8 +936,31 @@ export default function Auth({
           {/* REGISTER VIEW TEMPLATE */}
           {authMode === "register" && (
             <form onSubmit={handleSubmit} className="space-y-4" id="register_form">
+              {/* Company Name */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">{t.name}</label>
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "اسم المؤسسة / الشركة" : "Company / Enterprise Name"}
+                </label>
+                <div className="relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>🏢</span>
+                  <input
+                    type="text"
+                    required
+                    value={companyNameInput}
+                    onChange={(e) => setCompanyNameInput(e.target.value)}
+                    placeholder={isRtl ? "شات تيك للتجارة والتوزيع" : "Corevia Tech Trading"}
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Owner Name */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "الاسم الكامل للمالك" : "Owner Full Name"}
+                </label>
                 <div className="relative">
                   <User className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
                   <input
@@ -822,8 +976,11 @@ export default function Auth({
                 </div>
               </div>
 
+              {/* Email Address */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">{t.email}</label>
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "البريد الإلكتروني المعتمر" : "Email Address"}
+                </label>
                 <div className="relative">
                   <Mail className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
                   <input
@@ -839,6 +996,49 @@ export default function Auth({
                 </div>
               </div>
 
+              {/* Phone Number */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "رقم الهاتف" : "Phone Number"}
+                </label>
+                <div className="relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>📞</span>
+                  <input
+                    type="tel"
+                    required
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value)}
+                    placeholder="+213 550 12 34 56"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Country Selection */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "الدولة" : "Country"}
+                </label>
+                <div className="relative">
+                  <Globe className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <select
+                    value={countryInput}
+                    onChange={(e) => setCountryInput(e.target.value)}
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-250 text-xs focus:outline-none focus:border-indigo-500 transition-all appearance-none ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  >
+                    <option value="Algeria">{isRtl ? "الجزائر 🇩🇿" : "Algeria 🇩🇿"}</option>
+                    <option value="France">{isRtl ? "فرنسا 🇫🇷" : "France 🇫🇷"}</option>
+                    <option value="Morocco">{isRtl ? "المغرب 🇲🇦" : "Morocco 🇲🇦"}</option>
+                    <option value="Other">{isRtl ? "دولة أخرى" : "Other"}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Password */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-300">{t.password}</label>
                 <div className="relative">
@@ -931,6 +1131,92 @@ export default function Auth({
               >
                 <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span>{t.resetBtn}</span>
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                  className="text-slate-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto"
+                >
+                  {isRtl ? <ArrowRight className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
+                  <span>{t.backToLogin}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* UPDATE PASSWORD FORM */}
+          {authMode === "update_password" && (
+            <form onSubmit={handleSubmit} className="space-y-4" id="update_password_form">
+              <div className="p-3 bg-emerald-500/5 border border-emerald-550/10 rounded-2xl mb-4 text-center">
+                <p className="text-[11px] text-emerald-400 font-bold leading-relaxed">
+                  {isRtl 
+                    ? "استعادة ناجحة: الرجاء تعيين كلمة مرور قوية وجديدة لحماية حسابك."
+                    : "Recovery Active: Please configure a robust new password to protect your account."}
+                </p>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">{isRtl ? "كلمة المرور الجديدة" : "New Password"}</label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-emerald-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
+                  >
+                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">{isRtl ? "تأكيد كلمة المرور الجديدة" : "Confirm New Password"}</label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-emerald-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group overflow-hidden bg-gradient-to-r from-emerald-600 via-indigo-600 to-violet-600 hover:from-emerald-500 hover:via-indigo-500 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg hover:shadow-emerald-500/20 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-emerald-500/10"
+              >
+                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isRtl ? "جاري تحديث كلمة المرور..." : "Updating password..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{isRtl ? "تعديل وحفظ كلمة المرور" : "Apply Password Reset"}</span>
+                  </>
+                )}
               </button>
 
               <div className="text-center pt-2">

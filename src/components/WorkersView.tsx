@@ -9,6 +9,7 @@ import {
 import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
 import { getEmployees, saveEmployee } from "../employeeService";
 import { cleanArabicName, cleanPhoneDigits } from "./UsersPermissionsView";
+import { calculateWorkerPayroll } from "../supabaseSync";
 
 interface WorkersViewProps {
   workers: Worker[];
@@ -23,12 +24,12 @@ interface WorkersViewProps {
 }
 
 // 2.1 الدوال المساعدة العامة
-export const calcDailyWage = (salary: number) => {
-  return salary / 30;
+export const calcDailyWage = (salary: number, workingDaysCount = 22) => {
+  return salary / (workingDaysCount || 22);
 };
 
-export const calcHourlyWage = (salary: number, dailyHours: number) => {
-  return (salary / 30) / (dailyHours || 8);
+export const calcHourlyWage = (salary: number, dailyHours: number, workingDaysCount = 22) => {
+  return (salary / (workingDaysCount || 22)) / (dailyHours || 8);
 };
 
 // 2.2 المكون الداخلي: UndoToast

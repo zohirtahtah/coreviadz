@@ -62,6 +62,113 @@ export default function SuperAdminView({
   // Selection state for drill-down action of device list or editing
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
+  // Advanced Subscription & Billing manual management states
+  const [editPlan, setEditPlan] = useState("");
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editDuration, setEditDuration] = useState("1");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editSeatsLimit, setEditSeatsLimit] = useState(5);
+  const [editPaymentNote, setEditPaymentNote] = useState("Cash");
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      const company = companies.find(c => c.id === selectedCompanyId);
+      if (company) {
+        setEditPlan(company.subscriptionPlan);
+        const today = new Date().toISOString().split("T")[0];
+        setEditStartDate(company.registrationDate || today);
+        setEditDuration("1");
+        setEditSeatsLimit(company.seatsLimit || 5);
+        setEditPaymentNote("Cash");
+        
+        // Auto calculate end date
+        const start = company.registrationDate ? new Date(company.registrationDate) : new Date();
+        const end = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1050);
+        setEditEndDate(company.expirationDate || end.toISOString().split("T")[0]);
+      }
+    }
+  }, [selectedCompanyId, companies]);
+
+  const handleEditStartDateChange = (val: string) => {
+    setEditStartDate(val);
+    calculateAndSetEndDate(val, editDuration);
+  };
+
+  const handleEditDurationChange = (val: string) => {
+    setEditDuration(val);
+    calculateAndSetEndDate(editStartDate, val);
+  };
+
+  const calculateAndSetEndDate = (startStr: string, durationStr: string) => {
+    if (durationStr === "custom") return;
+    const start = startStr ? new Date(startStr) : new Date();
+    let months = 1;
+    if (durationStr === "1") months = 1;
+    else if (durationStr === "3") months = 3;
+    else if (durationStr === "6") months = 6;
+    else if (durationStr === "12") months = 12;
+    
+    const end = new Date(start.getFullYear(), start.getMonth() + months, start.getDate());
+    setEditEndDate(end.toISOString().split("T")[0]);
+  };
+
+  const handleSaveSubscriptionAndRenew = async (companyId: string) => {
+    try {
+      // 1. Update in Supabase corevia_companies
+      await persistCompanyStatusToSupabase(companyId, {
+        subscriptionPlan: editPlan,
+        seatsLimit: editSeatsLimit,
+        expirationDate: editEndDate,
+        accountStatus: "Active" // Automatic switch status to Active upon renewal
+      });
+
+      // 2. Log in activity log
+      await supabase.from("corevia_activity_logs").insert({
+        id: `log-renewal-${Date.now()}`,
+        company_id: companyId,
+        actor_name: "Super Admin Workspace",
+        actor_role: "Orchestrator",
+        operation: "تجديد باقة الاشتراك",
+        item_type: "renewal",
+        new_value: {
+          plan: editPlan,
+          duration: editDuration,
+          startDate: editStartDate,
+          endDate: editEndDate,
+          seatsLimit: editSeatsLimit,
+          paymentNote: editPaymentNote
+        },
+        ip_address: "127.0.0.1"
+      });
+
+      // 3. Update companies state local array
+      setCompanies(prev => prev.map(c => {
+        if (c.id === companyId) {
+          return {
+            ...c,
+            subscriptionPlan: editPlan,
+            seatsLimit: editSeatsLimit,
+            expirationDate: editEndDate,
+            accountStatus: "Active",
+            emailVerified: true
+          };
+        }
+        return c;
+      }));
+
+      onTriggerNotification(
+        isRtl 
+          ? "تم تجديد وحفظ باقة الاشتراك بنجاح وتنشيط حساب الشركة!" 
+          : "Subscription parameters adjusted, renewed and company reactivated!", 
+        "success"
+      );
+      
+    } catch (e: any) {
+      console.error(e);
+      onTriggerNotification("Error: " + e.message, "info");
+    }
+  };
+
   // New Client Registration form states
   const [showAddCompanyModal, setShowAddCompanyModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
@@ -94,6 +201,11 @@ export default function SuperAdminView({
         .from("companies")
         .select("*");
 
+      // Fetch companies from 'corevia_companies'
+      const { data: realCompanies } = await supabase
+        .from("corevia_companies")
+        .select("*");
+
       // Fetch profile data from 'corevia_profile'
       const { data: profiles } = await supabase
         .from("corevia_profile")
@@ -102,13 +214,30 @@ export default function SuperAdminView({
       const saasCompanies: SaaSCompany[] = (users || []).map(u => {
         const comp = (regularCompanies || []).find(c => c.id === u.company_id);
         const prof = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id);
+        const realC = (realCompanies || []).find(rc => rc.id === u.company_id);
 
-        const companyName = prof?.business_name || comp?.company_name || comp?.name || `${u.username || u.email.split("@")[0]} Trading`;
-        const ownerName = u.username || prof?.owner_name || comp?.owner_name || u.email.split("@")[0];
+        const companyName = prof?.business_name || comp?.company_name || realC?.name || comp?.name || `${u.username || u.email.split("@")[0]} Trading`;
+        const ownerName = u.username || prof?.owner_name || realC?.owner_name || comp?.owner_name || u.email.split("@")[0];
         const email = u.email;
-        const phone = prof?.phone || comp?.phone || "";
+        const phone = prof?.phone || realC?.phone || comp?.phone || "";
         const address = prof?.address || comp?.address || "";
         const registrationDate = u.created_at ? u.created_at.split("T")[0] : (comp?.created_at ? comp.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+
+        const seatsLimitVal = realC?.seatsLimit !== undefined ? realC.seatsLimit : (realC?.seatslimit !== undefined ? realC.seatslimit : 5);
+        const accountStatusVal = realC?.accountStatus !== undefined ? realC.accountStatus : (realC?.accountstatus !== undefined ? realC.accountstatus : (u.has_completed_onboarding ? "Active" : "Pending Verification"));
+        const subscriptionPlanVal = realC?.subscriptionPlan !== undefined ? realC.subscriptionPlan : (realC?.subscriptionplan !== undefined ? realC.subscriptionplan : "Basic");
+
+        // Dynamically parse or fallback expirationDate
+        let expirationDateVal = realC?.expirationDate || realC?.expiration_date || "";
+        if (!expirationDateVal) {
+          if (subscriptionPlanVal === "Trial") {
+            const regTime = new Date(registrationDate).getTime();
+            expirationDateVal = new Date(regTime + 7 * 24 * 60 * 60 * 1050).toISOString().split("T")[0];
+          } else {
+            const regTime = new Date(registrationDate).getTime();
+            expirationDateVal = new Date(regTime + 30 * 24 * 60 * 60 * 1050).toISOString().split("T")[0];
+          }
+        }
 
         return {
           id: u.company_id || `cop_${u.user_id.substring(0, 15)}`,
@@ -116,17 +245,17 @@ export default function SuperAdminView({
           ownerName,
           email,
           phone,
-          country: prof?.country || "Algeria",
+          country: realC?.country || prof?.country || "Algeria",
           registrationDate,
           lastLogin: comp?.updated_at ? comp.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
-          emailVerified: true,
-          subscriptionPlan: "Basic",
-          seatsLimit: 5,
+          emailVerified: accountStatusVal !== "Pending Verification",
+          subscriptionPlan: subscriptionPlanVal,
+          seatsLimit: seatsLimitVal,
           seatsUsed: 1,
-          accountStatus: u.has_completed_onboarding ? "Active" : "Pending Verification",
-          expirationDate: "",
+          accountStatus: accountStatusVal,
+          expirationDate: expirationDateVal,
           activeDevices: [],
-          otpCode: "123456"
+          otpCode: realC?.otpCode || realC?.otp_code || "123456"
         };
       });
 
@@ -242,12 +371,49 @@ export default function SuperAdminView({
     setLogs(prev => [newLog, ...prev]);
   };
 
+  // Helper to persist company updates to Supabase
+  const persistCompanyStatusToSupabase = async (companyId: string, updates: { subscriptionPlan?: string, seatsLimit?: number, accountStatus?: string, expirationDate?: string, country?: string, otpCode?: string }) => {
+    if (!supabase) return;
+    try {
+      const payload: any = {};
+      if (updates.subscriptionPlan !== undefined) {
+        payload.subscriptionPlan = updates.subscriptionPlan;
+      }
+      if (updates.seatsLimit !== undefined) {
+        payload.seatsLimit = updates.seatsLimit;
+      }
+      if (updates.accountStatus !== undefined) {
+        payload.accountStatus = updates.accountStatus;
+      }
+      if (updates.expirationDate !== undefined) {
+        payload.expirationDate = updates.expirationDate;
+      }
+      if (updates.country !== undefined) {
+        payload.country = updates.country;
+      }
+      if (updates.otpCode !== undefined) {
+        payload.otpCode = updates.otpCode;
+      }
+
+      await supabase
+        .from("corevia_companies")
+        .update(payload)
+        .eq("id", companyId);
+
+      console.log(`Successfully persisted company updates to Supabase for company: ${companyId}`);
+    } catch (err) {
+      console.error("Could not write SaaS updates to Supabase:", err);
+    }
+  };
+
   // Change Subscription Plan
   const handleUpgradePlan = (companyId: string, value: "Free" | "Basic" | "Pro" | "Enterprise") => {
+    const planLimit = PLANS[value].seats;
+    persistCompanyStatusToSupabase(companyId, { subscriptionPlan: value, seatsLimit: planLimit });
+
     setCompanies(prev => prev.map(c => {
       if (c.id === companyId) {
         const previousPlan = c.subscriptionPlan;
-        const planLimit = PLANS[value].seats;
         
         // Push notification of success
         onTriggerNotification(
@@ -276,6 +442,8 @@ export default function SuperAdminView({
 
   // Change Account Status
   const handleUpdateStatus = (companyId: string, status: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled") => {
+    persistCompanyStatusToSupabase(companyId, { accountStatus: status });
+
     setCompanies(prev => prev.map(c => {
       if (c.id === companyId) {
         const previousStatus = c.accountStatus;
@@ -324,6 +492,8 @@ export default function SuperAdminView({
           );
           return c;
         }
+
+        persistCompanyStatusToSupabase(companyId, { seatsLimit: targetLimit });
 
         onTriggerNotification(
           isRtl ? `تم تحديث عدد مقاعد المؤسسة إلى: ${targetLimit}` : `Seats limit set to ${targetLimit}`,
@@ -377,6 +547,8 @@ export default function SuperAdminView({
 
   // Simulate OTP Code validation for pending accounts
   const handleSimulateOTPVerification = (companyId: string) => {
+    persistCompanyStatusToSupabase(companyId, { accountStatus: "Active" });
+
     setCompanies(prev => prev.map(c => {
       if (c.id === companyId) {
         onTriggerNotification(
@@ -434,6 +606,42 @@ export default function SuperAdminView({
         { id: `dev-${Date.now()}-1`, browser: "Chrome", os: "Windows", activityType: "Registration Portal", lastActive: new Date().toISOString().replace("T", " ").substr(0, 16) }
       ]
     };
+
+    if (supabase) {
+      const coId = newCompany.id;
+      // Write into corevia_companies
+      supabase.from("corevia_companies").upsert({
+        id: coId,
+        name: newCompany.companyName,
+        business_type: "تجارة إلكترونية",
+        owner_name: newCompany.ownerName,
+        phone: newCompany.phone,
+        email: newCompany.email,
+        seatsLimit: newCompany.seatsLimit,
+        accountStatus: newCompany.accountStatus,
+        subscriptionPlan: newCompany.subscriptionPlan
+      }).then(() => console.log("Created company in corevia_companies via Super Admin"));
+
+      // Write into companies
+      supabase.from("companies").upsert({
+        id: coId,
+        company_name: newCompany.companyName,
+        owner_id: "saas-provisioned",
+        email: newCompany.email,
+        phone: newCompany.phone,
+        address: ""
+      }).then(() => console.log("Created company in companies via Super Admin"));
+
+      // Create saas user profile shell
+      supabase.from("corevia_saas_users").upsert({
+        user_id: `usr-${Date.now()}`,
+        company_id: coId,
+        email: newCompany.email,
+        username: newCompany.ownerName,
+        has_completed_onboarding: false,
+        role: "admin"
+      }).then(() => console.log("Provisioned SaaS user shell via Super Admin"));
+    }
 
     setCompanies(prev => [newCompany, ...prev]);
     setShowAddCompanyModal(false);
@@ -879,52 +1087,178 @@ export default function SuperAdminView({
 
                           </tr>
 
-                          {/* NESTED INSPECT DRAWER - DEVICE TERMINALS Hub */}
+                          {/* NESTED INSPECT DRAWER - DEVICE TERMINALS & BILLING PARAMETERS Hub */}
                           {isSelected && (
-                            <tr className="bg-slate-950/80 animate-fade-in border-t-0 border-[#27272a]">
+                            <tr className="bg-slate-950/90 animate-fade-in border-t-0 border-[#27272a]">
                               <td colSpan={8} className="p-4 px-6 text-right">
-                                <div className="space-y-3 max-w-4xl mx-auto" id="devices_hub_drawer">
+                                <div className="space-y-4 max-w-5xl mx-auto" id="devices_and_billing_hub_drawer">
                                   
                                   <div className="flex justify-between items-center pb-2 border-b border-[#27272a]">
                                     <h4 className="text-xs font-black text-white flex items-center gap-2">
-                                      <Smartphone className="w-4 h-4 text-rose-400" />
+                                      <span className="text-sm">⚙️</span>
                                       <span>
                                         {isRtl 
-                                          ? `الأجهزة النشطة في حساب: ${c.companyName} (${c.activeDevices.length})` 
-                                          : `Authorized Live Sessions for: ${c.companyName}`}
+                                          ? `إدارة وإعداد اشتراك: ${c.companyName}` 
+                                          : `Subscription & Session Orchestration: ${c.companyName}`}
                                       </span>
                                     </h4>
-                                    <span className="text-[10px] text-indigo-400 font-mono">Tenant UUID Profile: cop-{c.id.substr(-6)}</span>
+                                    <span className="text-[10px] text-indigo-400 font-mono">Tenant ID: cop-{c.id.substr(-6)}</span>
                                   </div>
 
-                                  {c.activeDevices.length === 0 ? (
-                                    <p className="text-slate-500 text-xs py-3 text-center">{isRtl ? "لا توجد أجهزة متصلة مسجلة حالياً." : "No active terminals found."}</p>
-                                  ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                      {c.activeDevices.map(d => (
-                                        <div key={d.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col justify-between h-24 relative overflow-hidden" id="device_session_card">
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-xs font-extrabold text-white">{d.browser} - {d.os}</span>
-                                            <span className="text-[9px] rounded-full px-2 py-0.5 bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">{d.activityType}</span>
-                                          </div>
-                                          
-                                          <div className="flex justify-between items-center col-span-2 mt-3">
-                                            <div className="text-[10px] text-slate-500 font-mono">
-                                              <span>{isRtl ? "آخر نشاط:" : "Active:"}</span> <span className="text-slate-300">{d.lastActive}</span>
-                                            </div>
-                                            
-                                            <button
-                                              onClick={() => handleForceLogoutDevice(c.id, d.id, d.browser, d.os)}
-                                              className="p-1 px-2.5 bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded text-[10px] font-bold transition-all cursor-pointer"
-                                              title={isRtl ? "طرد وإنهاء جلسة الجهاز الفورية" : "Drop authorization token"}
-                                            >
-                                              {isRtl ? "طرد فوري" : "Force Log out"}
-                                            </button>
-                                          </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
+                                    {/* Left side: Device terminals observer */}
+                                    <div className="space-y-3 font-sans">
+                                      <div className="flex items-center gap-2 text-xs font-black text-slate-350 uppercase pb-1">
+                                        <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                                        <span>{isRtl ? "الأجهزة ومحطات العمل المتصلة" : "Active Authorized Sessions"}</span>
+                                      </div>
+
+                                      {c.activeDevices.length === 0 ? (
+                                        <div className="p-6 bg-slate-900/30 border border-slate-800/50 rounded-xl text-center">
+                                          <p className="text-slate-500 text-xs">{isRtl ? "لا توجد أجهزة متصلة مسجلة حالياً." : "No active terminals found."}</p>
                                         </div>
-                                      ))}
+                                      ) : (
+                                        <div className="grid grid-cols-1 gap-2">
+                                          {c.activeDevices.map(d => (
+                                            <div key={d.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col justify-between h-24 relative overflow-hidden text-right" id="device_session_card">
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-xs font-extrabold text-white">{d.browser} - {d.os}</span>
+                                                <span className="text-[9px] rounded-full px-2 py-0.5 bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">{d.activityType}</span>
+                                              </div>
+                                              
+                                              <div className="flex justify-between items-center col-span-2 mt-3">
+                                                <div className="text-[10px] text-slate-500 font-mono">
+                                                  <span>{isRtl ? "آخر نشاط:" : "Active:"}</span> <span className="text-slate-300">{d.lastActive}</span>
+                                                </div>
+                                                
+                                                <button
+                                                  onClick={() => handleForceLogoutDevice(c.id, d.id, d.browser, d.os)}
+                                                  className="p-1 px-2.5 bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded text-[10px] font-bold transition-all cursor-pointer"
+                                                  title={isRtl ? "طرد وإنهاء جلسة الجهاز الفورية" : "Drop authorization token"}
+                                                >
+                                                  {isRtl ? "طرد فوري" : "Force Log out"}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      
+                                      {/* Quick details audit log block */}
+                                      <div className="p-3 bg-slate-900/50 border border-slate-800 rounded-xl space-y-1.5 font-sans text-[11px] leading-relaxed text-right">
+                                        <div className="font-bold text-slate-350">{isRtl ? "تفاصيل حالة الشركة:" : "Tenant Health Status:"}</div>
+                                        <div className="text-slate-400 grid grid-cols-2 gap-1 font-mono text-[10px]">
+                                          <span>{isRtl ? "تاريخ التأسيس:" : "Reg Date:"} <span className="text-slate-200">{c.registrationDate}</span></span>
+                                          <span>{isRtl ? "صلاحية الحساب:" : "Service Expiry:"} <span className="text-rose-400">{c.expirationDate}</span></span>
+                                          <span>{isRtl ? "باقة الاشتراك:" : "Active Plan:"} <span className="text-indigo-400">{c.subscriptionPlan}</span></span>
+                                          <span>{isRtl ? "رمز التحقق OTP:" : "System Verification OTP:"} <span className="text-amber-400">{c.otpCode || "N/A"}</span></span>
+                                        </div>
+                                      </div>
                                     </div>
-                                  )}
+
+                                    {/* Right side: Subscription Management & Renewal panel */}
+                                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3 text-right font-sans">
+                                      <div className="flex items-center gap-2 text-xs font-black text-slate-300 uppercase border-b border-slate-800 pb-2">
+                                        <span className="text-sm">💳</span>
+                                        <span>{isRtl ? "بوابة تجديد وتعديل باقات الاشتراك" : "Subscription Configuration & Renewals"}</span>
+                                      </div>
+
+                                      <div className="grid grid-cols-2 gap-3 text-xs text-right text-slate-100">
+                                        {/* Select Plan */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "باقة الاشتراك" : "Subscription Plan"}</label>
+                                          <select
+                                            value={editPlan}
+                                            onChange={(e) => setEditPlan(e.target.value)}
+                                            className="w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg text-slate-200 outline-none text-xs"
+                                          >
+                                            <option value="Free">Free</option>
+                                            <option value="Basic">Basic ($29)</option>
+                                            <option value="Pro">Pro ($79)</option>
+                                            <option value="Enterprise">Enterprise ($249)</option>
+                                            <option value="Trial">Trial (Free 7 Days)</option>
+                                          </select>
+                                        </div>
+
+                                        {/* Select Duration */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "فترة الاشتراك / التجديد" : "Duration Period"}</label>
+                                          <select
+                                            value={editDuration}
+                                            onChange={(e) => handleEditDurationChange(e.target.value)}
+                                            className="w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg text-slate-200 outline-none text-xs"
+                                          >
+                                            <option value="1">{isRtl ? "شهر واحد (1 Month)" : "1 Month"}</option>
+                                            <option value="3">{isRtl ? "3 أشهر (3 Months)" : "3 Months"}</option>
+                                            <option value="6">{isRtl ? "6 أشهر (6 Months)" : "6 Months"}</option>
+                                            <option value="12">{isRtl ? "سنة كاملة (12 Months)" : "12 Months"}</option>
+                                            <option value="custom">{isRtl ? "فترة مخصصة (Custom Date)" : "Custom Date"}</option>
+                                          </select>
+                                        </div>
+
+                                        {/* Start Date */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "تاريخ البدء" : "Start Date"}</label>
+                                          <input
+                                            type="date"
+                                            value={editStartDate}
+                                            onChange={(e) => handleEditStartDateChange(e.target.value)}
+                                            className="w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg text-slate-255 outline-none text-xs font-mono text-right text-slate-100"
+                                          />
+                                        </div>
+
+                                        {/* End Date */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "تاريخ انتهاء الصلاحية" : "Expiry Date"}</label>
+                                          <input
+                                            type="date"
+                                            value={editEndDate}
+                                            disabled={editDuration !== "custom"}
+                                            onChange={(e) => setEditEndDate(e.target.value)}
+                                            className={`w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg outline-none text-xs font-mono text-right ${
+                                              editDuration === "custom" ? "text-slate-200 border-indigo-500" : "text-indigo-400 opacity-80 cursor-not-allowed"
+                                            }`}
+                                          />
+                                        </div>
+
+                                        {/* Seats Limit */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "الحد الأقصى للمقاعد" : "Seats Allocation Limit"}</label>
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            value={editSeatsLimit}
+                                            onChange={(e) => setEditSeatsLimit(parseInt(e.target.value) || 1)}
+                                            className="w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg text-slate-255 outline-none text-xs font-mono text-right text-slate-100"
+                                          />
+                                        </div>
+
+                                        {/* Payment Method description */}
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-bold text-slate-400">{isRtl ? "طريقة الدفع للمحاسب" : "Renewal Payment Mode"}</label>
+                                          <select
+                                            value={editPaymentNote}
+                                            onChange={(e) => setEditPaymentNote(e.target.value)}
+                                            className="w-full p-2 bg-[#09090b] border border-slate-800 rounded-lg text-slate-200 outline-none text-xs"
+                                          >
+                                            <option value="Cash">{isRtl ? "نقداً (Cash)" : "Cash"}</option>
+                                            <option value="Bank CCP">{isRtl ? "حوالة بريدية / CCP" : "Bank CCP / BaridiMob"}</option>
+                                            <option value="Credit Card">{isRtl ? "بطاقة دفع فيزا" : "Visa/Mastercard"}</option>
+                                            <option value="Cheque">{isRtl ? "صك مصرفي (Cheque)" : "Cheque"}</option>
+                                            <option value="Waived">{isRtl ? "إعفاء (Waived)" : "Waived"}</option>
+                                          </select>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        onClick={() => handleSaveSubscriptionAndRenew(c.id)}
+                                        className="w-full mt-2 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold transition-all shadow shadow-indigo-500/10 cursor-pointer flex items-center justify-center gap-1.5"
+                                      >
+                                        <span>💾</span>
+                                        <span>{isRtl ? "حفظ التعديلات وتجديد الحساب فورياً" : "Apply Parameter Changes & Renew"}</span>
+                                      </button>
+                                    </div>
+                                  </div>
 
                                 </div>
                               </td>

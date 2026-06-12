@@ -11,11 +11,13 @@ import {
   getSuppliers, saveSuppliers, getSupplierInvoices, saveSupplierInvoices,
   getWorkers, saveWorkers, getTrashItems, saveTrashItems, initializeDatabase,
   deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft, deleteEntireWorkerProfileSoft,
-  restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft
+  restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft,
+  getStockMovements, saveStockMovements
 } from "./storageUtils";
 import { 
   BusinessProfile, Order, Product, BasicInventoryItem, SubInventoryItem, 
-  ReturnInventoryItem, Supplier, SupplierInvoice, Worker, Expense, TrashItem 
+  ReturnInventoryItem, Supplier, SupplierInvoice, Worker, Expense, TrashItem,
+  StockMovement
 } from "./types";
 import { LanguageType, ThemeType, UserSession } from "./types";
 import Auth from "./components/Auth";
@@ -166,6 +168,28 @@ export default function App() {
           found.otpCode = "123456";
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
+
+        // Automated Check for Expired Subscriptions
+        if (found.expirationDate && found.accountStatus === "Active") {
+          const expTime = new Date(found.expirationDate).getTime();
+          if (expTime < Date.now()) {
+            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
+            found.accountStatus = "Suspended";
+            localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
+            
+            // Sync status to Supabase in background
+            if (supabase) {
+              supabase
+                .from("corevia_companies")
+                .update({ accountStatus: "Suspended" })
+                .eq("id", found.id)
+                .then(() => {
+                  console.log("[Auto-Billing] Safely updated company status on Supabase.");
+                });
+            }
+          }
+        }
+
         return found;
       }
       return null;
@@ -175,7 +199,7 @@ export default function App() {
   };
 
   const saasAccount = getSaaSAccountForSession();
-  const isReadOnly = saasAccount ? saasAccount.accountStatus === "Read Only" : false;
+  const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
   const isPendingVerification = saasAccount ? saasAccount.accountStatus === "Pending Verification" : false;
@@ -289,7 +313,7 @@ export default function App() {
         email: userMeta.email,
         isRegistered: true,
         isApproved: true,
-        isSuspended: false,
+        isSuspended: userMeta.role === "suspended" || userMeta.role === "Suspended",
         user_id: userMeta.userId,
         company_id: userMeta.companyId,
         role: userMeta.role
@@ -982,13 +1006,22 @@ export default function App() {
     saveOrders(audited);
 
     // Sync physical inventory immediately after order edits
-    setBasicInventory(getBasicInventory());
-    setSubInventory(getSubInventory());
-    setReturnInventory(getReturnInventory());
+    const basicLocal = getBasicInventory();
+    const subLocal = getSubInventory();
+    const returnLocal = getReturnInventory();
+    const movesLocal = getStockMovements();
+
+    setBasicInventory(basicLocal);
+    setSubInventory(subLocal);
+    setReturnInventory(returnLocal);
 
     // Auto synchronise order edits directly to the Supabase cloud partition
     if (session && session.company_id) {
       pushSingleDatasetToCloud(session.company_id, "orders", audited);
+      pushSingleDatasetToCloud(session.company_id, "inventory_basic", basicLocal);
+      pushSingleDatasetToCloud(session.company_id, "inventory_sub", subLocal);
+      pushSingleDatasetToCloud(session.company_id, "inventory_return", returnLocal);
+      pushSingleDatasetToCloud(session.company_id, "stock_movements", movesLocal);
     }
 
     // Instant Google Sheets Bidirectional Outbound Push
@@ -1712,8 +1745,8 @@ export default function App() {
     );
   }
 
-  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE
-  if (isSuspended) {
+  // GATE II: SUSPENDED/FROZEN TENANT BLOCKADE (Bypassed to allow logging in and reading tables in read-only mode, as requested by system guidelines)
+  if (false && isSuspended) {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_suspended">
@@ -1875,7 +1908,19 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"}`} id="applet_main_scaffold">
+    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended ? "pt-10" : ""}`} id="applet_main_scaffold">
+      
+      {/* SaaS Suspended warning banner */}
+      {isSuspended && (
+        <div className="fixed top-0 inset-x-0 h-10 bg-rose-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="suspension_danger_banner">
+          <AlertCircle className="w-4 h-4 text-white shrink-0 animate-pulse" />
+          <span>
+            {lang === "ar" 
+              ? "تنبيه: حساب مؤسستكم مجمد حالياً بسبب انتهاء صلاحية الاشتراك. لقد تم تحويل صلاحياتكم إلى وضع القراءة فقط. يرجى التواصل مع الدعم الفني لتجديد الاشتراك." 
+              : "Your company account is currently suspended. Please contact support for assistance (Read-Only Mode)."}
+          </span>
+        </div>
+      )}
       
       {/* SIDEBAR NAVIGATION DOCK */}
       <Sidebar
@@ -1932,9 +1977,33 @@ export default function App() {
             basicInventory={basicInventory}
             subInventory={subInventory}
             returnInventory={returnInventory}
-            onSaveBasic={(arr) => { setBasicInventory(arr); saveBasicInventory(arr); logInventoryAdjustment("Basic Stock"); }}
-            onSaveSub={(arr) => { setSubInventory(arr); saveSubInventory(arr); logInventoryAdjustment("Sub Stock"); }}
-            onSaveReturn={(arr) => { setReturnInventory(arr); saveReturnInventory(arr); logInventoryAdjustment("Returned Stock"); }}
+            onSaveBasic={(arr) => {
+              setBasicInventory(arr);
+              saveBasicInventory(arr);
+              logInventoryAdjustment("Basic Stock");
+              if (session?.company_id) {
+                pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
+                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+              }
+            }}
+            onSaveSub={(arr) => {
+              setSubInventory(arr);
+              saveSubInventory(arr);
+              logInventoryAdjustment("Sub Stock");
+              if (session?.company_id) {
+                pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
+                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+              }
+            }}
+            onSaveReturn={(arr) => {
+              setReturnInventory(arr);
+              saveReturnInventory(arr);
+              logInventoryAdjustment("Returned Stock");
+              if (session?.company_id) {
+                pushSingleDatasetToCloud(session.company_id, "inventory_return", arr);
+                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+              }
+            }}
             products={products}
             lang={lang}
             onSoftDeleteProduct={handleSoftDeleteProduct}
@@ -1954,9 +2023,21 @@ export default function App() {
             invoices={invoices}
             onSaveInvoices={saveInvoicesAndPersist}
             basicInventory={basicInventory}
-            onSaveBasic={(arr) => { setBasicInventory(arr); saveBasicInventory(arr); }}
+            onSaveBasic={(arr) => {
+              setBasicInventory(arr);
+              saveBasicInventory(arr);
+              if (session?.company_id) {
+                pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
+              }
+            }}
             subInventory={subInventory}
-            onSaveSub={(arr) => { setSubInventory(arr); saveSubInventory(arr); }}
+            onSaveSub={(arr) => {
+              setSubInventory(arr);
+              saveSubInventory(arr);
+              if (session?.company_id) {
+                pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
+              }
+            }}
             onSoftDeleteInvoice={handleSoftDeleteInvoice}
           />
         )}

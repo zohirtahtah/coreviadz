@@ -3,10 +3,13 @@ import {
   getOrders, saveOrders, getProducts, saveProducts, getSuppliers, saveSuppliers, 
   getWorkers, saveWorkers, getSalarySheets, saveSalarySheets, getFixedExpenses, 
   saveFixedExpenses, getVarExpenses, saveVarExpenses, getAdExpenses, saveAdExpenses,
-  getBusinessProfile, saveBusinessProfile, saveUserSession
+  getBusinessProfile, saveBusinessProfile, saveUserSession,
+  saveBasicInventory, saveSubInventory, saveReturnInventory, saveStockMovements,
+  getBasicInventory, getSubInventory, getReturnInventory, getStockMovements
 } from "./storageUtils";
 import { 
-  Order, Product, Supplier, Worker, WorkerSalarySheet, BusinessProfile, Expense 
+  Order, Product, Supplier, Worker, WorkerSalarySheet, BusinessProfile, Expense,
+  BasicInventoryItem, SubInventoryItem, ReturnInventoryItem, StockMovement
 } from "./types";
 
 export interface SaasUserMeta {
@@ -73,6 +76,56 @@ export async function fetchUserSaaSMeta(
           .update({ role: "super_admin" })
           .eq("user_id", userId);
       }
+
+      // Sync company's subscription plan, status, and seats limit directly from DB!
+      const compId = userMeta.company_id || defaultCompanyId;
+      try {
+        const { data: dbCompany } = await supabase
+          .from("corevia_companies")
+          .select("*")
+          .eq("id", compId)
+          .maybeSingle();
+
+        if (dbCompany) {
+          const stored = localStorage.getItem("corevia_saas_companies_v1");
+          let list: any[] = [];
+          try { if (stored) list = JSON.parse(stored); } catch (e) {}
+
+          const seatsLimitVal = dbCompany.seatsLimit !== undefined ? dbCompany.seatsLimit : (dbCompany.seatslimit !== undefined ? dbCompany.seatslimit : 5);
+          const accountStatusVal = dbCompany.accountStatus !== undefined ? dbCompany.accountStatus : (dbCompany.accountstatus !== undefined ? dbCompany.accountstatus : (userMeta.has_completed_onboarding ? "Active" : "Pending Verification"));
+          const subscriptionPlanVal = dbCompany.subscriptionPlan !== undefined ? dbCompany.subscriptionPlan : (dbCompany.subscriptionplan !== undefined ? dbCompany.subscriptionplan : "Basic");
+
+          const matchedIdx = list.findIndex(c => c.id === compId || c.email.toLowerCase() === cleanEmail);
+          const companyObj = {
+            id: compId,
+            companyName: dbCompany.name || `${fallbackName || cleanEmail.split("@")[0]} Trading`,
+            ownerName: dbCompany.owner_name || fallbackName,
+            email: cleanEmail,
+            phone: dbCompany.phone || "+213 550 00 00 00",
+            country: dbCompany.country || "Algeria",
+            registrationDate: dbCompany.created_at ? dbCompany.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
+            lastLogin: new Date().toISOString().replace("T", " ").substr(0, 16),
+            emailVerified: true,
+            subscriptionPlan: subscriptionPlanVal,
+            seatsLimit: seatsLimitVal,
+            seatsUsed: 1,
+            accountStatus: accountStatusVal,
+            expirationDate: "",
+            activeDevices: [],
+            otpCode: "123456"
+          };
+
+          if (matchedIdx > -1) {
+            list[matchedIdx] = { ...list[matchedIdx], ...companyObj };
+          } else {
+            list.push(companyObj);
+          }
+          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+        }
+      } catch (coErr) {
+        console.warn("Could not synchronize corevia_companies metadata upon session initialization:", coErr);
+      }
+
       return {
         userId: userMeta.user_id,
         companyId: userMeta.company_id || defaultCompanyId,
@@ -211,7 +264,7 @@ export async function saveOnboardingCompletionInCloud(
  */
 export async function pushSingleDatasetToCloud(
   companyId: string,
-  type: "products" | "orders" | "suppliers" | "expenses" | "workers" | "salary_sheets",
+  type: "products" | "orders" | "suppliers" | "expenses" | "workers" | "salary_sheets" | "inventory_basic" | "inventory_sub" | "inventory_return" | "stock_movements",
   rawItems: any[]
 ): Promise<void> {
   if (!supabase) return;
@@ -364,19 +417,76 @@ export async function pushSingleDatasetToCloud(
         updated_date: sh.updatedDate || null,
         updated_time: sh.updatedTime || null
       }));
-    }
-
-    // First, clear old records for this company of this table in background to handle deletions perfectly
-    const { error: deleteError } = await supabase.from(tableName).delete().eq("company_id", companyId);
-    if (deleteError) {
-      console.warn(`[AutoSync] Could not clear table "${tableName}" for sync:`, deleteError);
+    } else if (type === "inventory_basic") {
+      formattedItems = (rawItems as BasicInventoryItem[]).map(bi => ({
+        id: `${bi.productId}_${bi.color}`,
+        company_id: companyId,
+        product_id: bi.productId,
+        product_name: bi.productName,
+        color: bi.color,
+        quantity: bi.quantity,
+        updated_at: new Date().toISOString()
+      }));
+    } else if (type === "inventory_sub") {
+      formattedItems = (rawItems as SubInventoryItem[]).map(si => ({
+        id: `${si.productId}_${si.color}_${si.size}`,
+        company_id: companyId,
+        product_id: si.productId,
+        product_name: si.productName,
+        color: si.color,
+        size: si.size,
+        quantity: si.quantity,
+        updated_at: new Date().toISOString()
+      }));
+    } else if (type === "inventory_return") {
+      formattedItems = (rawItems as ReturnInventoryItem[]).map(ri => ({
+        id: `${ri.orderId}_${ri.productName}_${ri.color}_${ri.size}`,
+        company_id: companyId,
+        order_id: ri.orderId,
+        product_name: ri.productName,
+        color: ri.color,
+        size: ri.size,
+        quantity: ri.quantity,
+        updated_at: new Date().toISOString()
+      }));
+    } else if (type === "stock_movements") {
+      formattedItems = (rawItems as StockMovement[]).map(m => ({
+        id: m.id,
+        company_id: companyId,
+        date: m.date,
+        order_id: m.orderId,
+        product_name: m.productName,
+        color: m.color,
+        size: m.size,
+        quantity_change: m.quantityChange,
+        movement_type: m.movementType,
+        source: m.source
+      }));
     }
 
     if (formattedItems.length > 0) {
-      const { error: insertError } = await supabase.from(tableName).insert(formattedItems);
-      if (insertError) throw insertError;
+      // 1. Surgical upsert of all active records to ensure zero downtime or data loss
+      const { error: upsertError } = await supabase.from(tableName).upsert(formattedItems);
+      if (upsertError) throw upsertError;
+
+      // 2. Targeted pruning of orphans (records deleted locally but still lingering on remote db)
+      const activeIds = formattedItems.map(item => item.id);
+      const { error: pruneError } = await supabase
+        .from(tableName)
+        .delete()
+        .eq("company_id", companyId)
+        .not("id", "in", `(${activeIds.map(id => `"${id}"`).join(",")})`);
+
+      if (pruneError) {
+        console.warn(`[AutoSync] Orphan pruning warning for table "${tableName}":`, pruneError);
+      }
       console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items).`);
     } else {
+      // If there are exactly zero items locally, safely purge all records under this company ID
+      const { error: deleteError } = await supabase.from(tableName).delete().eq("company_id", companyId);
+      if (deleteError) {
+        console.warn(`[AutoSync] Could not purge empty table "${tableName}":`, deleteError);
+      }
       console.log(`Automatic background cloud sync success for table "${tableName}" (purged, 0 items left).`);
     }
   } catch (err) {
@@ -652,6 +762,82 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       saveSalarySheets(formatted);
     }
 
+    // 8. Fetch Basic Inventory
+    try {
+      const { data: dbInvBasic } = await supabase.from("corevia_inventory_basic").select("*").eq("company_id", companyId);
+      if (dbInvBasic) {
+        const formatted: BasicInventoryItem[] = dbInvBasic.map(bi => ({
+          productId: bi.product_id,
+          productName: bi.product_name,
+          color: bi.color || "",
+          quantity: safeNum(bi.quantity)
+        }));
+        saveBasicInventory(formatted);
+      }
+    } catch (e) {
+      console.warn("Could not sync corevia_inventory_basic remote database:", e);
+    }
+
+    // 9. Fetch Sub Inventory
+    try {
+      const { data: dbInvSub } = await supabase.from("corevia_inventory_sub").select("*").eq("company_id", companyId);
+      if (dbInvSub) {
+        const formatted: SubInventoryItem[] = dbInvSub.map(si => ({
+          productId: si.product_id,
+          productName: si.product_name,
+          color: si.color || "",
+          size: si.size || "",
+          quantity: safeNum(si.quantity)
+        }));
+        saveSubInventory(formatted);
+      }
+    } catch (e) {
+      console.warn("Could not sync corevia_inventory_sub remote database:", e);
+    }
+
+    // 10. Fetch Return Inventory
+    try {
+      const { data: dbInvReturn } = await supabase.from("corevia_inventory_return").select("*").eq("company_id", companyId);
+      if (dbInvReturn) {
+        const formatted: ReturnInventoryItem[] = dbInvReturn.map(ri => ({
+          orderId: ri.order_id,
+          productName: ri.product_name,
+          color: ri.color || "",
+          size: ri.size || "",
+          quantity: safeNum(ri.quantity)
+        }));
+        saveReturnInventory(formatted);
+      }
+    } catch (e) {
+      console.warn("Could not sync corevia_inventory_return remote database:", e);
+    }
+
+    // 11. Fetch Stock Movements
+    try {
+      const { data: dbMovements } = await supabase
+        .from("corevia_stock_movements")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("date", { ascending: false })
+        .limit(1000);
+      if (dbMovements) {
+        const formatted: StockMovement[] = dbMovements.map(m => ({
+          id: m.id,
+          date: m.date || new Date().toISOString(),
+          orderId: m.order_id || "",
+          productName: m.product_name || "",
+          color: m.color || "",
+          size: m.size || "",
+          quantityChange: safeNum(m.quantity_change),
+          movementType: (m.movement_type || "Manual Adjustment") as any,
+          source: m.source || "Database"
+        }));
+        saveStockMovements(formatted);
+      }
+    } catch (e) {
+      console.warn("Could not sync corevia_stock_movements remote database:", e);
+    }
+
     console.log("Full ERP sync pulled clean and isolated successfully from Supabase.");
     return true;
   } catch (err) {
@@ -678,6 +864,10 @@ export async function pushFullTenantData(companyId: string, email: string): Prom
   await pushSingleDatasetToCloud(companyId, "expenses", listExp);
   await pushSingleDatasetToCloud(companyId, "workers", getWorkers());
   await pushSingleDatasetToCloud(companyId, "salary_sheets", getSalarySheets());
+  await pushSingleDatasetToCloud(companyId, "inventory_basic", getBasicInventory());
+  await pushSingleDatasetToCloud(companyId, "inventory_sub", getSubInventory());
+  await pushSingleDatasetToCloud(companyId, "inventory_return", getReturnInventory());
+  await pushSingleDatasetToCloud(companyId, "stock_movements", getStockMovements());
 }
 
 /**
@@ -740,4 +930,73 @@ export async function cleanSlateResetSandbox(
   } catch (err) {
     console.error("Clean slate cloud tables deletion warning:", err);
   }
+}
+
+/**
+ * Calculates worker payroll strictly using database rpc if available,
+ * falling back to local exact formula with decimal rounding to 2 places.
+ */
+export async function calculateWorkerPayroll(params: {
+  baseSalary: number;
+  workingDaysCount: number;
+  absenceDaysCount: number;
+  overtimeHoursCount: number;
+  dailyWorkingHours: number;
+  overtimeMultiplier: number;
+  deductionsAmount: number;
+  bonusesAmount: number;
+}): Promise<{
+  daily_base_rate: number;
+  hourly_overtime_rate: number;
+  overtime_pay: number;
+  absence_deduction: number;
+  net_salary: number;
+}> {
+  // Try Postgres Database RPC Function
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.rpc("calculate_worker_payroll_v1", {
+        p_base_salary: params.baseSalary,
+        p_working_days_count: params.workingDaysCount,
+        p_absence_days_count: params.absenceDaysCount,
+        p_overtime_hours_count: params.overtimeHoursCount,
+        p_daily_working_hours: params.dailyWorkingHours,
+        p_overtime_multiplier: params.overtimeMultiplier,
+        p_deductions_amount: params.deductionsAmount,
+        p_bonuses_amount: params.bonusesAmount
+      });
+      if (!error && data) {
+        return {
+          daily_base_rate: Number(data.daily_base_rate),
+          hourly_overtime_rate: Number(data.hourly_overtime_rate),
+          overtime_pay: Number(data.overtime_pay),
+          absence_deduction: Number(data.absence_deduction),
+          net_salary: Number(data.net_salary)
+        };
+      }
+    } catch (e) {
+      console.warn("Database calculate_worker_payroll RPC failed, using secure frontend calculation fallback:", e);
+    }
+  }
+
+  // Fallback identical formula
+  const workingDays = params.workingDaysCount || 22;
+  const workingHours = params.dailyWorkingHours || 8;
+  const multiplier = params.overtimeMultiplier || 1.5;
+  
+  const daily_base_rate = Number((params.baseSalary / workingDays).toFixed(4));
+  const hourly_overtime_rate = Number(((params.baseSalary / (workingDays * workingHours)) * multiplier).toFixed(4));
+  
+  const overtime_pay = Number((params.overtimeHoursCount * hourly_overtime_rate).toFixed(2));
+  const absence_deduction = Number((params.absenceDaysCount * daily_base_rate).toFixed(2));
+  
+  const net_salary = Number((params.baseSalary + overtime_pay - absence_deduction - params.deductionsAmount + params.bonusesAmount).toFixed(2));
+
+  return {
+    daily_base_rate,
+    hourly_overtime_rate,
+    overtime_pay,
+    absence_deduction,
+    net_salary: Math.max(0, net_salary)
+  };
 }
