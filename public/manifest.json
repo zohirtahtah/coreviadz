@@ -1,9 +1,0 @@
-{
-  "name": "Corevia DZ",
-  "short_name": "Corevia",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
-  "description": "ERP & Employee Management System"
-}

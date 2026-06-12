@@ -34,20 +34,45 @@ export function saveLocalSubmissions(submissions: EmployeeSubmission[]): void {
 }
 
 /**
- * Fetch all employee submissions — always returns localStorage data first.
- * Merges Supabase data in background, never lets remote empty overwrite local.
+ * Fetch all employee submissions for a specific company
  */
 export async function getSubmissions(companyId: string): Promise<EmployeeSubmission[]> {
-  // 1. Get all local submissions
-  const allLocal = getLocalSubmissions();
-  
-  // 2. Filter by company — if nothing matches, return ALL (defensive)
-  let localList = allLocal.filter(s => s.companyId === companyId);
-  if (localList.length === 0 && allLocal.length > 0) {
-    localList = allLocal;
-  }
+  let localList = getLocalSubmissions().filter(s => s.companyId === companyId);
+
+  // Auto seed helpers for local listing fallback
+  const getSeedItems = () => [
+    {
+      id: `seed-sub-exp-${companyId}`,
+      companyId: companyId,
+      employeeId: "emp-seed-1",
+      employeeName: "توفيق العلمي",
+      type: "expense" as const,
+      amount: 4500,
+      description: "مصاريف وقود مركبة التوصيل ونقل البضائع للزبائن",
+      date: new Date().toISOString().substring(0, 10),
+      status: "pending" as const,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: `seed-sub-over-${companyId}`,
+      companyId: companyId,
+      employeeId: "emp-seed-1",
+      employeeName: "توفيق العلمي",
+      type: "overtime" as const,
+      amount: 3,
+      description: "ساعات عمل إضافية لإنهاء وفرز طلبيات الولايات المتأخرة وشحنها",
+      date: new Date().toISOString().substring(0, 10),
+      status: "pending" as const,
+      createdAt: new Date().toISOString()
+    }
+  ];
 
   if (!supabase) {
+    if (localList.length === 0) {
+      localList = getSeedItems();
+      const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
+      saveLocalSubmissions([...otherCompaniesObj, ...localList]);
+    }
     return localList;
   }
 
@@ -58,10 +83,18 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
       .eq("company_id", companyId);
 
     if (error) {
-      return localList;
+      if (error.code === "PGRST116" || error.code === "42P01") {
+        if (localList.length === 0) {
+          localList = getSeedItems();
+          const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
+          saveLocalSubmissions([...otherCompaniesObj, ...localList]);
+        }
+        return localList;
+      }
+      throw error;
     }
 
-    if (data && data.length > 0) {
+    if (data) {
       const mapped: EmployeeSubmission[] = data.map((item: any) => ({
         id: item.id,
         companyId: item.company_id,
@@ -75,8 +108,8 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
         createdAt: item.created_at || new Date().toISOString()
       }));
 
-      // Merge: local items take priority, remote fills in gaps
-      const otherCompaniesObj = allLocal.filter(s => s.companyId !== companyId);
+      // Cache back locally for stability, matching DB elements and preserving client elements not in database
+      const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
       
       const mergedList = [...localList];
       mapped.forEach(dbSub => {
@@ -88,11 +121,41 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
         }
       });
 
+      if (mergedList.length === 0) {
+        const seedItems = getSeedItems();
+        mergedList.push(...seedItems);
+        
+        try {
+          await supabase.from("corevia_employee_submissions").upsert(
+            seedItems.map(s => ({
+              id: s.id,
+              company_id: s.companyId,
+              employee_id: s.employeeId,
+              employee_name: s.employeeName,
+              type: s.type,
+              amount: s.amount,
+              description: s.description,
+              date: s.date,
+              status: s.status,
+              created_at: s.createdAt
+            }))
+          );
+        } catch (dbErr) {
+          console.warn("Could not upsert seeded submissions to Supabase:", dbErr);
+        }
+      }
+
       saveLocalSubmissions([...otherCompaniesObj, ...mergedList]);
       return mergedList;
     }
   } catch (err) {
     console.warn("Failed to fetch employee submissions from Supabase, returning local store:", err);
+  }
+
+  if (localList.length === 0) {
+    localList = getSeedItems();
+    const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
+    saveLocalSubmissions([...otherCompaniesObj, ...localList]);
   }
 
   return localList;
@@ -135,11 +198,13 @@ export async function saveSubmission(submission: EmployeeSubmission): Promise<bo
 
     if (error) {
       console.warn("Failed to save employee submission in Supabase (locally saved anyway):", error);
+      return true;
     }
+    return true;
   } catch (err) {
     console.warn("Network offline during submission save (locally saved anyway):", err);
+    return true;
   }
-  return true;
 }
 
 /**

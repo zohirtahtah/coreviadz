@@ -137,20 +137,14 @@ export default function App() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
-    // Read path for SPA routing (Vercel rewrites all paths to index.html)
     try {
-      const path = window.location.pathname.replace(/^\/|\/$/g, "");
-      const validTabs = [
-        "dashboard", "orders", "inventory", "products", "suppliers",
-        "workers", "expenses", "profit", "yearly", "trash",
-        "settings", "users-permissions", "activity-log",
-        "communication", "my-profile", "super-admin"
-      ];
-      if (path && validTabs.includes(path)) {
-        return path;
+      const path = window.location.pathname;
+      if (path === "/super-admin" || path.endsWith("/super-admin")) {
+        return "super-admin";
       }
-      // Legacy aliases
-      if (path === "purchases") return "suppliers";
+      if (path === "/purchases" || path.endsWith("/purchases")) {
+        return "suppliers";
+      }
     } catch (e) {}
     const saved = localStorage.getItem("corevia_active_tab_v1");
     return saved ? saved : "dashboard";
@@ -236,7 +230,12 @@ export default function App() {
     
     // Unified SPA routing history sync
     try {
-      const desiredPath = activeTab === "dashboard" ? "/" : `/${activeTab}`;
+      let desiredPath = "/";
+      if (activeTab === "super-admin") {
+        desiredPath = "/super-admin";
+      } else if (activeTab === "suppliers") {
+        desiredPath = "/purchases";
+      }
       if (window.location.pathname !== desiredPath) {
         window.history.pushState({}, "", desiredPath);
       }
@@ -445,38 +444,18 @@ export default function App() {
     }
   }, [session]);
 
-  // Automated safety check: If an employee is logged in, redirect them away from
-  // pages they don't have permission to access (admin-only pages or non-allowed pages).
-  const adminOnlyPages = ["settings", "users-permissions", "trash", "activity-log", "super-admin"];
+  // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
+  // automatically redirect them to the first allowed page in their list.
   useEffect(() => {
-    if (session?.role === "employee") {
-      if (adminOnlyPages.includes(activeTab)) {
-        const firstAllowed = session.allowedPages?.[0] || "dashboard";
-        setActiveTab(firstAllowed);
-      } else if (session.allowedPages && session.allowedPages.length > 0) {
-        if (!session.allowedPages.includes(activeTab)) {
-          const firstAllowed = session.allowedPages[0];
-          if (firstAllowed) setActiveTab(firstAllowed);
+    if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
+      if (!session.allowedPages.includes(activeTab)) {
+        const firstAllowed = session.allowedPages[0];
+        if (firstAllowed) {
+          setActiveTab(firstAllowed);
         }
       }
     }
   }, [session, activeTab]);
-
-  // Path-based routing for SPA navigation (e.g. /super-admin, /users-permissions)
-  // Vercel rewrites all paths to index.html, then we read the pathname here.
-  useEffect(() => {
-    const path = window.location.pathname.replace("/", "");
-    if (path) {
-      setActiveTab(path);
-    }
-  }, []);
-
-  useEffect(() => {
-    const path = window.location.pathname.replace("/", "");
-    if (activeTab !== path) {
-      window.history.replaceState(null, "", "/" + activeTab);
-    }
-  }, [activeTab]);
 
   // 3. Periodic cloud sync to keep both Admin & Employees 100% interconnected in real-time
   useEffect(() => {
@@ -757,6 +736,99 @@ export default function App() {
     setActiveTab("dashboard");
     triggerToast(lang === "ar" ? "تم تسجيل الخروج بنجاح." : "Logged out successfully.", "success");
   };
+
+  // Real-time Employee Session Verification and Sync
+  useEffect(() => {
+    if (!session || session.role !== "employee" || !supabase) return;
+
+    const verifyEmployeeStatus = async () => {
+      try {
+        const userIdVal = session.user_id || session.userId;
+        if (!userIdVal) return;
+
+        const { data, error } = await supabase
+          .from("corevia_company_users")
+          .select("*")
+          .eq("id", userIdVal)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (data) {
+          // If suspended, log them out immediately!
+          if (data.status === "Suspended") {
+            triggerToast(
+              lang === "ar" 
+                ? "🚫 تم تعليق حسابك من قِبل إدارة الشركة. تم تسجيل الخروج تلقائياً." 
+                : "🚫 Your employee account has been suspended by administration. Automatic log out applied.",
+              "info"
+            );
+            
+            // Simple direct logout sequence inside the hook scope
+            localStorage.removeItem("corevia_session_v1");
+            localStorage.removeItem("corevia_user_session_v1");
+            setSession(null);
+            setProfile(null);
+            setActiveTab("dashboard");
+            return;
+          }
+
+          // Update session if permissions, jobTitle, or status changed
+          const isReadOnlyMode = data.status === "Read Only";
+          let dbPages: string[] = [];
+          try {
+            dbPages = Array.isArray(data.allowed_pages) 
+              ? data.allowed_pages 
+              : JSON.parse(data.allowed_pages || "[]");
+          } catch(e) {}
+
+          const hasPagesChanged = JSON.stringify(dbPages) !== JSON.stringify(session.allowedPages || []);
+          const hasReadOnlyChanged = isReadOnlyMode !== session.isReadOnly;
+          const hasTitleChanged = data.job_title !== session.jobTitle;
+
+          if (hasPagesChanged || hasReadOnlyChanged || hasTitleChanged) {
+            const updatedSession = {
+              ...session,
+              allowedPages: dbPages,
+              jobTitle: data.job_title,
+              isReadOnly: isReadOnlyMode
+            };
+            saveUserSession(updatedSession);
+            setSession(updatedSession);
+            triggerToast(
+              lang === "ar" 
+                ? "⚡ تم تحديث هويتك وصلاحيات حسابك بنجاح من قِبل إدارة الشركة." 
+                : "⚡ Your digital role and page permissions have been updated by administration.",
+              "success"
+            );
+          }
+        } else {
+          // If employee record was deleted, log them out
+          triggerToast(
+            lang === "ar" 
+              ? "🚫 لم يعد حسابك مقيداً كعضو في الشركة. تم الخروج تلقائياً." 
+              : "🚫 This account is no longer registered. Automatic logout applied.",
+            "info"
+          );
+          
+          localStorage.removeItem("corevia_session_v1");
+          localStorage.removeItem("corevia_user_session_v1");
+          setSession(null);
+          setProfile(null);
+          setActiveTab("dashboard");
+        }
+      } catch (err) {
+        console.warn("Reactive employee session monitoring skipped or network offline:", err);
+      }
+    };
+
+    // Verify status immediately on mount/update
+    verifyEmployeeStatus();
+
+    // Check status periodically every 8 seconds
+    const interval = setInterval(verifyEmployeeStatus, 8000);
+    return () => clearInterval(interval);
+  }, [session, lang, supabase]);
 
   // Dynamic low stock alerts calculated live
   const dynamicAlerts = useMemo(() => {
@@ -1949,7 +2021,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "trash" && (session?.role === "admin" || session?.role === "super_admin") && (
+        {activeTab === "trash" && (
           <TrashView
             trashItems={trashItems}
             onRestoreItem={handleRestoreItem}
@@ -1958,7 +2030,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "settings" && (session?.role === "admin" || session?.role === "super_admin") && (
+        {activeTab === "settings" && (
           <SettingsView
             profile={profile}
             onSaveProfile={saveProfileAndPersist}
@@ -1972,7 +2044,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "users-permissions" && (session?.role === "admin" || session?.role === "super_admin") && (
+        {activeTab === "users-permissions" && (
           <UsersPermissionsView
             lang={lang}
             session={session}
@@ -1983,7 +2055,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "activity-log" && (session?.role === "admin" || session?.role === "super_admin") && (
+        {activeTab === "activity-log" && (
           <ActivityLogView
             lang={lang}
             session={session}
@@ -2003,11 +2075,10 @@ export default function App() {
           <MyProfileView
             session={session}
             lang={lang}
-            onTriggerNotification={triggerToast}
           />
         )}
 
-        {activeTab === "super-admin" && session?.role === "super_admin" && (
+        {activeTab === "super-admin" && (
           <SuperAdminView
             lang={lang}
             onTriggerNotification={triggerToast}

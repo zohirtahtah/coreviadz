@@ -105,10 +105,18 @@ export default function Auth({
           
           onTriggerNotification(
             isRtl 
-              ? "📋 تم تهيئة بيانات الموظف بنجاح، اضغط على تسجيل الدخول للبدء" 
-              : "📋 Employee credentials prefilled, click Login to proceed", 
+              ? "⚡ جاري جلب لوحة العمل وتسجيل الدخول التلقائي لحساب الموظف الرقمي..." 
+              : "⚡ Connecting to your digital employee account automatically...", 
             "success"
           );
+
+          // Auto-trigger submitting sequence
+          setTimeout(() => {
+            const btn = document.getElementById("auth-submit-btn");
+            if (btn) {
+              btn.click();
+            }
+          }, 350);
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
