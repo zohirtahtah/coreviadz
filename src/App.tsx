@@ -1791,7 +1791,7 @@ export default function App() {
         if (stored) {
           try {
             const list: SaaSCompany[] = JSON.parse(stored);
-            const idx = list.findIndex(c => c.id === saasAccount.id);
+            const idx = list.findIndex(c => c.email.toLowerCase() === saasAccount.email.toLowerCase());
             if (idx !== -1) {
               list[idx].accountStatus = "Active";
               list[idx].emailVerified = true;
