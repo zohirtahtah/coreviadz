@@ -164,13 +164,18 @@ export default function App() {
       const parsed: SaaSCompany[] = JSON.parse(stored);
       const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
       if (found) {
+        const otpFlagKey = "corevia_otp_verified_" + session.email.toLowerCase().replace(/[^a-z0-9]/g, "_");
+        if (localStorage.getItem(otpFlagKey) === "1") {
+          found.accountStatus = "Active";
+        }
+
         if (!found.otpCode || found.otpCode.trim() === "") {
           found.otpCode = "123456";
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
 
         // Automated Check for Expired Subscriptions
-        if (found.expirationDate && found.accountStatus === "Active") {
+        if (found.expirationDate && found.accountStatus === "Active" && localStorage.getItem(otpFlagKey) !== "1") {
           const expTime = new Date(found.expirationDate).getTime();
           if (expTime < Date.now()) {
             console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
@@ -1796,6 +1801,10 @@ export default function App() {
               list[idx].accountStatus = "Active";
               list[idx].emailVerified = true;
               localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+              
+              // Set persistent OTP verified flag to prevent reset by late Supabase sync
+              const flagKey = "corevia_otp_verified_" + saasAccount.email.toLowerCase().replace(/[^a-z0-9]/g, "_");
+              localStorage.setItem(flagKey, "1");
               
               // Log otp success activation
               const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
