@@ -8,7 +8,7 @@ import {
   Lock, Unlock, Mail, User, Eye, EyeOff, Globe, Sun, Moon, Check, 
   AlertCircle, ShieldAlert, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, KeyRound
 } from "lucide-react";
-import { LanguageType, ThemeType, UserSession } from "../types";
+import { LanguageType, ThemeType, UserSession, SaaSCompany } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
@@ -256,34 +256,33 @@ export default function Auth({
       // If we are online, query credentials from Supabase with separate direct lookups (prevents .or parsing/spaces/syntax syntax errors in old/new clients)
       if (!matchingEmployee && supabase) {
         try {
-          const searchVal = finalEmail;
+          const searchVal = finalEmail.trim();
           let dbEmps: any[] = [];
           
           if (searchVal) {
-            // Option A: Username lookup
-            const { data: userMatch } = await supabase
-              .from("corevia_company_users")
-              .select("*")
-              .eq("username", searchVal);
-            if (userMatch) dbEmps.push(...userMatch);
+            // Case-insensitive clean lookups + ilike operators
+            const [q1, q2, q3] = await Promise.all([
+              supabase.from("corevia_company_users").select("*").ilike("username", searchVal),
+              supabase.from("corevia_company_users").select("*").ilike("email", searchVal),
+              supabase.from("corevia_company_users").select("*").eq("phone", searchVal)
+            ]);
 
-            // Option B: Email lookup
-            const { data: emailMatch } = await supabase
-              .from("corevia_company_users")
-              .select("*")
-              .eq("email", searchVal);
-            if (emailMatch) dbEmps.push(...emailMatch);
+            if (q1.data) dbEmps.push(...q1.data);
+            if (q2.data) dbEmps.push(...q2.data);
+            if (q3.data) dbEmps.push(...q3.data);
 
-            // Option C: Phone lookup
-            const { data: phoneMatch } = await supabase
-              .from("corevia_company_users")
-              .select("*")
-              .eq("phone", searchVal);
-            if (phoneMatch) dbEmps.push(...phoneMatch);
+            // Lowercase exact fallback lookup
+            if (dbEmps.length === 0) {
+              const { data: lowerUserMatch } = await supabase
+                .from("corevia_company_users")
+                .select("*")
+                .eq("username", searchVal.toLowerCase());
+              if (lowerUserMatch) dbEmps.push(...lowerUserMatch);
+            }
           }
 
           if (dbEmps.length > 0) {
-            const dbMatch = dbEmps.find(e => e.password === finalPassword);
+            const dbMatch = dbEmps.find(e => e.password && e.password.trim() === finalPassword.trim());
             if (dbMatch) {
               matchingEmployee = {
                 id: dbMatch.id,
@@ -302,6 +301,20 @@ export default function Auth({
                 lastActivity: dbMatch.last_activity,
                 createdAt: dbMatch.created_at
               };
+
+              // Cache to local storage immediately so that session restores nicely!
+              try {
+                const currentLocal = getLocalEmployees();
+                const idx = currentLocal.findIndex(e => e.id === matchingEmployee.id);
+                if (idx !== -1) {
+                  currentLocal[idx] = matchingEmployee;
+                } else {
+                  currentLocal.push(matchingEmployee);
+                }
+                localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
+              } catch (storageErr) {
+                console.warn("[Employee caching failure]", storageErr);
+              }
             }
           }
         } catch (e) {
@@ -575,7 +588,7 @@ export default function Auth({
           registrationDate: new Date().toISOString().split("T")[0],
           lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
           emailVerified: false,
-          subscriptionPlan: "Trial",
+          subscriptionPlan: "Basic",
           seatsLimit: 5,
           seatsUsed: 1,
           accountStatus: "Pending Verification",

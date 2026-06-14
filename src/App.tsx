@@ -164,18 +164,13 @@ export default function App() {
       const parsed: SaaSCompany[] = JSON.parse(stored);
       const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
       if (found) {
-        const otpFlagKey = "corevia_otp_verified_" + session.email.toLowerCase().replace(/[^a-z0-9]/g, "_");
-        if (localStorage.getItem(otpFlagKey) === "1") {
-          found.accountStatus = "Active";
-        }
-
         if (!found.otpCode || found.otpCode.trim() === "") {
           found.otpCode = "123456";
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
 
         // Automated Check for Expired Subscriptions
-        if (found.expirationDate && found.accountStatus === "Active" && localStorage.getItem(otpFlagKey) !== "1") {
+        if (found.expirationDate && found.accountStatus === "Active") {
           const expTime = new Date(found.expirationDate).getTime();
           if (expTime < Date.now()) {
             console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
@@ -369,13 +364,25 @@ export default function App() {
   // 1. Core Supabase Session persistence and automatic session restoration
   useEffect(() => {
     if (supabase) {
+      // Check if local session is already an employee session
+      const cachedSess = getUserSession();
+      if (cachedSess && cachedSess.role === "employee") {
+        setSession(cachedSess);
+        return; // Bypass cloud session restoration to prevent admin session overwrite
+      }
+
       // Restore initial session in background safely
       supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+        const localSess = getUserSession();
+        if (localSess && localSess.role === "employee") {
+          setSession(localSess);
+          return;
+        }
+
         if (currentSession) {
           handleAuthSessionChange(currentSession);
         } else {
           // If no cloud session, check cached storage
-          const localSess = getUserSession();
           if (localSess && localSess.isRegistered && localSess.email) {
             setSession(localSess);
           }
@@ -384,6 +391,11 @@ export default function App() {
 
       // Standard RLS/Auth channel listening
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+        const localSess = getUserSession();
+        if (localSess && localSess.role === "employee") {
+          return; // Block overrides when employee is logged in
+        }
+
         if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
           if (currentSession) {
             await handleAuthSessionChange(currentSession);
@@ -473,12 +485,16 @@ export default function App() {
     }
   }, [session]);
 
-  // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages,
+  // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages (including implicit pages like profile or chat),
   // automatically redirect them to the first allowed page in their list.
   useEffect(() => {
-    if (session?.role === "employee" && session.allowedPages && session.allowedPages.length > 0) {
-      if (!session.allowedPages.includes(activeTab)) {
-        const firstAllowed = session.allowedPages[0];
+    if (session?.role === "employee") {
+      const implicitlyAllowed = ["my-profile", "communication"];
+      const dbAllowed = session.allowedPages || [];
+      const totalAllowed = [...implicitlyAllowed, ...dbAllowed];
+      
+      if (totalAllowed.length > 0 && !totalAllowed.includes(activeTab)) {
+        const firstAllowed = totalAllowed[0];
         if (firstAllowed) {
           setActiveTab(firstAllowed);
         }
@@ -1796,15 +1812,11 @@ export default function App() {
         if (stored) {
           try {
             const list: SaaSCompany[] = JSON.parse(stored);
-            const idx = list.findIndex(c => c.email.toLowerCase() === saasAccount.email.toLowerCase());
+            const idx = list.findIndex(c => c.id === saasAccount.id);
             if (idx !== -1) {
               list[idx].accountStatus = "Active";
               list[idx].emailVerified = true;
               localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-              
-              // Set persistent OTP verified flag to prevent reset by late Supabase sync
-              const flagKey = "corevia_otp_verified_" + saasAccount.email.toLowerCase().replace(/[^a-z0-9]/g, "_");
-              localStorage.setItem(flagKey, "1");
               
               // Log otp success activation
               const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");

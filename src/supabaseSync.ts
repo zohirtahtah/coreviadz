@@ -116,10 +116,7 @@ export async function fetchUserSaaSMeta(
           };
 
           if (matchedIdx > -1) {
-            const localActive = list[matchedIdx].accountStatus === "Active";
-            const merged = { ...list[matchedIdx], ...companyObj };
-            if (localActive) merged.accountStatus = "Active";
-            list[matchedIdx] = merged;
+            list[matchedIdx] = { ...list[matchedIdx], ...companyObj };
           } else {
             list.push(companyObj);
           }
