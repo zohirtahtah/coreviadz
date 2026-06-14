@@ -169,6 +169,21 @@ export default function App() {
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
 
+        // Auto-heal of account status to Active if user-onboarding is completed
+        const hasOnboarded = getBusinessProfile()?.businessName;
+        if (found.accountStatus === "Pending Verification" && hasOnboarded) {
+          found.accountStatus = "Active";
+          found.emailVerified = true;
+          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
+          if (supabase) {
+            supabase
+              .from("corevia_companies")
+              .update({ accountStatus: "Active" })
+              .eq("id", found.id)
+              .then(() => console.log("[Auto-Heal] Activated company on login."));
+          }
+        }
+
         // Automated Check for Expired Subscriptions
         if (found.expirationDate && found.accountStatus === "Active") {
           const expTime = new Date(found.expirationDate).getTime();
@@ -202,7 +217,9 @@ export default function App() {
   const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
-  const isPendingVerification = saasAccount ? saasAccount.accountStatus === "Pending Verification" : false;
+  const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
+    ? saasAccount.accountStatus === "Pending Verification" 
+    : false;
   const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
 
   // OTP Validation code entry state
