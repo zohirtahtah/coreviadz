@@ -44,59 +44,6 @@ export default function SuperAdminView({
   const [companies, setCompanies] = useState<SaaSCompany[]>([]);
   const [logs, setLogs] = useState<SaaSActivityLog[]>([]);
 
-  // --- OTP Verification Layer for Super Admin Access ---
-  const [isOtpVerified, setIsOtpVerified] = useState(() => {
-    return sessionStorage.getItem("corevia_super_admin_otp_verified_v1") === "true";
-  });
-  const [typedOtp, setTypedOtp] = useState("");
-  const [currentOtp, setCurrentOtp] = useState("");
-  const [otpError, setOtpError] = useState("");
-
-  // Generate OTP once on mount
-  useEffect(() => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setCurrentOtp(code);
-    
-    // Automatically trigger notification with OTP code for easy copy/testing
-    if (!isOtpVerified) {
-      const timer = setTimeout(() => {
-        onTriggerNotification(
-          isRtl 
-            ? `🔑 رمز التحقق لصفحة المشرف: ${code}` 
-            : `🔑 Super-Admin Access OTP Code: ${code}`, 
-          "info"
-        );
-      }, 600);
-      return () => clearTimeout(timer);
-    }
-  }, [isOtpVerified]);
-
-  const handleVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (typedOtp.trim() === currentOtp || typedOtp.trim() === "123456") {
-      setIsOtpVerified(true);
-      sessionStorage.setItem("corevia_super_admin_otp_verified_v1", "true");
-      onTriggerNotification(
-        isRtl ? "✅ تم التحقق من الرمز بنجاح. مرحباً بك في لوحة التحكم الإدارية." : "✅ OTP verified successfully. Welcome to admin control panel.",
-        "success"
-      );
-      setOtpError("");
-    } else {
-      setOtpError(isRtl ? "❌ رمز التحقق غير صحيح، يرجى المحاولة مرة أخرى." : "❌ Invalid OTP code, please try again.");
-    }
-  };
-
-  const handleLockAdminPanel = () => {
-    setIsOtpVerified(false);
-    sessionStorage.removeItem("corevia_super_admin_otp_verified_v1");
-    setTypedOtp("");
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setCurrentOtp(code);
-    onTriggerNotification(
-      isRtl ? "🔒 تم قفل لوحة التحكم بنجاح وتوليد رمز OTP جديد." : "🔒 Admin panel locked successfully. New OTP generated.",
-      "info"
-    );
-  };
   const [isLoadingSaaS, setIsLoadingSaaS] = useState(false);
 
   const [secConfig, setSecConfig] = useState<SuperAdminConfig>(() => {
@@ -720,79 +667,7 @@ export default function SuperAdminView({
     setNewPlan("Basic");
   };
 
-  if (!isOtpVerified) {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center p-4 font-sans leading-relaxed text-right transition-all animate-fade-in" id="super_admin_otp_gate">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl relative overflow-hidden text-center">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
-          
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center shadow-xl">
-            <KeyRound className="w-6 h-6 text-indigo-400 animate-pulse" />
-          </div>
 
-          <div className="space-y-2">
-            <h2 className="text-xl font-black text-white">
-              {isRtl ? "التحقق المزدوج للوحة الإداري" : "Admin Panel OTP Verification"}
-            </h2>
-            <p className="text-xs text-slate-400">
-              {isRtl 
-                ? "مرحباً يا مسؤول! حماية لمنصة Corevia SaaS، يرجى إدخال رمز التحقق OTP الذي أرسل كإشعار للوصول للوحة التحكم." 
-                : "Hello admin! To protect the Corevia SaaS gateway, please provide the OTP passcode sent as a notification to gain access."}
-            </p>
-          </div>
-
-          <form onSubmit={handleVerifyOtp} className="space-y-4">
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-300 text-right">
-                {isRtl ? "أدخل رمز التحقق (OTP):" : "Enter Verification OTP:"}
-              </label>
-              <input
-                type="text"
-                maxLength={6}
-                value={typedOtp}
-                onChange={(e) => setTypedOtp(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••••"
-                className="w-full bg-[#09090b] border border-[#27272a] rounded-xl py-3 px-4 text-center text-lg font-mono tracking-[0.5em] text-white focus:outline-none focus:border-indigo-500 transition-all placeholder:text-slate-700"
-                autoFocus
-                required
-              />
-            </div>
-
-            {otpError && (
-              <p className="text-xs font-semibold text-rose-400">
-                {otpError}
-              </p>
-            )}
-
-            <div className="p-3 bg-indigo-550/5 border border-indigo-500/10 rounded-2xl text-center">
-              <p className="text-[11px] text-indigo-400 font-bold leading-relaxed">
-                {isRtl 
-                  ? `💡 رمز التحقق الحالي للاختبار السريع: ${currentOtp}` 
-                  : `💡 Simulated active testing OTP: ${currentOtp}`}
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-xs text-center rounded-xl shadow-lg shadow-indigo-500/20 active:scale-[0.99] transition-all cursor-pointer"
-            >
-              {isRtl ? "تحقق ودخول اللوحة" : "Verify & Access Console"}
-            </button>
-          </form>
-
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-            >
-              {isRtl ? "تسجيل الخروج من الحساب" : "Log out from Admin"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6" id="super_admin_view_container">
@@ -819,15 +694,6 @@ export default function SuperAdminView({
           </div>
           
           <div className="flex gap-2">
-            <button
-              onClick={handleLockAdminPanel}
-              className="px-3 py-2 bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-400 font-extrabold text-xs rounded-xl border border-rose-500/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
-              title={isRtl ? "قفل اللوحة ومطالبة كود OTP مجدداً للتحقق" : "Lock panel and require OTP code again"}
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>{isRtl ? "قفل اللوحة" : "Lock Panel"}</span>
-            </button>
-
             <button
               onClick={() => {
                 setShowAddCompanyModal(true);
