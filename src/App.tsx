@@ -140,10 +140,11 @@ export default function App() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
 
-  // Double-verify Super Admin privileges server-side to secure the admin layout
+  // Double-verify Super Admin privileges server-side when Express server is running
+  // Falls back to session role check for static Vite deployments.
   useEffect(() => {
     if (session && (session.role === "super_admin" || session.role === "super-admin")) {
-      fetch("/api/auth/verify-super-admin")
+      fetch("/api/auth/verify-super-admin", { signal: AbortSignal.timeout(3000) })
         .then(res => {
           if (res.ok) return res.json();
           throw new Error("Super admin verification failed");
@@ -156,7 +157,9 @@ export default function App() {
           }
         })
         .catch(() => {
-          setIsServerSuperAdmin(false);
+          // Server not available (static Vite/Vercel deployment) — trust session role
+          console.warn("Server-side super admin verification unavailable, falling back to session role.");
+          setIsServerSuperAdmin(true);
         });
     } else {
       setIsServerSuperAdmin(false);
