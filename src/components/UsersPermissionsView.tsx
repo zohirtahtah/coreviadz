@@ -173,19 +173,26 @@ export default function UsersPermissionsView({
     setIsModalOpen(true);
   };
 
-  const handleCopyLink = (emp: Employee) => {
+  const handleCopyLink = async (emp: Employee) => {
     try {
-      // Prioritize using database-stored secure UUID invitation token
-      let url = "";
-      if (emp.invitation_token) {
-        url = `${window.location.origin}/?invite_token=${emp.invitation_token}`;
-      } else {
-        // Safe reversible Base64-sealed token fallback if offline or db delay
-        const loginKey = emp.email || emp.username || emp.phone || "";
-        const payload = JSON.stringify({ email: loginKey, password: emp.password || "" });
-        const base64Token = btoa(unescape(encodeURIComponent(payload)));
-        url = `${window.location.origin}/?invite_token=${base64Token}`;
+      let tokenToUse = emp.invitation_token;
+      let expiresToUse = emp.invitation_expires;
+
+      if (!tokenToUse) {
+        // Generate expiring (7 days) secure invitation link on the fly and sync
+        tokenToUse = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+        expiresToUse = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        
+        const updatedEmp = {
+          ...emp,
+          invitation_token: tokenToUse,
+          invitation_expires: expiresToUse,
+          invitation_used: false
+        };
+        await saveEmployee(updatedEmp);
       }
+
+      const url = `${window.location.origin}/?invite_token=${tokenToUse}`;
 
       navigator.clipboard.writeText(url);
       setCopiedId(emp.id);

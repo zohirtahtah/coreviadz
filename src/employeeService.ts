@@ -180,7 +180,8 @@ export async function deleteEmployee(employeeId: string, companyId: string): Pro
     const { error } = await supabase
       .from("corevia_company_users")
       .delete()
-      .eq("id", employeeId);
+      .eq("id", employeeId)
+      .eq("company_id", companyId);
 
     if (error) {
       console.warn("Could not delete employee on remote database table:", error);

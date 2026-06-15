@@ -31,6 +31,7 @@ interface SidebarProps {
   notifications: string[];
   clearNotifications: () => void;
   session?: any;
+  isServerSuperAdmin?: boolean | null;
 }
 
 export default function Sidebar({
@@ -49,7 +50,8 @@ export default function Sidebar({
   onLogout,
   notifications,
   clearNotifications,
-  session
+  session,
+  isServerSuperAdmin
 }: SidebarProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -135,28 +137,32 @@ export default function Sidebar({
 
   // Read local storage/prop to check for Super Admin session
   let isSuperAdmin = false;
-  const currentEmail = session?.email || "";
-  if (
-    session?.role === "super_admin" || 
-    currentEmail.toLowerCase().trim() === "coreviadz@gmail.com" || 
-    currentEmail.toLowerCase().trim() === "admin@corevia.com"
-  ) {
-    isSuperAdmin = true;
+  if (isServerSuperAdmin !== undefined && isServerSuperAdmin !== null) {
+    isSuperAdmin = isServerSuperAdmin === true;
   } else {
-    try {
-      const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
-      if (sessionStored) {
-        const parsed = JSON.parse(sessionStored);
-        if (
-          parsed.role === "super_admin" || 
-          parsed.email?.toLowerCase().trim() === "coreviadz@gmail.com" || 
-          parsed.email?.toLowerCase().trim() === "admin@corevia.com"
-        ) {
-          isSuperAdmin = true;
+    const currentEmail = session?.email || "";
+    if (
+      session?.role === "super_admin" || 
+      currentEmail.toLowerCase().trim() === "coreviadz@gmail.com" || 
+      currentEmail.toLowerCase().trim() === "admin@corevia.com"
+    ) {
+      isSuperAdmin = true;
+    } else {
+      try {
+        const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+        if (sessionStored) {
+          const parsed = JSON.parse(sessionStored);
+          if (
+            parsed.role === "super_admin" || 
+            parsed.email?.toLowerCase().trim() === "coreviadz@gmail.com" || 
+            parsed.email?.toLowerCase().trim() === "admin@corevia.com"
+          ) {
+            isSuperAdmin = true;
+          }
         }
+      } catch (e) {
+        console.warn("Sidebar parse session status:", e);
       }
-    } catch (e) {
-      console.warn("Sidebar parse session status:", e);
     }
   }
 

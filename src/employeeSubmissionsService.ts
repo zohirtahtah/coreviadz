@@ -222,7 +222,8 @@ export async function deleteSubmission(id: string, companyId: string): Promise<b
     const { error } = await supabase
       .from("corevia_employee_submissions")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("company_id", companyId);
 
     if (error) {
       console.warn("Failed to delete employee submission from Supabase:", error);

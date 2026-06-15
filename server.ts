@@ -67,6 +67,38 @@ function broadcastToTenant(tenantId: string, payload: any) {
 // AUTHENTICATION AND SECURITY API ENDPOINTS
 // -------------------------------------------------------------
 
+// -------------------------------------------------------------
+// AUTHENTICATION AND SECURITY API ENDPOINTS
+// -------------------------------------------------------------
+
+// Helper to look up a user by email, username, or phone case-insensitively
+async function lookupUser(identifier: string): Promise<any | null> {
+  const normCred = identifier.toLowerCase().trim();
+
+  // 1. Try corevia_saas_users first (admins / super admins)
+  const { data: saasUsers } = await supabase
+    .from("corevia_saas_users")
+    .select("*")
+    .or(`email.ilike.${normCred},username.ilike.${normCred}`);
+
+  if (saasUsers && saasUsers.length > 0) {
+    return { ...saasUsers[0], userType: "admin" };
+  }
+
+  // 2. Try corevia_company_users next (employees)
+  const { data: employees } = await supabase
+    .from("corevia_company_users")
+    .select("*")
+    .or(`username.ilike.${normCred},email.ilike.${normCred},phone.eq.${normCred}`)
+    .is("deleted_at", null);
+
+  if (employees && employees.length > 0) {
+    return { ...employees[0], userType: "employee" };
+  }
+
+  return null;
+}
+
 // POST /api/auth/login -> Handles Unified Email, Phone, and Username Credentials
 app.post("/api/auth/login", async (req, res) => {
   const { credential, password } = req.body;
@@ -79,34 +111,24 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   try {
-    const normCred = credential.toLowerCase().trim();
-    let targetEmail = normCred;
-    let resolvedRole = "admin";
-    let companyId = "";
-    let isReadOnly = false;
-    let isSuspended = false;
-    let employeeData: any = null;
+    const userMatched = await lookupUser(credential);
 
-    // A. Query corevia_company_users (employees) to resolve potential Phone or Username logins
-    const { data: employees, error: empErr } = await supabase
-      .from("corevia_company_users")
-      .select("*")
-      .or(`username.eq.${normCred},email.eq.${normCred},phone.eq.${normCred}`)
-      .is("deleted_at", null);
-
-    if (empErr) {
-      console.warn("[Auth API] Employees lookup warning:", empErr);
+    if (!userMatched) {
+      return res.status(401).json({
+        error_en: "User not found. Please verify your credentials or contact administrator.",
+        error_ar: "لم يتم العثور على حساب مطابق. يرجى التحقق من صحة البيانات أو مراجعة المشرف."
+      });
     }
 
-    if (employees && employees.length > 0) {
-      const dbEmp = employees[0];
-      employeeData = dbEmp;
-      targetEmail = dbEmp.email || `${dbEmp.username.toLowerCase()}@corevia.dz`;
-      resolvedRole = "employee";
-      companyId = dbEmp.company_id || "cop_default";
-      isReadOnly = dbEmp.status === "Read Only";
-      isSuspended = dbEmp.status === "Suspended";
+    let targetEmail = userMatched.email || `${userMatched.username.toLowerCase()}@corevia.dz`;
+    let resolvedRole = userMatched.role || userMatched.userType;
+    let companyId = userMatched.company_id || "cop_default";
+    let isReadOnly = false;
+    let isSuspended = false;
 
+    if (userMatched.userType === "employee") {
+      isReadOnly = userMatched.status === "Read Only";
+      isSuspended = userMatched.status === "Suspended";
       if (isSuspended) {
         return res.status(403).json({
           error_en: "This employee account is suspended.",
@@ -114,31 +136,21 @@ app.post("/api/auth/login", async (req, res) => {
         });
       }
     } else {
-      // B. Query corevia_saas_users (admins) to resolve matching company or check if admin account exists
-      const { data: saasUsers, error: saasUserErr } = await supabase
-        .from("corevia_saas_users")
-        .select("*")
-        .eq("email", normCred);
-
-      if (saasUsers && saasUsers.length > 0) {
-        const saasUser = saasUsers[0];
-        resolvedRole = saasUser.role || "admin";
-        companyId = saasUser.company_id || `cop_${saasUser.user_id.substring(0, 15)}`;
-      } else {
-        // Fallback default generated company ID for direct admin logins
-        companyId = `cop_admin_${normCred.replace(/[^a-z0-9]/g, "_")}`;
+      // For corevia_saas_users, resolve their default company ID
+      if (!companyId || companyId === "cop_default") {
+        companyId = `cop_${userMatched.user_id ? userMatched.user_id.substring(0, 15) : "admin"}`;
       }
     }
 
-    // C. Perform real password validation via Supabase Auth or direct DB password check for employees
+    // Perform real password validation via Supabase Auth or direct DB password check for employees
     let userId = "";
     let authValidated = false;
 
-    // Direct Match for employees using their DB-assigned credentials
-    if (employeeData && employeeData.password && String(employeeData.password).trim() === String(password).trim()) {
-      userId = employeeData.auth_user_id || employeeData.id || `emp_${employeeData.id}`;
+    // Direct Match for employees/admins using their DB-assigned credentials
+    if (userMatched.password && String(userMatched.password).trim() === String(password).trim()) {
+      userId = userMatched.auth_user_id || userMatched.id || userMatched.user_id || `emp_${userMatched.id}`;
       authValidated = true;
-      console.log(`[Auth API] Secure direct matches for employee ${employeeData.username || employeeData.full_name}. Bypassing Supabase Auth outer validation layer.`);
+      console.log(`[Auth API] Secure direct matches for ${userMatched.username || userMatched.full_name}. Bypassing Supabase Auth outer validation layer.`);
     }
 
     if (!authValidated) {
@@ -158,7 +170,7 @@ app.post("/api/auth/login", async (req, res) => {
       userId = authData.user.id;
     }
 
-    // D. Generate custom JWT token embedding user identity, role, and tenant isolation parameters
+    // Generate custom JWT token embedding user identity, role, and tenant isolation parameters
     const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration
     const token = jwt.sign(
       { 
@@ -172,28 +184,28 @@ app.post("/api/auth/login", async (req, res) => {
       JWT_SECRET
     );
 
-    // E. Set Cookie with strict secure flags
+    // Set Cookie with strict secure flags
     res.cookie("corevia_session_v1_cookie", token, {
       httpOnly: true,
-      secure: true, // Deploying onto strict HTTPS environments
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 Days
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      path: "/"
     });
 
     // Provide parsed ERP interactive session back to React UI
     const finalSession = {
-      username: employeeData ? employeeData.username : targetEmail.split("@")[0],
+      username: userMatched.username || userMatched.full_name || targetEmail.split("@")[0],
       email: targetEmail,
       isRegistered: true,
       isApproved: true,
-      isSuspended: false,
+      isSuspended: isSuspended,
       userId: userId,
       user_id: userId,
       company_id: companyId,
       role: resolvedRole,
-      allowedPages: employeeData ? (Array.isArray(employeeData.allowed_pages) ? employeeData.allowed_pages : JSON.parse(employeeData.allowed_pages || "[]")) : undefined,
-      jobTitle: employeeData ? employeeData.job_title : undefined,
+      allowedPages: userMatched.userType === "employee" ? (Array.isArray(userMatched.allowed_pages) ? userMatched.allowed_pages : JSON.parse(userMatched.allowed_pages || "[]")) : undefined,
+      jobTitle: userMatched.job_title || undefined,
       isReadOnly: isReadOnly
     };
 
@@ -209,6 +221,46 @@ app.post("/api/auth/login", async (req, res) => {
       error_en: "Internal validation server error: " + err.message,
       error_ar: "خطأ داخلي في نظام المصادقة: " + err.message
     });
+  }
+});
+
+// -------------------------------------------------------------
+// HELPER MIDDLEWARES FOR MULTI-TENANT RLS ENFORCEMENT
+// -------------------------------------------------------------
+const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.cookies.corevia_session_v1_cookie;
+  if (!token) {
+    return res.status(411).json({ error: "Missing required authorization cookie credentials." });
+  }
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // { user_id, tenant_id, role, is_read_only }
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Unauthorized session credentials." });
+  }
+};
+
+// GET /api/auth/verify-super-admin -> Server side gate for super admin validation
+app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {
+  try {
+    const isSuperRole = req.user!.role === "super_admin";
+    
+    // Cross check database corevia_saas_users table role
+    const { data: saasUser } = await supabase
+      .from("corevia_saas_users")
+      .select("role")
+      .eq("user_id", req.user!.user_id)
+      .maybeSingle();
+
+    if (!isSuperRole || !saasUser || saasUser.role !== "super_admin") {
+      return res.status(403).json({ isSuperAdmin: false, error: "Access Denied. Insufficient administrative privileges." });
+    }
+
+    return res.status(200).json({ isSuperAdmin: true });
+  } catch (err) {
+    return res.status(500).json({ isSuperAdmin: false, error: "Internal validation failure." });
   }
 });
 
@@ -242,7 +294,7 @@ app.get("/api/auth/session", async (req, res) => {
     const { data: employees } = await supabase
       .from("corevia_company_users")
       .select("*")
-      .eq("auth_user_id", decoded.user_id)
+      .or(`auth_user_id.eq.${decoded.user_id},id.eq.${decoded.user_id}`)
       .maybeSingle();
 
     const resolvedUsername = employees ? employees.username : (saasUsers ? saasUsers.username : "User");
@@ -270,21 +322,7 @@ app.get("/api/auth/session", async (req, res) => {
   }
 });
 
-// Helper Middlewares for Multi-Tenant RLS Enforcement
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const token = req.cookies.corevia_session_v1_cookie;
-  if (!token) {
-    return res.status(411).json({ error: "Missing required authorization cookie credentials." });
-  }
-
-  try {
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { user_id, tenant_id, role, is_read_only }
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Unauthorized session credentials." });
-  }
-};
+// Multi-Tenant RLS Enforcement Hooks are located above
 
 // Extends Request typing
 declare global {

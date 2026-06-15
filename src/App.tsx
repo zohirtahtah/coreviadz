@@ -138,6 +138,31 @@ export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
+  const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
+
+  // Double-verify Super Admin privileges server-side to secure the admin layout
+  useEffect(() => {
+    if (session && (session.role === "super_admin" || session.role === "super-admin")) {
+      fetch("/api/auth/verify-super-admin")
+        .then(res => {
+          if (res.ok) return res.json();
+          throw new Error("Super admin verification failed");
+        })
+        .then(data => {
+          if (data && data.isSuperAdmin) {
+            setIsServerSuperAdmin(true);
+          } else {
+            setIsServerSuperAdmin(false);
+          }
+        })
+        .catch(() => {
+          setIsServerSuperAdmin(false);
+        });
+    } else {
+      setIsServerSuperAdmin(false);
+    }
+  }, [session]);
+
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
       const path = window.location.pathname;
@@ -826,6 +851,7 @@ export default function App() {
           .from("corevia_company_users")
           .select("*")
           .eq("id", userIdVal)
+          .eq("company_id", session.company_id || "cop_default")
           .maybeSingle();
 
         if (error) throw error;
@@ -1991,6 +2017,7 @@ export default function App() {
         notifications={dynamicAlerts}
         clearNotifications={handleClearNotifications}
         session={session}
+        isServerSuperAdmin={isServerSuperAdmin}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}
@@ -2211,18 +2238,39 @@ export default function App() {
         )}
 
         {activeTab === "super-admin" && (
-          <SuperAdminView
-            lang={lang}
-            onTriggerNotification={triggerToast}
-            onLogout={handleLogout}
-            session={session}
-            profile={profile}
-            onCleanSlate={async () => {
-              if (session && session.user_id && session.company_id) {
-                await cleanSlateResetSandbox(session.user_id, session.company_id, session.email);
-              }
-            }}
-          />
+          isServerSuperAdmin === true ? (
+            <SuperAdminView
+              lang={lang}
+              onTriggerNotification={triggerToast}
+              onLogout={handleLogout}
+              session={session}
+              profile={profile}
+              onCleanSlate={async () => {
+                if (session && session.user_id && session.company_id) {
+                  await cleanSlateResetSandbox(session.user_id, session.company_id, session.email);
+                }
+              }}
+            />
+          ) : isServerSuperAdmin === false ? (
+            <div className="flex flex-col items-center justify-center p-12 bg-slate-900/50 border-2 border-red-500/20 rounded-2xl text-center max-w-xl mx-auto my-12" id="super_admin_unauthorized_state_banner">
+              <Shield className="w-16 h-16 text-red-500 mb-4 animate-pulse" />
+              <h2 className="text-xl font-bold text-slate-100 mb-2 font-sans">
+                {lang === "ar" ? "وصول غير مصرح به" : "Unauthorized Access"}
+              </h2>
+              <p className="text-sm text-slate-400 font-sans">
+                {lang === "ar" 
+                  ? "عذراً، هذا القسم يتطلب صلاحيات إدارية عليا تم التحقق منها من الخادم." 
+                  : "Sorry, this section requires verified super administrative permissions from the server."}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-12 bg-slate-900/50 border border-slate-800 rounded-2xl text-center max-w-xl mx-auto my-12" id="super_admin_loading_state_banner">
+              <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-sm text-slate-400 font-sans">
+                {lang === "ar" ? "جاري التحقق من صلاحيات الإدارة العليا..." : "Verifying super administrative status..."}
+              </p>
+            </div>
+          )
         )}
 
       </main>
