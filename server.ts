@@ -130,22 +130,33 @@ app.post("/api/auth/login", async (req, res) => {
       }
     }
 
-    // C. Perform real password validation via Supabase Auth
-    console.log(`[Auth API] Authenticating email: ${targetEmail} against Supabase...`);
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: targetEmail,
-      password: password
-    });
+    // C. Perform real password validation via Supabase Auth or direct DB password check for employees
+    let userId = "";
+    let authValidated = false;
 
-    if (authError || !authData.user) {
-      console.warn("[Auth API] Sign-in rejection:", authError);
-      return res.status(401).json({
-        error_en: "Sign-in failed. Please verify your credentials and try again.",
-        error_ar: "فشل تسجيل الدخول. يرجى التحقق من أوراق اعتمادك والمحاولة مرة أخرى."
-      });
+    // Direct Match for employees using their DB-assigned credentials
+    if (employeeData && employeeData.password && String(employeeData.password).trim() === String(password).trim()) {
+      userId = employeeData.auth_user_id || employeeData.id || `emp_${employeeData.id}`;
+      authValidated = true;
+      console.log(`[Auth API] Secure direct matches for employee ${employeeData.username || employeeData.full_name}. Bypassing Supabase Auth outer validation layer.`);
     }
 
-    const userId = authData.user.id;
+    if (!authValidated) {
+      console.log(`[Auth API] Authenticating email: ${targetEmail} against Supabase...`);
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: targetEmail,
+        password: password
+      });
+
+      if (authError || !authData.user) {
+        console.warn("[Auth API] Sign-in rejection:", authError);
+        return res.status(401).json({
+          error_en: "Sign-in failed. Please verify your credentials and try again.",
+          error_ar: "فشل تسجيل الدخول. يرجى التحقق من أوراق اعتمادك والمحاولة مرة أخرى."
+        });
+      }
+      userId = authData.user.id;
+    }
 
     // D. Generate custom JWT token embedding user identity, role, and tenant isolation parameters
     const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration

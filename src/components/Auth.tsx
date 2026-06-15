@@ -417,6 +417,55 @@ export default function Auth({
 
       } catch (err: any) {
         console.error("Auth login api error:", err);
+
+        // A. Check local backup employees lists for quick success robust fallback
+        try {
+          const cachedEmployees = getLocalEmployees();
+          const matchedEmployee = cachedEmployees.find(emp => {
+            const empNum = emp.phone ? emp.phone.replace(/[^0-9]/g, "") : "";
+            const inputNum = finalEmail.replace(/[^0-9]/g, "");
+            const isMatchEmail = emp.email && emp.email.toLowerCase().trim() === finalEmail.toLowerCase().trim();
+            const isMatchUsername = emp.username && emp.username.toLowerCase().trim() === finalEmail.toLowerCase().trim();
+            const isMatchPhone = empNum && inputNum && (empNum.length > 5 && inputNum.length > 5 && (empNum.includes(inputNum) || inputNum.includes(empNum)));
+            return (isMatchEmail || isMatchUsername || isMatchPhone) && String(emp.password).trim() === String(finalPassword).trim();
+          });
+
+          if (matchedEmployee) {
+            if (matchedEmployee.status === "Suspended") {
+              onTriggerNotification(isRtl ? "هذا الحساب معطل وموقوف حالياً" : "This account is suspended", "info");
+              setIsSubmitting(false);
+              return;
+            }
+
+            const employeeSession: UserSession = {
+              username: matchedEmployee.fullName,
+              email: matchedEmployee.email || `${matchedEmployee.username}@corevia.dz`,
+              isRegistered: true,
+              isApproved: true,
+              isSuspended: false,
+              userId: matchedEmployee.id,
+              user_id: matchedEmployee.id,
+              company_id: matchedEmployee.companyId,
+              role: "employee",
+              allowedPages: matchedEmployee.allowedPages,
+              jobTitle: matchedEmployee.jobTitle,
+              isReadOnly: matchedEmployee.status === "Read Only"
+            };
+
+            onAuthSuccess(employeeSession);
+            onTriggerNotification(
+              isRtl 
+                ? `تم تسجيل دخول الموظف ${matchedEmployee.fullName} بنجاح!` 
+                : `Logged in offline employee account ${matchedEmployee.fullName} successfully!`, 
+              "success"
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        } catch (localCheckErr) {
+          console.warn("[Auth Fallback Error]", localCheckErr);
+        }
+
         // Fallback to local simulation in case server is not fully up or offline
         if (!supabase || finalEmail.toLowerCase().trim() === "coreviadz@gmail.com") {
           const adminUserId = "usr_super_admin_coreviadz";
