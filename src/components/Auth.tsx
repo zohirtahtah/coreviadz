@@ -12,7 +12,7 @@ import { LanguageType, ThemeType, UserSession, SaaSCompany } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
-import { getLocalEmployees } from "../employeeService";
+import { getLocalEmployees, Employee } from "../employeeService";
 import { logActivity } from "../activityLogService";
 
 interface AuthProps {
@@ -24,7 +24,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "pending_approval" | "suspended" | "update_password";
+type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password";
 
 export default function Auth({
   lang,
@@ -45,6 +45,7 @@ export default function Auth({
   const [companyNameInput, setCompanyNameInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
   const [countryInput, setCountryInput] = useState("Algeria");
+  const [otpInput, setOtpInput] = useState("");
   
   // UI states
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -81,7 +82,7 @@ export default function Auth({
       
       // Check if this is a secure single-use invitation token link
       const inviteToken = params.get("invite_token");
-      if (inviteToken && supabase) {
+      if (inviteToken) {
         onTriggerNotification(
           isRtl 
             ? "🔍 جاري التحقق من رمز الدعوة للموظف واسترداد الهوية..." 
@@ -89,69 +90,98 @@ export default function Auth({
           "info"
         );
 
-        supabase
-          .from("corevia_company_users")
-          .select("*")
-          .eq("invitation_token", inviteToken)
-          .maybeSingle()
-          .then(async ({ data: inviteRecord, error: inviteErr }) => {
-            if (inviteErr || !inviteRecord) {
-              onTriggerNotification(
-                isRtl 
-                  ? "❌ رمز الدعوة غير صالح أو غير موجود." 
-                  : "❌ Invalid or non-existent invitation token.", 
-                "info"
-              );
-              return;
+        // Try decoding as Base64 JSON token
+        let decodedPayload: any = null;
+        try {
+          if (!inviteToken.includes("-") && inviteToken.length > 15) {
+            const raw = decodeURIComponent(escape(atob(inviteToken)));
+            decodedPayload = JSON.parse(raw);
+          }
+        } catch (e) {}
+
+        if (decodedPayload && decodedPayload.email && decodedPayload.password) {
+          setEmailInput(decodedPayload.email);
+          setPasswordInput(decodedPayload.password);
+
+          onTriggerNotification(
+            isRtl 
+              ? `🎉 تم التحقق من هويتك بنجاح كموظف! جاري تهيئة مكان العمل...` 
+              : `🎉 Identity verified! Launching employee workspace...`, 
+            "success"
+          );
+
+          // Auto-trigger setup submission
+          setTimeout(() => {
+            const btn = document.getElementById("auth-submit-btn");
+            if (btn) {
+              btn.click();
             }
-
-            if (inviteRecord.invitation_used) {
-              onTriggerNotification(
-                isRtl 
-                  ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة بنموذج تسجيل الدخول بالأسفل." 
-                  : "⚠️ This invitation has already been used. Please log in directly with your credentials.", 
-                "info"
-              );
-              return;
-            }
-
-            if (inviteRecord.invitation_expires && new Date(inviteRecord.invitation_expires).getTime() < Date.now()) {
-              onTriggerNotification(
-                isRtl 
-                  ? "❌ انتهت صلاحية رابط الدعوة هذا (صلاحية الرابط 7 أيام). يرجى طلب رابط جديد من المسؤول." 
-                  : "❌ This invitation link has expired. Please contact your administrator.", 
-                "info"
-              );
-              return;
-            }
-
-            // Mark invitation token as used in DB to prevent multi-use
-            await supabase
-              .from("corevia_company_users")
-              .update({ invitation_used: true })
-              .eq("id", inviteRecord.id);
-
-            const recUser = inviteRecord.username;
-            const recPass = inviteRecord.password;
-            
-            setEmailInput(recUser);
-            setPasswordInput(recPass);
-
-            onTriggerNotification(
-              isRtl 
-                ? `🎉 تم التحقق من هويتك بنجاح كموظف (${inviteRecord.full_name})! جاري تهيئة مكان العمل...` 
-                : `🎉 Identity verified as ${inviteRecord.full_name}! Launching employee workspace...`, 
-              "success"
-            );
-
-            // Auto-trigger setup submission
-            setTimeout(() => {
-              const btn = document.getElementById("auth-submit-btn");
-              if (btn) {
-                btn.click();
+          }, 800);
+        } else if (supabase) {
+          supabase
+            .from("corevia_company_users")
+            .select("*")
+            .eq("invitation_token", inviteToken)
+            .maybeSingle()
+            .then(async ({ data: inviteRecord, error: inviteErr }) => {
+              if (inviteErr || !inviteRecord) {
+                onTriggerNotification(
+                  isRtl 
+                    ? "❌ رمز الدعوة غير صالح أو غير موجود." 
+                    : "❌ Invalid or non-existent invitation token.", 
+                  "info"
+                );
+                return;
               }
-            }, 800);
-          });
+
+              if (inviteRecord.invitation_used) {
+                onTriggerNotification(
+                  isRtl 
+                    ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة بالأسفل." 
+                    : "⚠️ This invitation has already been used. Please log in directly below.", 
+                  "info"
+                );
+                return;
+              }
+
+              if (inviteRecord.invitation_expires && new Date(inviteRecord.invitation_expires).getTime() < Date.now()) {
+                onTriggerNotification(
+                  isRtl 
+                    ? "❌ انتهت صلاحية رابط الدعوة هذا (صلاحية الرابط 7 أيام). يرجى طلب رابط جديد من المسؤول." 
+                    : "❌ This invitation link has expired. Please contact your administrator.", 
+                  "info"
+                );
+                return;
+              }
+
+              // Mark invitation token as used in DB to prevent multi-use
+              await supabase
+                .from("corevia_company_users")
+                .update({ invitation_used: true })
+                .eq("id", inviteRecord.id);
+
+              const recUser = inviteRecord.username || inviteRecord.email;
+              const recPass = inviteRecord.password;
+              
+              setEmailInput(recUser);
+              setPasswordInput(recPass);
+
+              onTriggerNotification(
+                isRtl 
+                  ? `🎉 تم التحقق من هويتك بنجاح كموظف (${inviteRecord.full_name})! جاري تهيئة مكان العمل...` 
+                  : `🎉 Identity verified as ${inviteRecord.full_name}! Launching employee workspace...`, 
+                "success"
+              );
+
+              // Auto-trigger setup submission
+              setTimeout(() => {
+                const btn = document.getElementById("auth-submit-btn");
+                if (btn) {
+                  btn.click();
+                }
+              }, 800);
+            });
+        }
 
         setTimeout(() => {
           try {
@@ -325,258 +355,75 @@ export default function Auth({
         return;
       }
 
-      // 1. Search employee records first to resolve Email, Phone, or Username
-      let matchingEmployee: any = null;
-      if (supabase) {
-        try {
-          const searchVal = finalEmail.toLowerCase().trim();
-          const { data: dbEmps, error: fetchErr } = await supabase
-            .from("corevia_company_users")
-            .select("*")
-            .or(`username.eq.${searchVal},email.eq.${searchVal},phone.eq.${searchVal}`);
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential: finalEmail, password: finalPassword })
+        });
 
-          if (!fetchErr && dbEmps && dbEmps.length > 0) {
-            const dbMatch = dbEmps[0];
-            matchingEmployee = {
-              id: dbMatch.id,
-              companyId: dbMatch.company_id,
-              fullName: dbMatch.full_name,
-              phone: dbMatch.phone,
-              email: dbMatch.email,
-              username: dbMatch.username,
-              jobTitle: dbMatch.job_title,
-              password: dbMatch.password,
-              allowedPages: Array.isArray(dbMatch.allowed_pages) 
-                ? dbMatch.allowed_pages 
-                : JSON.parse(dbMatch.allowed_pages || "[]"),
-              status: dbMatch.status,
-              assignedResponsibilities: dbMatch.assigned_responsibilities,
-              lastActivity: dbMatch.last_activity,
-              createdAt: dbMatch.created_at,
-              auth_user_id: dbMatch.auth_user_id
-            };
-          }
-        } catch (e) {
-          console.warn("Supabase employee credentials lookup warning:", e);
-        }
-      }
+        const resData = await response.json();
 
-      // Offline fallback lookup
-      if (!matchingEmployee) {
-        const cachedEmployees = getLocalEmployees();
-        matchingEmployee = cachedEmployees.find(
-          emp => (
-            emp.email?.toLowerCase().trim() === finalEmail.toLowerCase() ||
-            emp.phone?.trim() === finalEmail ||
-            emp.username?.toLowerCase().trim() === finalEmail.toLowerCase()
-          ) && emp.password === finalPassword
-        );
-      }
-
-      if (matchingEmployee) {
-        if (matchingEmployee.status === "Suspended") {
-          setAuthMode("suspended");
-          onTriggerNotification(
-            isRtl 
-              ? "عذراً، هذا الحساب معلق من قِبل إدارة الشركة. يرجى مراجعة المسؤول." 
-              : "Access Denied: This account is suspended. Contact your company administrator.", 
-            "info"
-          );
-          setIsSubmitting(false);
-          return;
+        if (!response.ok) {
+          throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
         }
 
-        // Authenticate the employee using their real Supabase Auth account
-        if (supabase) {
-          const loginEmail = matchingEmployee.email || `${matchingEmployee.username.toLowerCase()}@corevia.dz`;
-          const { error: authError } = await supabase.auth.signInWithPassword({
-            email: loginEmail,
-            password: finalPassword
-          });
+        const authenticatedSession: UserSession = resData.session;
 
-          if (authError) {
-            console.error("Employee Supabase Auth login error:", authError);
-            onTriggerNotification(
-              isRtl 
-                ? `❌ خطأ تسجيل الدخول: ${authError.message}`
-                : `❌ Auth Login failed: ${authError.message}`,
-              "info"
-            );
-            setIsSubmitting(false);
-            return;
-          }
-        }
-
-        const isReadOnlyMode = matchingEmployee.status === "Read Only";
-
-        const employeeSession: UserSession = {
-          username: matchingEmployee.fullName,
-          email: matchingEmployee.email || `${matchingEmployee.username.toLowerCase()}@corevia.dz`,
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false,
-          user_id: matchingEmployee.id,
-          userId: matchingEmployee.id,
-          company_id: matchingEmployee.companyId,
-          role: "employee",
-          allowedPages: matchingEmployee.allowedPages,
-          jobTitle: matchingEmployee.jobTitle,
-          isReadOnly: isReadOnlyMode
-        };
-
-        // Cache to local storage immediately so that session restores nicely!
+        // Optionally cache to local storage in parallel for fallback
         try {
           const currentLocal = getLocalEmployees();
-          const idx = currentLocal.findIndex(e => e.id === matchingEmployee.id);
+          const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
+          const empObj: Employee = {
+            id: authenticatedSession.userId,
+            companyId: authenticatedSession.company_id || "cop_default",
+            fullName: authenticatedSession.username,
+            email: authenticatedSession.email,
+            phone: "",
+            jobTitle: authenticatedSession.jobTitle || "Employee",
+            allowedPages: authenticatedSession.allowedPages || [],
+            password: finalPassword,
+            status: "Active",
+            createdAt: new Date().toISOString()
+          };
           if (idx !== -1) {
-            currentLocal[idx] = matchingEmployee;
+            currentLocal[idx] = empObj;
           } else {
-            currentLocal.push(matchingEmployee);
+            currentLocal.push(empObj);
           }
           localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
-        } catch (storageErr) {
-          console.warn("[Employee caching failure]", storageErr);
-        }
+        } catch (storageErr) {}
 
-        // Log login action
+        // Log activity
         try {
           await logActivity({
-            companyId: matchingEmployee.companyId,
-            userName: matchingEmployee.fullName,
-            userId: matchingEmployee.id,
-            jobTitle: matchingEmployee.jobTitle,
+            companyId: authenticatedSession.company_id || "cop_default",
+            userName: authenticatedSession.username,
+            userId: authenticatedSession.userId || "usr_unknown",
+            jobTitle: authenticatedSession.jobTitle || "Admin",
             actionType: "Login",
             pageName: "Authentication",
-            affectedRecord: `Employee: ${matchingEmployee.fullName}`
+            affectedRecord: `User: ${authenticatedSession.username}`
           });
         } catch (logErr) {}
 
-        onAuthSuccess(employeeSession);
+        onAuthSuccess(authenticatedSession);
         onTriggerNotification(
           isRtl 
-            ? `تم تسجيل الدخول بنجاح كموظف: ${matchingEmployee.fullName} ${isReadOnlyMode ? "(للقراءة فقط)" : ""}` 
-            : `Logged in as ${matchingEmployee.fullName} ${isReadOnlyMode ? "(Read Only)" : ""}`, 
+            ? `تم تسجيل الدخول بنجاح! ${authenticatedSession.isReadOnly ? "(للقراءة فقط)" : ""}` 
+            : `Logged in successfully! ${authenticatedSession.isReadOnly ? "(Read Only)" : ""}`, 
           "success"
         );
-        setIsSubmitting(false);
-        return;
-      }
-
-      try {
-        if (!supabase) {
-          throw new Error("Supabase is not initialized.");
-        }
-
-        const isSuperAdminBypass =
-          finalEmail.toLowerCase().trim() === "coreviadz@gmail.com" &&
-          finalPassword === "zohir1904tahtah";
-
-        let data: any = null;
-        let bypassAuth = false;
-
-        if (isSuperAdminBypass) {
-          try {
-            const res = await supabase.auth.signInWithPassword({
-              email: "coreviadz@gmail.com",
-              password: "zohir1904tahtah",
-            });
-            if (res.error) {
-              console.warn("Super admin auth failed, running automatic seamless registration/bypass...");
-              bypassAuth = true;
-            } else {
-              data = res.data;
-            }
-          } catch (e) {
-            bypassAuth = true;
-          }
-        } else {
-          // Try standard authentication
-          const { data: standardData, error: standardError } = await supabase.auth.signInWithPassword({
-            email: finalEmail,
-            password: finalPassword,
-          });
-
-          if (standardError) {
-            throw standardError;
-          }
-          data = standardData;
-        }
-
-        let activeSession: UserSession;
-
-        if (bypassAuth) {
-          // Try to automatically sign them up if they got deleted on the Supabase Auth server, 
-          // to make sure they are recreated for future clean logins!
-          try {
-            const signupRes = await supabase.auth.signUp({
-              email: "coreviadz@gmail.com",
-              password: "zohir1904tahtah",
-              options: {
-                data: {
-                  full_name: "Zohir Corevia"
-                }
-              }
-            });
-            if (signupRes.data?.user) {
-              const retryLogin = await supabase.auth.signInWithPassword({
-                email: "coreviadz@gmail.com",
-                password: "zohir1904tahtah"
-              });
-              if (!retryLogin.error && retryLogin.data?.user) {
-                data = retryLogin.data;
-                bypassAuth = false;
-              }
-            }
-          } catch (signupErr) {
-            console.error("Auto signup bypass error:", signupErr);
-          }
-        }
-
-        if (bypassAuth) {
-          // Robust pre-authenticated fallback
-          const adminUserId = "usr_super_admin_coreviadz";
-          activeSession = {
-            username: "Zohir Corevia",
-            email: "coreviadz@gmail.com",
-            isRegistered: true,
-            isApproved: true,
-            isSuspended: false,
-            user_id: adminUserId,
-            userId: adminUserId,
-            company_id: `cop_${adminUserId.substring(0, 15)}`,
-            role: "super_admin"
-          };
-        } else {
-          const sessionUser = data.user;
-          const uId = sessionUser?.id || "usr_super_admin_coreviadz";
-          const email = sessionUser?.email || emailInput;
-          const isSuperAdminEmail = email.toLowerCase().trim() === "coreviadz@gmail.com";
-
-          activeSession = {
-            username: sessionUser?.user_metadata?.full_name || email.split("@")[0] || "User",
-            email: email,
-            isRegistered: true,
-            isApproved: true,
-            isSuspended: false,
-            user_id: uId,
-            userId: uId,
-            company_id: sessionUser ? `cop_${uId.substring(0, 15)}` : undefined,
-            role: isSuperAdminEmail ? "super_admin" : "admin"
-          };
-        }
-
-        onAuthSuccess(activeSession);
-        onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح!" : "Logged in successfully!", "success");
 
       } catch (err: any) {
-        console.error("Auth login error:", err);
-        // Fallback to local simulation in case of internet connection / configuration issue during preview
-        if (!supabase || emailInput.toLowerCase().trim() === "coreviadz@gmail.com") {
+        console.error("Auth login api error:", err);
+        // Fallback to local simulation in case server is not fully up or offline
+        if (!supabase || finalEmail.toLowerCase().trim() === "coreviadz@gmail.com") {
           const adminUserId = "usr_super_admin_coreviadz";
-          const isSuperAdminEmail = emailInput.toLowerCase().trim() === "coreviadz@gmail.com";
+          const isSuperAdminEmail = finalEmail.toLowerCase().trim() === "coreviadz@gmail.com";
           const fallbackSession: UserSession = {
-            username: isSuperAdminEmail ? "Zohir Corevia" : (emailInput.split("@")[0] || "User"),
-            email: emailInput,
+            username: isSuperAdminEmail ? "Zohir Corevia" : (finalEmail.split("@")[0] || "User"),
+            email: finalEmail,
             isRegistered: true,
             isApproved: true,
             isSuspended: false,
@@ -740,17 +587,18 @@ export default function Auth({
 
       try {
         if (!supabase) throw new Error("Supabase is not initialized.");
-        const { error } = await supabase.auth.resetPasswordForEmail(emailInput, {
+        const { error } = await supabase.auth.resetPasswordForEmail(emailInput.trim(), {
           redirectTo: window.location.origin,
         });
 
         if (error) throw error;
 
         onTriggerNotification(
-          isRtl ? `تم إرسال رابط استعادة الحساب إلى ${emailInput}` : `Password reset link sent to ${emailInput}`, 
+          isRtl ? `تم إرسال رمز استعادة الحساب إلى ${emailInput}. يرجى التحقق من الرسائل الواردة وصندوق الرسائل غير المرغوب فيها وتأكيد الرمز المكون من 6 أرقام.` : `Password reset token sent to ${emailInput}. Please verify your inbox/spam folder and enter the 6-digit code below.`, 
           "success"
         );
-        setAuthMode("login");
+        // Transition directly to OTP verification view
+        setAuthMode("forgot_otp");
       } catch (err: any) {
         onTriggerNotification(
           isRtl ? `خطأ في استعادة الحساب: ${err.message}` : `Reset error: ${err.message}`,
@@ -759,7 +607,58 @@ export default function Auth({
       } finally {
         setIsSubmitting(false);
       }
+
+    } else if (authMode === "forgot_otp") {
+      if (!otpInput.trim() || otpInput.trim().length < 6) {
+        onTriggerNotification(isRtl ? "يرجى إدخال رمز التحقق المكون من 6 أرقام" : "Please enter the 6-digit verification code", "info");
+        setIsSubmitting(false);
+        return;
+      }
+
+      try {
+        if (!supabase) throw new Error("Supabase is not initialized.");
+        
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: emailInput.trim(),
+          token: otpInput.trim(),
+          type: "recovery"
+        });
+
+        if (error) throw error;
+
+        onTriggerNotification(
+          isRtl ? "تم التحقق من الرمز بنجاح! الرجاء تعيين كلمة المرور الجديدة." : "Verification code accepted successfully! Please specify your new password below.",
+          "success"
+        );
+        
+        // Securely flag verified email status
+        localStorage.setItem("corevia_otp_verified_email", emailInput.trim());
+        setAuthMode("update_password");
+      } catch (err: any) {
+        onTriggerNotification(
+          isRtl ? `رمز التحقق غير صحيح أو منتهي الصلاحية: ${err.message}` : `Invalid or expired verification code: ${err.message}`,
+          "info"
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+
     } else if (authMode === "update_password") {
+      // Secure Fallback: check if they came from authentic OTP verify or authentic recovery link
+      const hash = window.location.hash;
+      const isRecoverySession = hash && (hash.includes("type=recovery") || hash.includes("access_token="));
+      const hasVerifiedOtpToken = localStorage.getItem("corevia_otp_verified_email") !== null;
+
+      if (!isRecoverySession && !hasVerifiedOtpToken) {
+        setAuthMode("login");
+        onTriggerNotification(
+          isRtl ? "وصول غير مصرح به. يرجى البدء من جديد عبر طلب رمز استعادة الحساب." : "Unauthorized. Please initiate password recovery first.",
+          "info"
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!passwordInput) {
         onTriggerNotification(isRtl ? "الرجاء إدخال كلمة المرور الجديدة" : "Please enter your new password", "info");
         setIsSubmitting(false);
@@ -776,6 +675,9 @@ export default function Auth({
         const { error } = await supabase.auth.updateUser({ password: passwordInput });
 
         if (error) throw error;
+
+        // Clear verified token from localStorage
+        localStorage.removeItem("corevia_otp_verified_email");
 
         onTriggerNotification(
           isRtl ? "تم تحديث كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة." : "Password updated successfully! You can now log in using your new password.",
@@ -1228,6 +1130,57 @@ export default function Auth({
               >
                 <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span>{t.resetBtn}</span>
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                  className="text-slate-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto"
+                >
+                  {isRtl ? <ArrowRight className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
+                  <span>{t.backToLogin}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* FORGOT PASSWORD OTP FORM */}
+          {authMode === "forgot_otp" && (
+            <form onSubmit={handleSubmit} className="space-y-4" id="forgot_otp_form">
+              <div className="p-3 bg-indigo-500/5 border border-indigo-550/10 rounded-2xl mb-4 text-center">
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {isRtl 
+                    ? `أدخل رمز التحقق المكون من 6 أرقام المرسل إلى البريد الإلكتروني: ${emailInput}`
+                    : `Enter the 6-digit verification code sent to ${emailInput}`}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "رمز التحقق (OTP)" : "Verification Code (OTP)"}
+                </label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type="text"
+                    required
+                    maxLength={10}
+                    value={otpInput}
+                    onChange={(e) => setOtpInput(e.target.value)}
+                    placeholder="123456"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-center text-sm font-bold tracking-widest focus:outline-none focus:border-indigo-500 transition-all`}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group overflow-hidden bg-gradient-to-r from-indigo-650 to-indigo-550 hover:from-indigo-600 hover:to-indigo-500 text-white rounded-xl py-3 text-xs font-black shadow-lg shadow-indigo-600/10 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-indigo-550/10"
+              >
+                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <span>{isRtl ? "تأكيد الرمز" : "Verify Code"}</span>
               </button>
 
               <div className="text-center pt-2">

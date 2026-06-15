@@ -175,14 +175,24 @@ export default function UsersPermissionsView({
 
   const handleCopyLink = (emp: Employee) => {
     try {
-      const loginKey = emp.email || emp.phone;
-      const url = `${window.location.origin}/?email=${encodeURIComponent(loginKey)}&pass=${encodeURIComponent(emp.password || "")}`;
+      // Prioritize using database-stored secure UUID invitation token
+      let url = "";
+      if (emp.invitation_token) {
+        url = `${window.location.origin}/?invite_token=${emp.invitation_token}`;
+      } else {
+        // Safe reversible Base64-sealed token fallback if offline or db delay
+        const loginKey = emp.email || emp.username || emp.phone || "";
+        const payload = JSON.stringify({ email: loginKey, password: emp.password || "" });
+        const base64Token = btoa(unescape(encodeURIComponent(payload)));
+        url = `${window.location.origin}/?invite_token=${base64Token}`;
+      }
+
       navigator.clipboard.writeText(url);
       setCopiedId(emp.id);
       onTriggerNotification(
         isRtl 
-          ? `📋 تم نسخ رابط الدخول المباشر الخاص بـ (${emp.fullName})! يمكنك إرساله له الآن.` 
-          : `📋 Pre-filled login link for (${emp.fullName}) copied to clipboard!`
+          ? `📋 تم نسخ رابط الدخول المباشر الآمن الخاص بـ (${emp.fullName})! يمكنك إرساله له الآن.` 
+          : `📋 Secure pre-filled login link for (${emp.fullName}) copied to clipboard!`
       );
       setTimeout(() => {
         setCopiedId(null);

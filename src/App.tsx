@@ -378,63 +378,32 @@ export default function App() {
     }
   };
 
-  // 1. Core Supabase Session persistence and automatic session restoration
+  // 1. Core Session persistence and automatic session restoration
   useEffect(() => {
-    if (supabase) {
-      // Check if local session is already an employee session
-      const cachedSess = getUserSession();
-      if (cachedSess && cachedSess.role === "employee") {
-        setSession(cachedSess);
-        return; // Bypass cloud session restoration to prevent admin session overwrite
-      }
-
-      // Restore initial session in background safely
-      supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-        const localSess = getUserSession();
-        if (localSess && localSess.role === "employee") {
-          setSession(localSess);
-          return;
+    // Attempt to restore server-side JWT cookie-based session first as single source of truth
+    fetch("/api/auth/session")
+      .then(res => {
+        if (res.ok) {
+          return res.json();
         }
-
-        if (currentSession) {
-          handleAuthSessionChange(currentSession);
+        throw new Error("No server session available");
+      })
+      .then(data => {
+        if (data.authenticated && data.session) {
+          console.log("🟩 Server session validated and restored successfully:", data.session);
+          setSession(data.session);
+          saveUserSession(data.session);
         } else {
-          // If no cloud session, check cached storage
-          if (localSess && localSess.isRegistered && localSess.email) {
-            setSession(localSess);
-          }
+          throw new Error("Unauthenticated server session");
+        }
+      })
+      .catch(err => {
+        console.warn("Server session validation offline - restoring from cache:", err);
+        const cachedSess = getUserSession();
+        if (cachedSess && cachedSess.isRegistered) {
+          setSession(cachedSess);
         }
       });
-
-      // Standard RLS/Auth channel listening
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-        const localSess = getUserSession();
-        if (localSess && localSess.role === "employee") {
-          return; // Block overrides when employee is logged in
-        }
-
-        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-          if (currentSession) {
-            await handleAuthSessionChange(currentSession);
-          }
-        } else if (event === "SIGNED_OUT") {
-          setSession(null);
-          setProfile(null);
-          localStorage.removeItem("corevia_session_v1");
-          localStorage.removeItem("corevia_user_session_v1");
-        }
-      });
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    } else {
-      // Local Sandbox Fallback
-      const localSess = getUserSession();
-      if (localSess && localSess.isRegistered) {
-        setSession(localSess);
-      }
-    }
   }, []);
 
   // Helper to load localized database and configuration records from local cache
@@ -500,6 +469,43 @@ export default function App() {
           setIsSyncingOnAuth(false);
         });
     }
+  }, [session]);
+
+  // 3. Dynamic Real-Time Sync via Server-Sent Events (SSE) stream
+  useEffect(() => {
+    if (!session?.company_id) return;
+
+    console.log("⚡ [Real-time Sync SSE] Initiating secure multi-tenant events listener...");
+    const eventSource = new EventSource("/api/sync/events");
+
+    eventSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "RELOAD_ERP_DATA") {
+          console.log(`⚡ [Real-time Sync SSE] Received live reload signal:`, payload);
+          // Only sync if the event is specifically for this tenant OR general broadcast
+          if (!payload.tenantId || payload.tenantId === session.company_id) {
+            pullMultiTenantData(session.company_id).then((success) => {
+              if (success) {
+                console.log("⚡ [Real-time Sync SSE] Successfully synced fresh tenant data.");
+                loadStateFromLocal();
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.error("error parsing sse broadcast event:", err);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.warn("Real-time SSE disconnected. Reconnection will be automatically orchestrated by the browser.", err);
+    };
+
+    return () => {
+      console.log("⚡ [Real-time Sync SSE] Cleaning up events listener.");
+      eventSource.close();
+    };
   }, [session]);
 
   // Automated safety check: If an employee is logged in, and their activeTab is NOT in their allowedPages (including implicit pages like profile or chat),
@@ -784,6 +790,14 @@ export default function App() {
         // ignore
       }
     }
+
+    // Clear session cookies securely on the backend server
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.warn("Could not contact server to clear auth cookies:", err);
+    }
+
     if (supabase) {
       try {
         await supabase.auth.signOut();
