@@ -4,12 +4,13 @@
  */
 
 import { useState, useMemo } from "react";
-import { Order, Product, LanguageType } from "../types";
+import { Order, Product, LanguageType, SaaSCompany } from "../types";
 import { translations } from "../translations";
 import { 
   TrendingUp, TrendingDown, Layers, ShoppingBag, 
   Package, CheckCircle2, History, AlertCircle,
-  Palette, Ruler, MapPin, Award
+  Palette, Ruler, MapPin, Award, CreditCard,
+  Users, Calendar, Clock
 } from "lucide-react";
 import { SmartCountryMap } from "./SmartCountryMap";
 
@@ -17,11 +18,20 @@ interface DashboardViewProps {
   orders: Order[];
   products: Product[];
   lang: LanguageType;
+  saasAccount?: SaaSCompany | null;
 }
 
-export default function DashboardView({ orders, products, lang }: DashboardViewProps) {
+export default function DashboardView({ orders, products, lang, saasAccount }: DashboardViewProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
+  const subDays = saasAccount?.expirationDate
+    ? Math.ceil((new Date(saasAccount.expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : 999;
+  const subColor = subDays <= 0 ? "text-red-400" : subDays <= 7 ? "text-red-400" : subDays <= 15 ? "text-orange-400" : subDays <= 30 ? "text-amber-400" : "text-emerald-400";
+  const subBg = subDays <= 0 ? "bg-red-500/10 border-red-500/20" : subDays <= 7 ? "bg-red-500/10 border-red-500/20" : subDays <= 15 ? "bg-orange-500/10 border-orange-500/20" : subDays <= 30 ? "bg-amber-500/10 border-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20";
+  const subProgress = saasAccount?.registrationDate && saasAccount?.expirationDate && subDays > 0
+    ? Math.min(100, Math.round((1 - subDays / 365) * 100))
+    : subDays <= 0 ? 100 : 0;
 
   // Dynamic system notifications calculated live from localStorage
   const notificationsList = useMemo(() => {
@@ -222,6 +232,58 @@ export default function DashboardView({ orders, products, lang }: DashboardViewP
           <p className="text-xs text-slate-400 mt-1">{t.appSubtitle}</p>
         </div>
       </div>
+
+      {/* Company Owner Subscription Widget */}
+      {saasAccount && (
+        <div className={`p-4 rounded-2xl ${subBg} backdrop-blur-md border ${subDays <= 0 ? "bg-red-500/15" : ""}`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <CreditCard className={`w-4 h-4 ${subColor}`} />
+              <span className="text-xs font-bold text-slate-300">
+                {lang === "ar" ? "حالة الاشتراك" : lang === "fr" ? "État de l'abonnement" : "Subscription Status"}
+              </span>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${subBg} ${subColor}`}>
+              {saasAccount.subscriptionPlan}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div>
+              <span className="text-slate-500">{lang === "ar" ? "المقاعد" : "Seats"}:</span>
+              <span className="text-slate-200 font-bold ml-1">{saasAccount.seatsUsed}/{saasAccount.seatsLimit}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">{lang === "ar" ? "المتبقي" : "Remaining"}:</span>
+              <span className={`font-bold ml-1 ${subColor}`}>
+                {subDays <= 0 ? (lang === "ar" ? "منتهي" : "Expired") : `${subDays} ${lang === "ar" ? "يوم" : "days"}`}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500">{lang === "ar" ? "تاريخ التجديد" : "Renewal"}:</span>
+              <span className="text-slate-200 font-bold ml-1">{saasAccount.expirationDate || "N/A"}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">{lang === "ar" ? "الحالة" : "Status"}:</span>
+              <span className={`font-bold ml-1 ${saasAccount.accountStatus === "Active" ? "text-emerald-400" : saasAccount.accountStatus === "Suspended" ? "text-amber-400" : "text-red-400"}`}>
+                {saasAccount.accountStatus}
+              </span>
+            </div>
+          </div>
+          {/* Progress bar */}
+          {subDays > 0 && (
+            <div className="mt-3">
+              <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                <span>{lang === "ar" ? "استخدام الاشتراك" : "Subscription Usage"}</span>
+                <span>{subProgress}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-[#1c1c1e] overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${subColor.replace("text-", "bg-")}`}
+                  style={{ width: `${subProgress}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* QUICK STATS CARDS GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard_state_badges">

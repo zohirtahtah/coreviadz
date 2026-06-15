@@ -6,10 +6,18 @@ import {
   BarChart3, ChevronRight, ChevronLeft, X, CheckCircle, Clock, Zap,
   CreditCard, DollarSign, Package, MessageSquare, HardDrive, TrendingUp,
   TrendingDown, MoreVertical, Edit3, Trash2, ArrowUpDown, Download,
-  Layers, Bell, BellOff, Settings, HelpCircle, ExternalLink
+  Layers, Bell, BellOff, Settings, HelpCircle, ExternalLink, Timer,
+  History, ArrowUp, ArrowDown, Target, Award
 } from "lucide-react";
-import { SaaSCompany, SaaSActivityLog, SuperAdminConfig, LanguageType, UserSession } from "../types";
+import { SaaSCompany, SaaSActivityLog, SuperAdminConfig, LanguageType, UserSession, SubscriptionHistoryRecord } from "../types";
 import { supabase } from "../supabaseClient";
+import {
+  getSubscription, upsertSubscription, updateSubscriptionSeats,
+  getSeatManagement, upsertSeatManagement, updateSeatsLimit,
+  getSubscriptionHistory, addSubscriptionHistory,
+  getNotificationsForCompany, createNotification,
+  getExpirationGroups, calcEndDate, daysRemaining, getDaysColor, PLAN_DETAILS
+} from "../subscriptionService";
 
 interface SuperAdminViewProps {
   lang: LanguageType;
@@ -20,14 +28,9 @@ interface SuperAdminViewProps {
   onCleanSlate: () => Promise<void>;
 }
 
-const PLANS: Record<string, { price: number; seats: number; color: string }> = {
-  Free: { price: 0, seats: 2, color: "bg-slate-600" },
-  Basic: { price: 29, seats: 5, color: "bg-blue-600" },
-  Pro: { price: 79, seats: 15, color: "bg-indigo-600" },
-  Enterprise: { price: 249, seats: 100, color: "bg-violet-600" }
-};
+const PLANS = PLAN_DETAILS;
 
-type SaView = "dashboard" | "companies" | "company-detail" | "activity" | "subscriptions";
+type SaView = "dashboard" | "companies" | "company-detail" | "activity" | "subscriptions" | "expiration-center";
 
 export default function SuperAdminView({
   lang, onTriggerNotification, onLogout, session, profile, onCleanSlate
@@ -60,11 +63,18 @@ export default function SuperAdminView({
   const [editEndDate, setEditEndDate] = useState("");
   const [editSeatsLimit, setEditSeatsLimit] = useState(5);
 
+  // Seat management states
+  const [seatLimitInput, setSeatLimitInput] = useState(5);
+  const [seatHistory, setSeatHistory] = useState<SubscriptionHistoryRecord[]>([]);
+  const [activeNotifs, setActiveNotifs] = useState<{ companyId: string; message: string; type: "yellow" | "orange" | "red" }[]>([]);
+
+  // Expiration center filter
+  const [expFilter, setExpFilter] = useState<string>("ALL");
+
   useEffect(() => {
     localStorage.setItem("corevia_saas_security_config_v1", JSON.stringify(secConfig));
   }, [secConfig]);
 
-  // Load data
   const loadData = async () => {
     if (!supabase) {
       const saved = localStorage.getItem("corevia_saas_companies_v1");
@@ -79,21 +89,23 @@ export default function SuperAdminView({
       const { data: regularCompanies } = await supabase.from("companies").select("*");
       const { data: realCompanies } = await supabase.from("corevia_companies").select("*");
       const { data: profiles } = await supabase.from("corevia_profile").select("*");
+      const { data: subscriptions } = await supabase.from("corevia_subscriptions").select("*");
 
       const saasCompanies: SaaSCompany[] = (users || []).map(u => {
         const comp = (regularCompanies || []).find(c => c.id === u.company_id);
         const prof = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id);
         const realC = (realCompanies || []).find(rc => rc.id === u.company_id);
+        const sub = (subscriptions || []).find((s: any) => s.company_id === u.company_id);
 
         const companyName = prof?.business_name || comp?.company_name || realC?.name || comp?.name || `${u.username || u.email.split("@")[0]} Trading`;
         const ownerName = u.username || prof?.owner_name || realC?.owner_name || comp?.owner_name || u.email.split("@")[0];
         const email = u.email;
         const phone = prof?.phone || realC?.phone || comp?.phone || "";
         const registrationDate = u.created_at ? u.created_at.split("T")[0] : new Date().toISOString().split("T")[0];
-        const seatsLimitVal = realC?.seatsLimit ?? realC?.seatslimit ?? 5;
+        const seatsLimitVal = sub?.seats_limit ?? realC?.seatsLimit ?? realC?.seatslimit ?? 5;
         const accountStatusVal = realC?.accountStatus ?? realC?.accountstatus ?? (u.has_completed_onboarding ? "Active" : "Pending Verification");
-        const subscriptionPlanVal = realC?.subscriptionPlan ?? realC?.subscriptionplan ?? "Basic";
-        let expirationDateVal = realC?.expirationDate || realC?.expiration_date || "";
+        const subscriptionPlanVal = sub?.plan_name ?? realC?.subscriptionPlan ?? realC?.subscriptionplan ?? "Basic";
+        let expirationDateVal = sub?.end_date ?? realC?.expirationDate ?? realC?.expiration_date ?? "";
         if (!expirationDateVal) {
           const regTime = new Date(registrationDate).getTime();
           expirationDateVal = subscriptionPlanVal === "Trial"
@@ -110,7 +122,7 @@ export default function SuperAdminView({
           emailVerified: accountStatusVal !== "Pending Verification",
           subscriptionPlan: subscriptionPlanVal as any,
           seatsLimit: seatsLimitVal,
-          seatsUsed: 1,
+          seatsUsed: sub?.seats_used ?? 1,
           accountStatus: accountStatusVal as any,
           expirationDate: expirationDateVal,
           activeDevices: [],
@@ -119,6 +131,27 @@ export default function SuperAdminView({
       });
 
       setCompanies(saasCompanies);
+
+      // Build notifications from expiration data
+      const notifs: { companyId: string; message: string; type: "yellow" | "orange" | "red" }[] = [];
+      saasCompanies.forEach(co => {
+        if (!co.expirationDate) return;
+        const d = daysRemaining(co.expirationDate);
+        if (d <= 0) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t("انتهى الاشتراك. يرجى التجديد.", "Subscription expired. Please renew.")}`, type: "red" });
+        } else if (d <= 1) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t("سينتهي اشتراكك غداً.", "Your subscription expires tomorrow.")}`, type: "red" });
+        } else if (d <= 3) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t(`سينتهي الاشتراك خلال ${d} أيام.`, `Subscription expires in ${d} days.`)}`, type: "orange" });
+        } else if (d <= 7) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t(`سينتهي الاشتراك خلال ${d} أيام.`, `Subscription expires in ${d} days.`)}`, type: "orange" });
+        } else if (d <= 15) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t(`سينتهي الاشتراك خلال ${d} يوماً.`, `Subscription expires in ${d} days.`)}`, type: "yellow" });
+        } else if (d <= 30) {
+          notifs.push({ companyId: co.id, message: `"${co.companyName}" — ${t(`سينتهي الاشتراك خلال ${d} يوماً.`, `Subscription expires in ${d} days.`)}`, type: "yellow" });
+        }
+      });
+      setActiveNotifs(notifs.slice(0, 50));
 
       const saasLogs: SaaSActivityLog[] = (users || []).map((u, i) => {
         const coName = u.username || u.email.split("@")[0];
@@ -145,11 +178,9 @@ export default function SuperAdminView({
 
   useEffect(() => { loadData(); }, []);
 
-  // Keep localStorage in sync
   useEffect(() => { localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(companies)); }, [companies]);
   useEffect(() => { localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logs)); }, [logs]);
 
-  // Persist to Supabase
   const persistToSupabase = async (companyId: string, updates: Record<string, any>) => {
     if (!supabase) return;
     try {
@@ -176,7 +207,6 @@ export default function SuperAdminView({
     }
   };
 
-  // Filtered companies
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
       const q = searchTerm.toLowerCase();
@@ -188,7 +218,6 @@ export default function SuperAdminView({
 
   const selectedCompany = useMemo(() => companies.find(c => c.id === selectedCompanyId), [selectedCompanyId, companies]);
 
-  // Statistics
   const stats = useMemo(() => {
     const total = companies.length;
     let active = 0, suspended = 0, trial = 0, expired = 0, pending = 0;
@@ -243,13 +272,16 @@ export default function SuperAdminView({
       setEditStartDate(selectedCompany.registrationDate || new Date().toISOString().split("T")[0]);
       setEditDuration("1");
       setEditSeatsLimit(selectedCompany.seatsLimit || 5);
+      setSeatLimitInput(selectedCompany.seatsLimit || 5);
       const start = selectedCompany.registrationDate ? new Date(selectedCompany.registrationDate) : new Date();
       const end = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000);
       setEditEndDate(selectedCompany.expirationDate || end.toISOString().split("T")[0]);
+      // Load history
+      getSubscriptionHistory(selectedCompany.id).then(h => setSeatHistory(h));
     }
   }, [selectedCompanyId, companies]);
 
-  const calcEndDate = (start: string, dur: string) => {
+  const calcEndDateLocal = (start: string, dur: string) => {
     if (dur === "custom") return;
     const s = start ? new Date(start) : new Date();
     const months = parseInt(dur) || 1;
@@ -267,23 +299,102 @@ export default function SuperAdminView({
       expirationDate: editEndDate, accountStatus: "Active"
     });
 
+    // Also write to corevia_subscriptions
+    await upsertSubscription({
+      company_id: selectedCompany.id,
+      plan_name: editPlan,
+      start_date: editStartDate,
+      duration_months: parseInt(editDuration) || 1,
+      end_date: editEndDate,
+      seats_limit: finalSeats,
+      seats_used: selectedCompany.seatsUsed || 1,
+      status: "Active"
+    });
+
+    // Record in history
+    await addSubscriptionHistory(
+      selectedCompany.id, parseInt(editDuration) || 1, editPlan,
+      finalSeats, PLANS[editPlan]?.price || 0, session?.email || "super-admin",
+      t("تجديد من لوحة الإدارة", "Renewed from admin panel")
+    );
+
+    // Update seat management
+    await updateSeatsLimit(selectedCompany.id, finalSeats, session?.email || "super-admin");
+
     setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? {
       ...c, subscriptionPlan: editPlan as any, seatsLimit: finalSeats,
       expirationDate: editEndDate, accountStatus: "Active"
     } : c));
+
+    // Refresh history
+    getSubscriptionHistory(selectedCompany.id).then(h => setSeatHistory(h));
 
     addLog(selectedCompany.companyName, selectedCompany.email, t("تجديد اشتراك", "Subscription Renewal"),
       t(`تم تجديد الاشتراك: ${editPlan}، ينتهي ${editEndDate}`, `Subscription renewed: ${editPlan}, expires ${editEndDate}`));
     onTriggerNotification(t("تم حفظ الاشتراك", "Subscription saved"), "success");
   };
 
-  const daysRemaining = (expDate: string) => {
-    if (!expDate) return 999;
-    return Math.ceil((new Date(expDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  // ========== SEAT MANAGEMENT ACTIONS ==========
+  const handleIncreaseSeats = async () => {
+    if (!selectedCompany) return;
+    const newLimit = selectedCompany.seatsLimit + 5;
+    setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? { ...c, seatsLimit: newLimit } : c));
+    await persistToSupabase(selectedCompany.id, { seatsLimit: newLimit });
+    await updateSubscriptionSeats(selectedCompany.id, newLimit);
+    await updateSeatsLimit(selectedCompany.id, newLimit, session?.email || "super-admin");
+    setSeatLimitInput(newLimit);
+    addLog(selectedCompany.companyName, selectedCompany.email, t("زيادة المقاعد", "Increase Seats"),
+      t(`تم زيادة المقاعد إلى ${newLimit}`, `Seats increased to ${newLimit}`));
+    onTriggerNotification(t(`تم زيادة المقاعد إلى ${newLimit}`, `Seats increased to ${newLimit}`), "success");
+  };
+
+  const handleDecreaseSeats = async () => {
+    if (!selectedCompany) return;
+    const newLimit = Math.max(1, selectedCompany.seatsLimit - 5);
+    setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? { ...c, seatsLimit: newLimit } : c));
+    await persistToSupabase(selectedCompany.id, { seatsLimit: newLimit });
+    await updateSubscriptionSeats(selectedCompany.id, newLimit);
+    await updateSeatsLimit(selectedCompany.id, newLimit, session?.email || "super-admin");
+    setSeatLimitInput(newLimit);
+    addLog(selectedCompany.companyName, selectedCompany.email, t("خفض المقاعد", "Decrease Seats"),
+      t(`تم خفض المقاعد إلى ${newLimit}`, `Seats decreased to ${newLimit}`));
+    onTriggerNotification(t(`تم خفض المقاعد إلى ${newLimit}`, `Seats decreased to ${newLimit}`), "success");
+  };
+
+  const handleCustomSeats = async () => {
+    if (!selectedCompany || seatLimitInput < 1) return;
+    setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? { ...c, seatsLimit: seatLimitInput } : c));
+    await persistToSupabase(selectedCompany.id, { seatsLimit: seatLimitInput });
+    await updateSubscriptionSeats(selectedCompany.id, seatLimitInput);
+    await updateSeatsLimit(selectedCompany.id, seatLimitInput, session?.email || "super-admin");
+    addLog(selectedCompany.companyName, selectedCompany.email, t("تعيين المقاعد", "Set Seats"),
+      t(`تم تعيين المقاعد إلى ${seatLimitInput}`, `Seats set to ${seatLimitInput}`));
+    onTriggerNotification(t(`تم تعيين المقاعد إلى ${seatLimitInput}`, `Seats set to ${seatLimitInput}`), "success");
   };
 
   // ========== RENDER ==========
   const btnClass = "px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer";
+
+  // Expiration groups
+  const expGroups = useMemo(() => {
+    const groups = [
+      { period: "30", label: t("30 يوم", "30 Days"), companies: [] as SaaSCompany[] },
+      { period: "15", label: t("15 يوم", "15 Days"), companies: [] as SaaSCompany[] },
+      { period: "7", label: t("7 أيام", "7 Days"), companies: [] as SaaSCompany[] },
+      { period: "3", label: t("3 أيام", "3 Days"), companies: [] as SaaSCompany[] },
+      { period: "expired", label: t("منتهية", "Expired"), companies: [] as SaaSCompany[] },
+    ];
+    companies.forEach(co => {
+      if (!co.expirationDate) return;
+      const d = daysRemaining(co.expirationDate);
+      if (d <= 0) groups[4].companies.push(co);
+      else if (d <= 3) groups[3].companies.push(co);
+      else if (d <= 7) groups[2].companies.push(co);
+      else if (d <= 15) groups[1].companies.push(co);
+      else if (d <= 30) groups[0].companies.push(co);
+    });
+    return groups;
+  }, [companies]);
 
   return (
     <div className={`min-h-screen bg-[#09090b] text-white ${isRtl ? "rtl" : "ltr"}`}>
@@ -306,17 +417,18 @@ export default function SuperAdminView({
 
       {/* NAV TABS */}
       <nav className="flex border-b border-[#27272a] px-4 gap-1 overflow-x-auto">
-        {(["dashboard", "companies", "activity", "subscriptions"] as SaView[]).map(v => (
+        {(["dashboard", "companies", "expiration-center", "activity", "subscriptions"] as SaView[]).map(v => (
           <button key={v} onClick={() => { setView(v); if (v !== "company-detail") setSelectedCompanyId(null); }}
             className={`px-4 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
               view === v ? "border-violet-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300"
             }`}>
             {v === "dashboard" && <BarChart3 className="w-3.5 h-3.5 inline mr-1.5" />}
             {v === "companies" && <Building2 className="w-3.5 h-3.5 inline mr-1.5" />}
+            {v === "expiration-center" && <Timer className="w-3.5 h-3.5 inline mr-1.5" />}
             {v === "activity" && <Activity className="w-3.5 h-3.5 inline mr-1.5" />}
             {v === "subscriptions" && <CreditCard className="w-3.5 h-3.5 inline mr-1.5" />}
-            {t({ dashboard: "الإحصائيات", companies: "الشركات", activity: "النشاطات", subscriptions: "الاشتراكات", "company-detail": "" }[v] || v,
-               { dashboard: "Dashboard", companies: "Companies", activity: "Activity", subscriptions: "Subscriptions", "company-detail": "" }[v] || v)}
+            {t({ dashboard: "الإحصائيات", companies: "الشركات", "expiration-center": "مركز الانتهاء", activity: "النشاطات", subscriptions: "الاشتراكات", "company-detail": "" }[v] || v,
+               { dashboard: "Dashboard", companies: "Companies", "expiration-center": "Expiration", activity: "Activity", subscriptions: "Subscriptions", "company-detail": "" }[v] || v)}
           </button>
         ))}
       </nav>
@@ -335,6 +447,30 @@ export default function SuperAdminView({
               <KpiCard icon={<Users className="w-5 h-5" />} label={t("المستخدمين", "Total Users")} value={stats.totalSeatsUsed} color="bg-blue-500/10 text-blue-400" />
               <KpiCard icon={<Layers className="w-5 h-5" />} label={t("المقاعد", "Seats")} value={`${stats.totalSeatsUsed}/${stats.totalSeatsLimit}`} color="bg-cyan-500/10 text-cyan-400" />
               <KpiCard icon={<Clock className="w-5 h-5" />} label={t("قيد الانتظار", "Pending")} value={stats.pending} color="bg-slate-500/10 text-slate-400" />
+            </div>
+
+            {/* Subscription Health Summary */}
+            <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
+              <h3 className="text-xs font-bold text-slate-400 mb-3">{t("حالة الاشتراكات", "Subscription Health")}</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {expGroups.map(g => (
+                  <div key={g.period} className={`p-3 rounded-lg border text-center ${
+                    g.period === "expired" ? "bg-red-500/10 border-red-500/20" :
+                    g.period === "3" ? "bg-red-500/10 border-red-500/20" :
+                    g.period === "7" ? "bg-orange-500/10 border-orange-500/20" :
+                    g.period === "15" ? "bg-amber-500/10 border-amber-500/20" :
+                    "bg-yellow-500/10 border-yellow-500/20"
+                  }`}>
+                    <div className={`text-lg font-black ${
+                      g.period === "expired" ? "text-red-400" :
+                      g.period === "3" ? "text-red-400" :
+                      g.period === "7" ? "text-orange-400" :
+                      g.period === "15" ? "text-amber-400" : "text-yellow-400"
+                    }`}>{g.companies.length}</div>
+                    <div className="text-[10px] text-slate-400">{g.label}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Status Distribution */}
@@ -372,17 +508,33 @@ export default function SuperAdminView({
                     className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold hover:bg-blue-500/20 transition-all">
                     <Building2 className="w-4 h-4 mx-auto mb-1" /> {t("إدارة الشركات", "Manage Companies")}
                   </button>
+                  <button onClick={() => setView("expiration-center")}
+                    className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all">
+                    <Timer className="w-4 h-4 mx-auto mb-1" /> {t("مركز الانتهاء", "Expiration Center")}
+                  </button>
                   <button onClick={() => setView("activity")}
                     className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all">
                     <Activity className="w-4 h-4 mx-auto mb-1" /> {t("سجل النشاطات", "Activity Log")}
                   </button>
-                  <button onClick={onCleanSlate}
-                    className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold hover:bg-red-500/20 transition-all">
-                    <Trash2 className="w-4 h-4 mx-auto mb-1" /> {t("مسح الكل", "Clean Slate")}
-                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Subscription Notification Banners */}
+            {activeNotifs.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-xs font-bold text-slate-400">{t("تنبيهات الاشتراك", "Subscription Alerts")}</h3>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {activeNotifs.map((n, i) => (
+                    <div key={i} className={`p-2 rounded-lg text-xs border ${
+                      n.type === "red" ? "bg-red-500/10 border-red-500/20 text-red-300" :
+                      n.type === "orange" ? "bg-orange-500/10 border-orange-500/20 text-orange-300" :
+                      "bg-yellow-500/10 border-yellow-500/20 text-yellow-300"
+                    }`}>{n.message}</div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Recent Activity */}
             <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
@@ -406,7 +558,6 @@ export default function SuperAdminView({
         {/* ==================== COMPANIES VIEW ==================== */}
         {view === "companies" && (
           <div className="space-y-4">
-            {/* Search & Filter */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -428,7 +579,6 @@ export default function SuperAdminView({
               </button>
             </div>
 
-            {/* Companies Table */}
             <div className="overflow-x-auto rounded-xl border border-[#27272a]">
               <table className="w-full text-xs">
                 <thead>
@@ -445,8 +595,7 @@ export default function SuperAdminView({
                 <tbody>
                   {filteredCompanies.map(co => {
                     const days = daysRemaining(co.expirationDate);
-                    const isExpired = days <= 0;
-                    const expiringSoon = days > 0 && days <= 7;
+                    const dc = getDaysColor(days);
                     return (
                       <tr key={co.id} className="border-b border-[#1c1c1e] hover:bg-[#121214] transition-colors">
                         <td className="p-3">
@@ -464,8 +613,8 @@ export default function SuperAdminView({
                           <StatusBadge status={co.accountStatus} />
                         </td>
                         <td className="p-3">
-                          <span className={`text-[11px] ${isExpired ? "text-red-400" : expiringSoon ? "text-amber-400" : "text-slate-400"}`}>
-                            {isExpired ? t("منتهي", "Expired") : `${days} ${t("يوم", "days")}`}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${dc.bg} ${dc.text}`}>
+                            {days <= 0 ? t("منتهي", "Expired") : `${days} ${t("يوم", "days")}`}
                           </span>
                         </td>
                         <td className="p-3">
@@ -493,6 +642,77 @@ export default function SuperAdminView({
           </div>
         )}
 
+        {/* ==================== EXPIRATION CENTER ==================== */}
+        {view === "expiration-center" && (
+          <div className="space-y-4">
+            <h2 className="text-sm font-bold">{t("مركز مراقبة الاشتراكات", "Subscription Monitoring Center")}</h2>
+
+            {/* Filter tabs */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "ALL", label: t("الكل", "All") },
+                { id: "30", label: t("30 يوم", "30 Days") },
+                { id: "15", label: t("15 يوم", "15 Days") },
+                { id: "7", label: t("7 أيام", "7 Days") },
+                { id: "3", label: t("3 أيام", "3 Days") },
+                { id: "expired", label: t("منتهية", "Expired") },
+              ].map(f => (
+                <button key={f.id} onClick={() => setExpFilter(f.id)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    expFilter === f.id ? "bg-violet-600 text-white" : "bg-[#121214] text-slate-400 hover:text-white border border-[#27272a]"
+                  }`}>{f.label}</button>
+              ))}
+            </div>
+
+            {/* Expiration groups */}
+            {expGroups.filter(g => expFilter === "ALL" || g.period === expFilter).map(g => (
+              <div key={g.period} className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-bold text-slate-400">{g.label} ({g.companies.length})</h3>
+                  <span className={`text-[10px] px-2 py-0.5 rounded ${
+                    g.period === "expired" ? "bg-red-500/10 text-red-400" :
+                    g.period === "3" ? "bg-red-500/10 text-red-400" :
+                    g.period === "7" ? "bg-orange-500/10 text-orange-400" :
+                    g.period === "15" ? "bg-amber-500/10 text-amber-400" : "bg-yellow-500/10 text-yellow-400"
+                  }`}>{g.label}</span>
+                </div>
+                <div className="space-y-1">
+                  {g.companies.sort((a, b) => daysRemaining(a.expirationDate) - daysRemaining(b.expirationDate)).slice(0, 50).map(co => {
+                    const d = daysRemaining(co.expirationDate);
+                    return (
+                      <div key={co.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1c1c1e] text-xs">
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => { setSelectedCompanyId(co.id); setView("company-detail"); }}
+                            className="text-violet-400 hover:text-violet-300 font-bold">{co.companyName}</button>
+                          <span className="text-slate-500">{co.email}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${PLANS[co.subscriptionPlan]?.color || "bg-slate-600"} text-white`}>{co.subscriptionPlan}</span>
+                          <StatusBadge status={co.accountStatus} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${d <= 0 ? "text-red-400" : d <= 3 ? "text-red-400" : d <= 7 ? "text-orange-400" : d <= 15 ? "text-amber-400" : "text-yellow-400"}`}>
+                            {d <= 0 ? t("منتهي", "Expired") : `${d} ${t("يوم", "days")}`}
+                          </span>
+                          <div className="flex gap-1">
+                            <button onClick={() => handleActivate(co)} className={`${btnClass} bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20`} title={t("تفعيل", "Activate")}>
+                              <CheckCircle className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => handleSuspend(co)} className={`${btnClass} bg-amber-500/10 text-amber-400 hover:bg-amber-500/20`} title={t("تعليق", "Suspend")}>
+                              <AlertTriangle className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {g.companies.length === 0 && (
+                    <p className="text-xs text-slate-500 text-center py-4">{t("لا توجد شركات في هذه الفئة", "No companies in this category")}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* ==================== COMPANY DETAIL VIEW ==================== */}
         {view === "company-detail" && selectedCompany && (
           <CompanyDetailView
@@ -504,16 +724,21 @@ export default function SuperAdminView({
             onSuspend={handleSuspend}
             onDisable={handleDisable}
             onReactivate={handleReactivate}
-            // Subscription editing
             editPlan={editPlan} setEditPlan={setEditPlan}
             editStartDate={editStartDate} setEditStartDate={setEditStartDate}
             editDuration={editDuration} setEditDuration={setEditDuration}
             editEndDate={editEndDate} setEditEndDate={setEditEndDate}
             editSeatsLimit={editSeatsLimit} setEditSeatsLimit={setEditSeatsLimit}
             onSaveSubscription={handleSaveSubscription}
-            onCalcEndDate={calcEndDate}
+            onCalcEndDate={calcEndDateLocal}
             daysRemaining={daysRemaining}
             onTriggerNotification={onTriggerNotification}
+            // Seats management
+            seatLimitInput={seatLimitInput} setSeatLimitInput={setSeatLimitInput}
+            onIncreaseSeats={handleIncreaseSeats}
+            onDecreaseSeats={handleDecreaseSeats}
+            onCustomSeats={handleCustomSeats}
+            seatHistory={seatHistory}
           />
         )}
 
@@ -571,7 +796,6 @@ export default function SuperAdminView({
               })}
             </div>
 
-            {/* Expiring Soon */}
             <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
               <h3 className="text-xs font-bold text-slate-400 mb-3">{t("اشتراكات على وشك الانتهاء", "Subscriptions Expiring Soon")}</h3>
               <div className="space-y-2">
@@ -580,14 +804,13 @@ export default function SuperAdminView({
                   return d > 0 && d <= 30;
                 }).sort((a, b) => daysRemaining(a.expirationDate) - daysRemaining(b.expirationDate)).slice(0, 20).map(co => {
                   const d = daysRemaining(co.expirationDate);
+                  const dc = getDaysColor(d);
                   return (
                     <div key={co.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1c1c1e] text-xs">
                       <div>
                         <span className="text-slate-200 font-bold">{co.companyName}</span>
                         <span className="text-slate-500 mx-2">—</span>
-                        <span className={d <= 3 ? "text-red-400" : d <= 7 ? "text-amber-400" : "text-slate-400"}>
-                          {d} {t("يوم متبقي", "days left")}
-                        </span>
+                        <span className={`${dc.text}`}>{dc.label}</span>
                       </div>
                       <span className="text-[10px] text-slate-500">{co.expirationDate}</span>
                     </div>
@@ -644,6 +867,11 @@ export default function SuperAdminView({
                   user_id: `usr-${Date.now()}`, company_id: newCo.id,
                   email: newCo.email, username: newCo.ownerName,
                   has_completed_onboarding: false, role: "admin"
+                }).then(() => {});
+                // Also create seat management record
+                supabase.from("corevia_company_seat_management").upsert({
+                  company_id: newCo.id, current_seats_limit: newCo.seatsLimit,
+                  used_seats: 1, available_seats: newCo.seatsLimit - 1
                 }).then(() => {});
               }
               setCompanies(prev => [newCo, ...prev]);
@@ -707,7 +935,9 @@ function CompanyDetailView({
   company, isRtl, t, onBack, onActivate, onSuspend, onDisable, onReactivate,
   editPlan, setEditPlan, editStartDate, setEditStartDate, editDuration, setEditDuration,
   editEndDate, setEditEndDate, editSeatsLimit, setEditSeatsLimit,
-  onSaveSubscription, onCalcEndDate, daysRemaining, onTriggerNotification
+  onSaveSubscription, onCalcEndDate, daysRemaining, onTriggerNotification,
+  seatLimitInput, setSeatLimitInput, onIncreaseSeats, onDecreaseSeats, onCustomSeats,
+  seatHistory
 }: {
   company: SaaSCompany; isRtl: boolean; t: (ar: string, en: string) => string;
   onBack: () => void; onActivate: (c: SaaSCompany) => void; onSuspend: (c: SaaSCompany) => void;
@@ -718,18 +948,27 @@ function CompanyDetailView({
   editSeatsLimit: number; setEditSeatsLimit: (v: number) => void;
   onSaveSubscription: () => Promise<void>; onCalcEndDate: (start: string, dur: string) => void;
   daysRemaining: (d: string) => number; onTriggerNotification: (msg: string, type: "success" | "info") => void;
+  seatLimitInput: number; setSeatLimitInput: (v: number) => void;
+  onIncreaseSeats: () => Promise<void>; onDecreaseSeats: () => Promise<void>; onCustomSeats: () => Promise<void>;
+  seatHistory: SubscriptionHistoryRecord[];
 }) {
   const days = daysRemaining(company.expirationDate);
-  const isExpired = days <= 0;
-  const expiringSoon = days > 0 && days <= 7;
+  const dc = getDaysColor(days);
+  const availableSeats = Math.max(0, company.seatsLimit - company.seatsUsed);
 
   return (
     <div className="space-y-4">
-      {/* Back button */}
       <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors">
         {isRtl ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         {t("العودة إلى القائمة", "Back to list")}
       </button>
+
+      {/* Expired Banner */}
+      {days <= 0 && (
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs font-bold">
+          {t("انتهى اشتراك هذه الشركة. يرجى تجديد الاشتراك لاستخدام Corevia.", "This company's subscription has expired. Please renew to continue using Corevia.")}
+        </div>
+      )}
 
       {/* Company Header */}
       <div className="flex items-start justify-between p-4 rounded-xl bg-[#121214] border border-[#27272a]">
@@ -770,6 +1009,7 @@ function CompanyDetailView({
           <div className="space-y-2 text-xs">
             <div className="flex justify-between"><span className="text-slate-500">{t("الباقة", "Plan")}:</span><StatusBadge status={company.subscriptionPlan} /></div>
             <div className="flex justify-between"><span className="text-slate-500">{t("المقاعد", "Seats")}:</span><span className="text-slate-200">{company.seatsUsed}/{company.seatsLimit}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">{t("المقاعد المتاحة", "Available")}:</span><span className="text-slate-200">{availableSeats}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">{t("الحالة", "Status")}:</span><StatusBadge status={company.accountStatus} /></div>
             <div className="flex justify-between">
               <span className="text-slate-500">{t("تاريخ البدء", "Start")}:</span>
@@ -777,16 +1017,27 @@ function CompanyDetailView({
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">{t("تاريخ الانتهاء", "Expires")}:</span>
-              <span className={`${isExpired ? "text-red-400" : expiringSoon ? "text-amber-400" : "text-slate-200"}`}>
-                {company.expirationDate || "N/A"}
-              </span>
+              <span className={dc.text}>{company.expirationDate || "N/A"}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">{t("الأيام المتبقية", "Days Left")}:</span>
-              <span className={`font-bold ${isExpired ? "text-red-400" : expiringSoon ? "text-amber-400" : "text-emerald-400"}`}>
-                {isExpired ? t("منتهي", "Expired") : `${days} ${t("يوم", "days")}`}
+              <span className={`font-bold ${dc.text}`}>
+                {days <= 0 ? t("منتهي", "Expired") : `${days} ${t("يوم", "days")}`}
               </span>
             </div>
+            {/* Progress bar for subscription */}
+            {company.registrationDate && company.expirationDate && days > 0 && (
+              <div className="pt-2">
+                <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                  <span>{t("استخدام الاشتراك", "Subscription Usage")}</span>
+                  <span>{Math.round((1 - days / 365) * 100)}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-[#1c1c1e] overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${dc.text.replace("text-", "bg-")}`}
+                    style={{ width: `${Math.min(100, Math.round((1 - days / 365) * 100))}%` }} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -847,10 +1098,156 @@ function CompanyDetailView({
           {t("حفظ الاشتراك", "Save Subscription")}
         </button>
       </div>
+
+      {/* Seats Management */}
+      <SeatsManagementSection
+        company={company}
+        t={t}
+        seatLimitInput={seatLimitInput}
+        setSeatLimitInput={setSeatLimitInput}
+        onIncreaseSeats={onIncreaseSeats}
+        onDecreaseSeats={onDecreaseSeats}
+        onCustomSeats={onCustomSeats}
+        availableSeats={availableSeats}
+        daysRemaining={daysRemaining}
+      />
+
+      {/* Renewal History */}
+      <RenewalHistorySection history={seatHistory} t={t} />
     </div>
   );
 }
 
-function t(ar: string, en: string) {
-  return document.documentElement.dir === "rtl" ? ar : en;
+function SeatsManagementSection({
+  company, t, seatLimitInput, setSeatLimitInput, onIncreaseSeats, onDecreaseSeats, onCustomSeats, availableSeats, daysRemaining
+}: {
+  company: SaaSCompany; t: (ar: string, en: string) => string;
+  seatLimitInput: number; setSeatLimitInput: (v: number) => void;
+  onIncreaseSeats: () => Promise<void>; onDecreaseSeats: () => Promise<void>; onCustomSeats: () => Promise<void>;
+  availableSeats: number; daysRemaining: (d: string) => number;
+}) {
+  const days = daysRemaining(company.expirationDate);
+  const isExpired = days <= 0;
+  const seatLimitReached = company.seatsUsed >= company.seatsLimit;
+
+  return (
+    <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
+      <h3 className="text-xs font-bold text-slate-400 mb-3 flex items-center gap-2">
+        <Target className="w-3.5 h-3.5" />
+        {t("إدارة المقاعد", "Seats Management")}
+      </h3>
+
+      {/* Seat limit warning */}
+      {seatLimitReached && (
+        <div className="p-3 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+          {t("لقد وصلت إلى الحد الأقصى للموظفين. يرجى ترقية الباقة أو الاتصال بالدعم.", "You have reached your employee limit. Please upgrade your subscription or contact support.")}
+        </div>
+      )}
+
+      {/* Seat stats */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="p-3 rounded-lg bg-[#09090b] border border-[#27272a] text-center">
+          <div className="text-[10px] text-slate-500">{t("حد المقاعد", "Seats Limit")}</div>
+          <div className="text-lg font-black text-white">{company.seatsLimit}</div>
+        </div>
+        <div className="p-3 rounded-lg bg-[#09090b] border border-[#27272a] text-center">
+          <div className="text-[10px] text-slate-500">{t("المستخدم", "Used")}</div>
+          <div className="text-lg font-black text-violet-400">{company.seatsUsed}</div>
+        </div>
+        <div className="p-3 rounded-lg bg-[#09090b] border border-[#27272a] text-center">
+          <div className="text-[10px] text-slate-500">{t("المتاح", "Available")}</div>
+          <div className={`text-lg font-black ${availableSeats <= 0 ? "text-red-400" : "text-emerald-400"}`}>{availableSeats}</div>
+        </div>
+      </div>
+
+      {/* Seat progress bar */}
+      <div className="mb-4">
+        <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+          <span>{t("استخدام المقاعد", "Seat Usage")}</span>
+          <span>{Math.round((company.seatsUsed / Math.max(1, company.seatsLimit)) * 100)}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-[#1c1c1e] overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${
+            (company.seatsUsed / Math.max(1, company.seatsLimit)) >= 0.9 ? "bg-red-500" :
+            (company.seatsUsed / Math.max(1, company.seatsLimit)) >= 0.7 ? "bg-amber-500" : "bg-emerald-500"
+          }`} style={{ width: `${Math.min(100, (company.seatsUsed / Math.max(1, company.seatsLimit)) * 100)}%` }} />
+        </div>
+      </div>
+
+      {isExpired ? (
+        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs text-center">
+          {t("انتهى الاشتراك. لا يمكن تعديل المقاعد حتى يتم التجديد.", "Subscription expired. Cannot modify seats until renewal.")}
+        </div>
+      ) : (
+        <>
+          {/* Controls */}
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <button onClick={onIncreaseSeats}
+              className="flex items-center justify-center gap-1 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all">
+              <ArrowUp className="w-3 h-3" /> +5
+            </button>
+            <button onClick={onDecreaseSeats}
+              className="flex items-center justify-center gap-1 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 text-xs font-bold transition-all">
+              <ArrowDown className="w-3 h-3" /> -5
+            </button>
+            <button onClick={onCustomSeats}
+              className="flex items-center justify-center gap-1 p-2 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400 hover:bg-violet-500/20 text-xs font-bold transition-all">
+              <Target className="w-3 h-3" /> {t("تعيين", "Set")}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="number" min={1} value={seatLimitInput}
+              onChange={e => setSeatLimitInput(Math.max(1, parseInt(e.target.value) || 1))}
+              className="w-24 bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-xs text-center" />
+            <button onClick={onCustomSeats}
+              className="px-3 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-bold transition-all">
+              {t("تطبيق العدد المخصص", "Set Custom Number")}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
+
+function RenewalHistorySection({ history, t }: { history: SubscriptionHistoryRecord[]; t: (ar: string, en: string) => string }) {
+  if (history.length === 0) return null;
+  return (
+    <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
+      <h3 className="text-xs font-bold text-slate-400 mb-3 flex items-center gap-2">
+        <History className="w-3.5 h-3.5" />
+        {t("سجل التجديد", "Renewal History")}
+      </h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="border-b border-[#27272a]">
+              <th className="p-2 text-slate-500 text-left">{t("التاريخ", "Date")}</th>
+              <th className="p-2 text-slate-500 text-left">{t("المدة", "Duration")}</th>
+              <th className="p-2 text-slate-500 text-left">{t("الباقة", "Plan")}</th>
+              <th className="p-2 text-slate-500 text-left">{t("المقاعد", "Seats")}</th>
+              <th className="p-2 text-slate-500 text-left">{t("المبلغ", "Amount")}</th>
+              <th className="p-2 text-slate-500 text-left">{t("المسؤول", "Admin")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map(h => (
+              <tr key={h.id} className="border-b border-[#1c1c1e]">
+                <td className="p-2 text-slate-200">{h.renewal_date}</td>
+                <td className="p-2 text-slate-300">{h.duration_months}mo</td>
+                <td className="p-2">
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${PLANS[h.plan_name]?.color || "bg-slate-600"} text-white`}>{h.plan_name}</span>
+                </td>
+                <td className="p-2 text-slate-300">{h.seats_purchased}</td>
+                <td className="p-2 text-slate-300">${h.amount_paid}</td>
+                <td className="p-2 text-slate-500">{h.admin_user}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+

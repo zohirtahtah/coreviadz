@@ -252,6 +252,9 @@ export default function App() {
   const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
+  const isExpiredSub = saasAccount && saasAccount.expirationDate
+    ? Math.ceil((new Date(saasAccount.expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 0
+    : false;
   const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
     ? (saasAccount.accountStatus === "Pending Verification" || (saasAccount.otpCode && !saasAccount.emailVerified))
     : false;
@@ -2060,8 +2063,19 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended ? "pt-10" : ""}`} id="applet_main_scaffold">
+    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended || isExpiredSub ? "pt-10" : ""}`} id="applet_main_scaffold">
       
+      {/* SaaS Expired subscription red banner */}
+      {isExpiredSub && !isSuspended && !isDisabled && (
+        <div className="fixed top-0 inset-x-0 h-10 bg-red-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="expired_danger_banner">
+          <AlertCircle className="w-4 h-4 text-white shrink-0 animate-pulse" />
+          <span>
+            {lang === "ar"
+              ? "تنبيه: اشتراك مؤسستكم منتهي. البيانات متاحة للعرض فقط. يرجى تجديد الاشتراك لاستخدام Corevia."
+              : "Your subscription has expired. Please renew your subscription to continue using Corevia."}
+          </span>
+        </div>
+      )}
       {/* SaaS Suspended warning banner */}
       {isSuspended && (
         <div className="fixed top-0 inset-x-0 h-10 bg-rose-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="suspension_danger_banner">
@@ -2105,7 +2119,8 @@ export default function App() {
           <DashboardView 
             orders={orders} 
             products={products} 
-            lang={lang} 
+            lang={lang}
+            saasAccount={saasAccount}
           />
         )}
 
