@@ -96,6 +96,8 @@ export async function fetchUserSaaSMeta(
           const subscriptionPlanVal = dbCompany.subscriptionPlan !== undefined ? dbCompany.subscriptionPlan : (dbCompany.subscriptionplan !== undefined ? dbCompany.subscriptionplan : "Basic");
 
           const matchedIdx = list.findIndex(c => c.id === compId || c.email.toLowerCase() === cleanEmail);
+          // Preserve existing OTP code so it is not overwritten by hardcoded default
+          const existingOtp = matchedIdx > -1 ? list[matchedIdx].otpCode : null;
           const companyObj = {
             id: compId,
             companyName: dbCompany.name || `${fallbackName || cleanEmail.split("@")[0]} Trading`,
@@ -112,7 +114,7 @@ export async function fetchUserSaaSMeta(
             accountStatus: accountStatusVal,
             expirationDate: "",
             activeDevices: [],
-            otpCode: "123456"
+            otpCode: existingOtp || "123456"
           };
 
           if (matchedIdx > -1) {

@@ -194,6 +194,13 @@ export default function App() {
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
 
+        // Check persistent OTP verified flag — immune to Supabase sync overwrites
+        const otpFlagKey = `corevia_otp_verified_${session.email.toLowerCase()}`;
+        if (localStorage.getItem(otpFlagKey) === "true") {
+          found.accountStatus = "Active";
+          found.emailVerified = true;
+        }
+
         // Auto-heal of account status to Active if user-onboarding is completed
         const hasOnboarded = getBusinessProfile()?.businessName;
         if (found.accountStatus === "Pending Verification" && hasOnboarded) {
@@ -243,7 +250,7 @@ export default function App() {
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
   const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
-    ? saasAccount.accountStatus === "Pending Verification" 
+    ? (saasAccount.accountStatus === "Pending Verification" || (saasAccount.otpCode && !saasAccount.emailVerified))
     : false;
   const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
 
@@ -430,6 +437,66 @@ export default function App() {
         }
       });
   }, []);
+
+  // Permission re-verification for employee sessions on every session restore
+  useEffect(() => {
+    if (session?.role === "employee" && supabase) {
+      const verifyPermissions = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("corevia_company_users")
+            .select("status, allowed_pages, company_id")
+            .eq("id", session.userId)
+            .maybeSingle();
+
+          if (error) {
+            console.warn("Permission re-verification error:", error);
+            return;
+          }
+
+          if (!data) {
+            console.warn("Employee record not found in Supabase, logging out.");
+            setSession(null);
+            setProfile(null);
+            localStorage.removeItem("corevia_session_v1");
+            localStorage.removeItem("corevia_user_session_v1");
+            return;
+          }
+
+          if (data.status === "Suspended") {
+            setSession(null);
+            setProfile(null);
+            localStorage.removeItem("corevia_session_v1");
+            localStorage.removeItem("corevia_user_session_v1");
+            return;
+          }
+
+          // Update allowed pages if they changed server-side
+          const serverPages = Array.isArray(data.allowed_pages)
+            ? data.allowed_pages
+            : JSON.parse(data.allowed_pages || "[]");
+
+          if (JSON.stringify(serverPages) !== JSON.stringify(session.allowedPages)) {
+            const updatedSession = { ...session, allowedPages: serverPages };
+            setSession(updatedSession);
+            saveUserSession(updatedSession);
+          }
+
+          // Verify company_id matches
+          if (data.company_id !== session.company_id) {
+            console.warn("Company ID mismatch, logging out employee.");
+            setSession(null);
+            setProfile(null);
+            localStorage.removeItem("corevia_session_v1");
+            localStorage.removeItem("corevia_user_session_v1");
+          }
+        } catch (err) {
+          console.warn("Permission re-verification exception:", err);
+        }
+      };
+      verifyPermissions();
+    }
+  }, [session?.userId, session?.role]);
 
   // Helper to load localized database and configuration records from local cache
   const loadStateFromLocal = () => {
@@ -1874,6 +1941,11 @@ export default function App() {
               list[idx].emailVerified = true;
               localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
               
+              // Set persistent OTP verified flag (immune to Supabase sync overwrites)
+              if (session?.email) {
+                localStorage.setItem(`corevia_otp_verified_${session.email.toLowerCase()}`, "true");
+              }
+
               // Log otp success activation
               const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
               let logsList: any[] = [];
