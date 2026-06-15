@@ -9,6 +9,7 @@ import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employe
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
+import { supabase, createSecondaryClient } from "../supabaseClient";
 
 // Name & Phone smart normalizations for bulletproof Algerian/Arabic de-duplication
 export function cleanArabicName(name: string): string {
@@ -89,13 +90,47 @@ export default function UsersPermissionsView({
 
   useEffect(() => {
     if (!editingEmployee && fullName) {
-      const slug = fullName.toLowerCase().trim()
-        .replace(/\s+/g, ".")
-        .replace(/[^a-z0-9.]/g, "");
-      setUsername(slug);
-      setEmail(`${slug}@corevia.dz`);
+      const cleanArabicName = (name: string) => {
+        return name.toLowerCase().trim()
+          .replace(/\s+/g, ".")
+          .replace(/[أإآا]/g, "a")
+          .replace(/[ب]/g, "b")
+          .replace(/[ت]/g, "t")
+          .replace(/[ث]/g, "th")
+          .replace(/[ج]/g, "j")
+          .replace(/[حخ]/g, "kh")
+          .replace(/[دذ]/g, "d")
+          .replace(/[ر]/g, "r")
+          .replace(/[ز]/g, "z")
+          .replace(/[سش]/g, "s")
+          .replace(/[صض]/g, "sh")
+          .replace(/[طظ]/g, "t")
+          .replace(/[عغ]/g, "g")
+          .replace(/[ف]/g, "f")
+          .replace(/[قك]/g, "k")
+          .replace(/[ل]/g, "l")
+          .replace(/[من]/g, "n")
+          .replace(/[ه]/g, "h")
+          .replace(/[وي]/g, "y")
+          .replace(/[^a-z0-9.]/g, "");
+      };
+
+      let baseSlug = cleanArabicName(fullName);
+      if (!baseSlug || baseSlug === ".") {
+        baseSlug = "user";
+      }
+
+      let counter = 1;
+      let uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
+      while (employees.some(emp => emp.username?.toLowerCase() === uniqueSlug)) {
+        counter++;
+        uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
+      }
+
+      setUsername(uniqueSlug);
+      setEmail(`${uniqueSlug}@corevia.dz`);
     }
-  }, [fullName, editingEmployee]);
+  }, [fullName, editingEmployee, employees]);
 
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -409,20 +444,88 @@ export default function UsersPermissionsView({
       return;
     }
 
+    let authUserId = editingEmployee?.auth_user_id;
+    let invitationToken = editingEmployee?.invitation_token;
+    let invitationExpires = editingEmployee?.invitation_expires;
+    let invitationUsed = editingEmployee?.invitation_used ?? false;
+
+    // Create a real Supabase Auth account for the new employee
+    if (isNew) {
+      const signUpSecondary = createSecondaryClient();
+      if (signUpSecondary) {
+        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
+        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
+          email: userEmail,
+          password: password.trim(),
+          options: {
+            data: {
+              company_id: companyId,
+              employee_id: employeeId,
+              role: "employee",
+              username: username.trim().toLowerCase(),
+              full_name: fullName.trim()
+            }
+          }
+        });
+
+        if (authError) {
+          console.error("Supabase Auth SignUp error:", authError);
+          onTriggerNotification(
+            isRtl 
+              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
+              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        authUserId = authData.user?.id;
+      }
+
+      // Generate expiring (7 days) secure invitation link
+      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      invitationUsed = false;
+    } else {
+      // If editing employee and password changed, sync password back to Supabase Auth
+      if (editingEmployee && editingEmployee.password !== password.trim()) {
+        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.dz`;
+        const signUpSecondary = createSecondaryClient();
+        if (signUpSecondary) {
+          try {
+            const { error: signInErr } = await signUpSecondary.auth.signInWithPassword({
+              email: userEmail,
+              password: editingEmployee.password || ""
+            });
+            if (!signInErr) {
+              await signUpSecondary.auth.updateUser({ password: password.trim() });
+              await signUpSecondary.auth.signOut();
+            }
+          } catch (err) {
+            console.warn("Could not sync updated password to Supabase Auth:", err);
+          }
+        }
+      }
+    }
+
     const payload: Employee = {
       id: employeeId,
       companyId,
       fullName: fullName.trim(),
       phone: phone.trim(),
       email: email.trim() || undefined,
-      username: username.trim(),
+      username: username.trim().toLowerCase(),
       jobTitle: jobTitle.trim() || "موظف",
       password: password.trim(),
       allowedPages: selectedPages,
       assignedResponsibilities: assignedResponsibilities.trim() || undefined,
       status,
       lastActivity: editingEmployee?.lastActivity,
-      createdAt: editingEmployee?.createdAt || new Date().toISOString()
+      createdAt: editingEmployee?.createdAt || new Date().toISOString(),
+      auth_user_id: authUserId,
+      invitation_token: invitationToken,
+      invitation_expires: invitationExpires,
+      invitation_used: invitationUsed
     };
 
     const success = await saveEmployee(payload);
@@ -477,7 +580,6 @@ export default function UsersPermissionsView({
       const actionType = isNew ? "Create User" : "Update User";
       const affectedRecord = `User: ${fullName} (${jobTitle})`;
       
-      // Check status changes to log "Suspend User" or "Reactivate User" specifically
       let logAction = actionType;
       if (!isNew && editingEmployee.status !== status) {
         logAction = status === "Suspended" ? "Suspend User" : "Reactivate User";
@@ -498,10 +600,10 @@ export default function UsersPermissionsView({
       if (isNew) {
         setCreatedCredentials({
           fullName: fullName.trim(),
-          email: email.trim() || undefined,
-          username: username.trim(),
+          email: email.trim() || `${username.trim().toLowerCase()}@corevia.dz`,
+          username: username.trim().toLowerCase(),
           password: password.trim(),
-          loginUrl: `${window.location.origin}/?setup_worker=true&id=${employeeId}&cid=${companyId}&name=${encodeURIComponent(fullName.trim())}&user=${encodeURIComponent(username.trim())}&pass=${encodeURIComponent(password.trim())}&title=${encodeURIComponent(jobTitle.trim() || "موظف")}&pages=${encodeURIComponent(JSON.stringify(selectedPages))}`
+          loginUrl: `${window.location.origin}/?invite_token=${invitationToken}`
         });
       } else {
         setIsModalOpen(false);

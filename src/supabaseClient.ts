@@ -26,3 +26,16 @@ export const supabase = isSupabaseConfigured
       }
     })
   : null;
+
+// Secondary client used to register/manage employees without affecting the active owner's session state
+export const createSecondaryClient = () => {
+  return isSupabaseConfigured
+    ? createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      })
+    : null;
+};

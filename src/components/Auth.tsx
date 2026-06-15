@@ -79,7 +79,90 @@ export default function Auth({
       const params = new URLSearchParams(window.location.search);
       const isRtl = lang === "ar";
       
-      // Check if this is a setup worker link
+      // Check if this is a secure single-use invitation token link
+      const inviteToken = params.get("invite_token");
+      if (inviteToken && supabase) {
+        onTriggerNotification(
+          isRtl 
+            ? "🔍 جاري التحقق من رمز الدعوة للموظف واسترداد الهوية..." 
+            : "🔍 Validating employee invitation token...", 
+          "info"
+        );
+
+        supabase
+          .from("corevia_company_users")
+          .select("*")
+          .eq("invitation_token", inviteToken)
+          .maybeSingle()
+          .then(async ({ data: inviteRecord, error: inviteErr }) => {
+            if (inviteErr || !inviteRecord) {
+              onTriggerNotification(
+                isRtl 
+                  ? "❌ رمز الدعوة غير صالح أو غير موجود." 
+                  : "❌ Invalid or non-existent invitation token.", 
+                "info"
+              );
+              return;
+            }
+
+            if (inviteRecord.invitation_used) {
+              onTriggerNotification(
+                isRtl 
+                  ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة بنموذج تسجيل الدخول بالأسفل." 
+                  : "⚠️ This invitation has already been used. Please log in directly with your credentials.", 
+                "info"
+              );
+              return;
+            }
+
+            if (inviteRecord.invitation_expires && new Date(inviteRecord.invitation_expires).getTime() < Date.now()) {
+              onTriggerNotification(
+                isRtl 
+                  ? "❌ انتهت صلاحية رابط الدعوة هذا (صلاحية الرابط 7 أيام). يرجى طلب رابط جديد من المسؤول." 
+                  : "❌ This invitation link has expired. Please contact your administrator.", 
+                "info"
+              );
+              return;
+            }
+
+            // Mark invitation token as used in DB to prevent multi-use
+            await supabase
+              .from("corevia_company_users")
+              .update({ invitation_used: true })
+              .eq("id", inviteRecord.id);
+
+            const recUser = inviteRecord.username;
+            const recPass = inviteRecord.password;
+            
+            setEmailInput(recUser);
+            setPasswordInput(recPass);
+
+            onTriggerNotification(
+              isRtl 
+                ? `🎉 تم التحقق من هويتك بنجاح كموظف (${inviteRecord.full_name})! جاري تهيئة مكان العمل...` 
+                : `🎉 Identity verified as ${inviteRecord.full_name}! Launching employee workspace...`, 
+              "success"
+            );
+
+            // Auto-trigger setup submission
+            setTimeout(() => {
+              const btn = document.getElementById("auth-submit-btn");
+              if (btn) {
+                btn.click();
+              }
+            }, 800);
+          });
+
+        setTimeout(() => {
+          try {
+            window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+          } catch (histErr) {}
+        }, 3000);
+
+        return;
+      }
+
+      // Check if this is a setup worker link (fallback)
       const setupWorker = params.get("setup_worker");
       if (setupWorker === "true") {
         const id = params.get("id");
@@ -242,84 +325,52 @@ export default function Auth({
         return;
       }
 
-      // 1. Search employee records first (to override normal account lookup if they are an employee)
-      const cachedEmployees = getLocalEmployees();
-      let matchingEmployee: any = cachedEmployees.find(
-        emp => (
-          (emp.email?.toLowerCase().trim() === finalEmail.toLowerCase() ||
-           emp.phone?.trim() === finalEmail ||
-           emp.username?.toLowerCase().trim() === finalEmail.toLowerCase()) &&
-          emp.password === finalPassword
-        )
-      );
-
-      // If we are online, query credentials from Supabase with separate direct lookups (prevents .or parsing/spaces/syntax syntax errors in old/new clients)
-      if (!matchingEmployee && supabase) {
+      // 1. Search employee records first to resolve Email, Phone, or Username
+      let matchingEmployee: any = null;
+      if (supabase) {
         try {
-          const searchVal = finalEmail.trim();
-          let dbEmps: any[] = [];
-          
-          if (searchVal) {
-            // Case-insensitive clean lookups + ilike operators
-            const [q1, q2, q3] = await Promise.all([
-              supabase.from("corevia_company_users").select("*").ilike("username", searchVal),
-              supabase.from("corevia_company_users").select("*").ilike("email", searchVal),
-              supabase.from("corevia_company_users").select("*").eq("phone", searchVal)
-            ]);
+          const searchVal = finalEmail.toLowerCase().trim();
+          const { data: dbEmps, error: fetchErr } = await supabase
+            .from("corevia_company_users")
+            .select("*")
+            .or(`username.eq.${searchVal},email.eq.${searchVal},phone.eq.${searchVal}`);
 
-            if (q1.data) dbEmps.push(...q1.data);
-            if (q2.data) dbEmps.push(...q2.data);
-            if (q3.data) dbEmps.push(...q3.data);
-
-            // Lowercase exact fallback lookup
-            if (dbEmps.length === 0) {
-              const { data: lowerUserMatch } = await supabase
-                .from("corevia_company_users")
-                .select("*")
-                .eq("username", searchVal.toLowerCase());
-              if (lowerUserMatch) dbEmps.push(...lowerUserMatch);
-            }
-          }
-
-          if (dbEmps.length > 0) {
-            const dbMatch = dbEmps.find(e => e.password && e.password.trim() === finalPassword.trim());
-            if (dbMatch) {
-              matchingEmployee = {
-                id: dbMatch.id,
-                companyId: dbMatch.company_id,
-                fullName: dbMatch.full_name,
-                phone: dbMatch.phone,
-                email: dbMatch.email,
-                username: dbMatch.username,
-                jobTitle: dbMatch.job_title,
-                password: dbMatch.password,
-                allowedPages: Array.isArray(dbMatch.allowed_pages) 
-                  ? dbMatch.allowed_pages 
-                  : JSON.parse(dbMatch.allowed_pages || "[]"),
-                status: dbMatch.status,
-                assignedResponsibilities: dbMatch.assigned_responsibilities,
-                lastActivity: dbMatch.last_activity,
-                createdAt: dbMatch.created_at
-              };
-
-              // Cache to local storage immediately so that session restores nicely!
-              try {
-                const currentLocal = getLocalEmployees();
-                const idx = currentLocal.findIndex(e => e.id === matchingEmployee.id);
-                if (idx !== -1) {
-                  currentLocal[idx] = matchingEmployee;
-                } else {
-                  currentLocal.push(matchingEmployee);
-                }
-                localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
-              } catch (storageErr) {
-                console.warn("[Employee caching failure]", storageErr);
-              }
-            }
+          if (!fetchErr && dbEmps && dbEmps.length > 0) {
+            const dbMatch = dbEmps[0];
+            matchingEmployee = {
+              id: dbMatch.id,
+              companyId: dbMatch.company_id,
+              fullName: dbMatch.full_name,
+              phone: dbMatch.phone,
+              email: dbMatch.email,
+              username: dbMatch.username,
+              jobTitle: dbMatch.job_title,
+              password: dbMatch.password,
+              allowedPages: Array.isArray(dbMatch.allowed_pages) 
+                ? dbMatch.allowed_pages 
+                : JSON.parse(dbMatch.allowed_pages || "[]"),
+              status: dbMatch.status,
+              assignedResponsibilities: dbMatch.assigned_responsibilities,
+              lastActivity: dbMatch.last_activity,
+              createdAt: dbMatch.created_at,
+              auth_user_id: dbMatch.auth_user_id
+            };
           }
         } catch (e) {
           console.warn("Supabase employee credentials lookup warning:", e);
         }
+      }
+
+      // Offline fallback lookup
+      if (!matchingEmployee) {
+        const cachedEmployees = getLocalEmployees();
+        matchingEmployee = cachedEmployees.find(
+          emp => (
+            emp.email?.toLowerCase().trim() === finalEmail.toLowerCase() ||
+            emp.phone?.trim() === finalEmail ||
+            emp.username?.toLowerCase().trim() === finalEmail.toLowerCase()
+          ) && emp.password === finalPassword
+        );
       }
 
       if (matchingEmployee) {
@@ -335,11 +386,32 @@ export default function Auth({
           return;
         }
 
+        // Authenticate the employee using their real Supabase Auth account
+        if (supabase) {
+          const loginEmail = matchingEmployee.email || `${matchingEmployee.username.toLowerCase()}@corevia.dz`;
+          const { error: authError } = await supabase.auth.signInWithPassword({
+            email: loginEmail,
+            password: finalPassword
+          });
+
+          if (authError) {
+            console.error("Employee Supabase Auth login error:", authError);
+            onTriggerNotification(
+              isRtl 
+                ? `❌ خطأ تسجيل الدخول: ${authError.message}`
+                : `❌ Auth Login failed: ${authError.message}`,
+              "info"
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
         const isReadOnlyMode = matchingEmployee.status === "Read Only";
 
         const employeeSession: UserSession = {
           username: matchingEmployee.fullName,
-          email: matchingEmployee.email || finalEmail,
+          email: matchingEmployee.email || `${matchingEmployee.username.toLowerCase()}@corevia.dz`,
           isRegistered: true,
           isApproved: true,
           isSuspended: false,
@@ -352,6 +424,20 @@ export default function Auth({
           isReadOnly: isReadOnlyMode
         };
 
+        // Cache to local storage immediately so that session restores nicely!
+        try {
+          const currentLocal = getLocalEmployees();
+          const idx = currentLocal.findIndex(e => e.id === matchingEmployee.id);
+          if (idx !== -1) {
+            currentLocal[idx] = matchingEmployee;
+          } else {
+            currentLocal.push(matchingEmployee);
+          }
+          localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
+        } catch (storageErr) {
+          console.warn("[Employee caching failure]", storageErr);
+        }
+
         // Log login action
         try {
           await logActivity({
@@ -363,9 +449,7 @@ export default function Auth({
             pageName: "Authentication",
             affectedRecord: `Employee: ${matchingEmployee.fullName}`
           });
-        } catch (logErr) {
-          // ignore
-        }
+        } catch (logErr) {}
 
         onAuthSuccess(employeeSession);
         onTriggerNotification(

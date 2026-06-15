@@ -590,6 +590,10 @@ create table if not exists corevia_company_users (
   allowed_pages jsonb default '[]'::jsonb,
   status text default 'Active',
   last_activity text,
+  auth_user_id text,
+  invitation_token text,
+  invitation_expires text,
+  invitation_used boolean default false,
   deleted_at timestamp with time zone default null,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
@@ -1739,6 +1743,10 @@ create table if not exists corevia_company_users (
   allowed_pages jsonb default '[]'::jsonb,
   status text default 'Active',
   last_activity text,
+  auth_user_id text,
+  invitation_token text,
+  invitation_expires text,
+  invitation_used boolean default false,
   deleted_at timestamp with time zone default null,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );

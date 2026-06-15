@@ -14,6 +14,10 @@ export interface Employee {
   status: "Active" | "Read Only" | "Suspended";
   lastActivity?: string;
   createdAt: string;
+  auth_user_id?: string;
+  invitation_token?: string;
+  invitation_expires?: string;
+  invitation_used?: boolean;
 }
 
 // Local Storage helper for holding offline/cached copies
@@ -76,7 +80,11 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         assignedResponsibilities: item.assigned_responsibilities || undefined,
         status: item.status || "Active",
         lastActivity: item.last_activity || undefined,
-        createdAt: item.created_at || new Date().toISOString()
+        createdAt: item.created_at || new Date().toISOString(),
+        auth_user_id: item.auth_user_id || undefined,
+        invitation_token: item.invitation_token || undefined,
+        invitation_expires: item.invitation_expires || undefined,
+        invitation_used: typeof item.invitation_used === "boolean" ? item.invitation_used : undefined
       }));
 
       // Cache back locally for stability, sorting by creation date
@@ -134,7 +142,11 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       assigned_responsibilities: employee.assignedResponsibilities || null,
       allowed_pages: employee.allowedPages,
       status: employee.status,
-      last_activity: employee.lastActivity || null
+      last_activity: employee.lastActivity || null,
+      auth_user_id: employee.auth_user_id || null,
+      invitation_token: employee.invitation_token || null,
+      invitation_expires: employee.invitation_expires || null,
+      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null
     };
 
     const { error } = await supabase
