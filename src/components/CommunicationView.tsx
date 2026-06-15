@@ -121,21 +121,27 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
   // Scroll on messages change
   useEffect(() => {
     scrollToBottom("auto");
-    // Also backup read count index in localStorage
-    localStorage.setItem(`corevia_last_read_chat_${session.company_id}`, String(messages.length));
 
     // Backup chat messages cleanly in the shared storage key so Sidebar stays synced
+    let companyMsgsCount = messages.length;
     if (messages.length > 0) {
       try {
         const raw = localStorage.getItem("corevia_chat_messages_v1");
         let allMsgs: any[] = raw ? JSON.parse(raw) : [];
         const idMap = new Map(allMsgs.map(m => [m.id, m]));
         messages.forEach(m => idMap.set(m.id, m));
-        localStorage.setItem("corevia_chat_messages_v1", JSON.stringify(Array.from(idMap.values())));
+        const mergedAllMsgs = Array.from(idMap.values());
+        localStorage.setItem("corevia_chat_messages_v1", JSON.stringify(mergedAllMsgs));
+        
+        // Count matching current tenant's messages in the merged list to sync perfectly with Sidebar!
+        companyMsgsCount = mergedAllMsgs.filter((m: any) => m.companyId === session.company_id).length;
       } catch (e) {
         console.warn("localStorage messages backup failed:", e);
       }
     }
+    
+    // Set last read count to the exact same size Sidebar checks
+    localStorage.setItem(`corevia_last_read_chat_${session.company_id}`, String(companyMsgsCount));
   }, [messages]);
 
   // Clean timer on unmount

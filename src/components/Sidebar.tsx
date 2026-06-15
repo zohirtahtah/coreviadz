@@ -66,13 +66,13 @@ export default function Sidebar({
   // Dynamic Chat messages unread badge counter
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
-  // Track checked notifications count to prevent red badge on old/read alerts
-  const [lastSeenNotificationsCount, setLastSeenNotificationsCount] = useState<number>(() => {
+  // Track seen notifications content to prevent red badge on old/read alerts
+  const [seenNotifications, setSeenNotifications] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem("corevia_last_seen_notifications_v1");
-      return saved ? Number(saved) : 0;
+      const saved = localStorage.getItem("corevia_seen_notifications_v1");
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return 0;
+      return [];
     }
   });
 
@@ -108,27 +108,27 @@ export default function Sidebar({
 
     checkUnreadMessages();
     const interval = setInterval(checkUnreadMessages, 5000);
-
     return () => clearInterval(interval);
   }, [activeTab]);
 
   useEffect(() => {
-    if (showNotifications) {
-      setLastSeenNotificationsCount(notifications.length);
-      try {
-        localStorage.setItem("corevia_last_seen_notifications_v1", String(notifications.length));
-      } catch (e) {}
+    if (showNotifications && notifications.length > 0) {
+      setSeenNotifications(prev => {
+        const updated = Array.from(new Set([...prev, ...notifications]));
+        localStorage.setItem("corevia_seen_notifications_v1", JSON.stringify(updated));
+        return updated;
+      });
     }
-  }, [showNotifications, notifications.length]);
+  }, [showNotifications, notifications]);
 
-  useEffect(() => {
-    if (notifications.length === 0 && lastSeenNotificationsCount > 0) {
-      setLastSeenNotificationsCount(0);
-      try {
-        localStorage.setItem("corevia_last_seen_notifications_v1", "0");
-      } catch (e) {}
-    }
-  }, [notifications.length, lastSeenNotificationsCount]);
+  const handleClearAllLocal = () => {
+    setSeenNotifications(prev => {
+      const updated = Array.from(new Set([...prev, ...notifications]));
+      localStorage.setItem("corevia_seen_notifications_v1", JSON.stringify(updated));
+      return updated;
+    });
+    clearNotifications();
+  };
 
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
@@ -529,7 +529,7 @@ export default function Sidebar({
               className="p-2 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl transition-all border border-slate-700/20 relative cursor-pointer"
             >
               <Bell className="w-4 h-4" />
-              {notifications.length > lastSeenNotificationsCount && !showNotifications && (
+              {notifications.some(notif => !seenNotifications.includes(notif)) && !showNotifications && (
                 <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
               )}
             </button>
@@ -539,7 +539,7 @@ export default function Sidebar({
                 <div className="flex justify-between items-center pb-2 border-b border-[#27272a] mb-2">
                   <h3 className="text-xs font-bold text-white">{t.notifTitle}</h3>
                   {notifications.length > 0 && (
-                    <button onClick={clearNotifications} className="text-[10px] text-indigo-400 hover:underline">
+                    <button onClick={handleClearAllLocal} className="text-[10px] text-indigo-400 hover:underline">
                       {isRtl ? "تفريغ الكل" : "Clear All"}
                     </button>
                   )}
