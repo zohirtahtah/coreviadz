@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee, generateUniqueUsername, createEmployeeWithAuth } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee, generateUniqueUsername, createEmployeeWithAuth, generateInvitationToken } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -154,8 +154,9 @@ export default function UsersPermissionsView({
       let expiresToUse = emp.invitation_expires;
 
       if (!tokenToUse) {
-        tokenToUse = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
-        expiresToUse = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const newToken = generateInvitationToken();
+        tokenToUse = newToken.token;
+        expiresToUse = newToken.expiresAt;
         
         const updatedEmp = {
           ...emp,
@@ -474,8 +475,9 @@ export default function UsersPermissionsView({
       }
 
       // Generate expiring (7 days) secure invitation link
-      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
-      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const newToken = generateInvitationToken();
+      invitationToken = newToken.token;
+      invitationExpires = newToken.expiresAt;
       invitationUsed = false;
     } else {
       // If editing employee and password changed, sync password back to Supabase Auth

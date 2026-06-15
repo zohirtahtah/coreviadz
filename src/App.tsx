@@ -249,12 +249,14 @@ export default function App() {
   };
 
   const saasAccount = getSaaSAccountForSession();
-  const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
-  const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
-  const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
   const isExpiredSub = saasAccount && saasAccount.expirationDate
     ? Math.ceil((new Date(saasAccount.expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 0
     : false;
+  const isReadOnly = saasAccount
+    ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended" || isExpiredSub)
+    : false;
+  const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
+  const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
   const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
     ? (saasAccount.accountStatus === "Pending Verification" || (saasAccount.otpCode && !saasAccount.emailVerified))
     : false;

@@ -62,6 +62,7 @@ export default function SuperAdminView({
   const [editDuration, setEditDuration] = useState("1");
   const [editEndDate, setEditEndDate] = useState("");
   const [editSeatsLimit, setEditSeatsLimit] = useState(5);
+  const [editStatus, setEditStatus] = useState("Active");
 
   // Seat management states
   const [seatLimitInput, setSeatLimitInput] = useState(5);
@@ -272,6 +273,7 @@ export default function SuperAdminView({
       setEditStartDate(selectedCompany.registrationDate || new Date().toISOString().split("T")[0]);
       setEditDuration("1");
       setEditSeatsLimit(selectedCompany.seatsLimit || 5);
+      setEditStatus(selectedCompany.accountStatus);
       setSeatLimitInput(selectedCompany.seatsLimit || 5);
       const start = selectedCompany.registrationDate ? new Date(selectedCompany.registrationDate) : new Date();
       const end = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -291,12 +293,12 @@ export default function SuperAdminView({
 
   const handleSaveSubscription = async () => {
     if (!selectedCompany) return;
-    const planLimits = PLANS[editPlan]?.seats || editSeatsLimit;
-    const finalSeats = Math.max(editSeatsLimit, planLimits);
+    // Pure manual control — no auto-override from plan limits
+    const finalSeats = editSeatsLimit;
 
     await persistToSupabase(selectedCompany.id, {
       subscriptionPlan: editPlan, seatsLimit: finalSeats,
-      expirationDate: editEndDate, accountStatus: "Active"
+      expirationDate: editEndDate, accountStatus: editStatus
     });
 
     // Also write to corevia_subscriptions
@@ -308,7 +310,7 @@ export default function SuperAdminView({
       end_date: editEndDate,
       seats_limit: finalSeats,
       seats_used: selectedCompany.seatsUsed || 1,
-      status: "Active"
+      status: editStatus
     });
 
     // Record in history
@@ -323,14 +325,15 @@ export default function SuperAdminView({
 
     setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? {
       ...c, subscriptionPlan: editPlan as any, seatsLimit: finalSeats,
-      expirationDate: editEndDate, accountStatus: "Active"
+      expirationDate: editEndDate, accountStatus: editStatus as any
     } : c));
 
     // Refresh history
     getSubscriptionHistory(selectedCompany.id).then(h => setSeatHistory(h));
 
     addLog(selectedCompany.companyName, selectedCompany.email, t("تجديد اشتراك", "Subscription Renewal"),
-      t(`تم تجديد الاشتراك: ${editPlan}، ينتهي ${editEndDate}`, `Subscription renewed: ${editPlan}, expires ${editEndDate}`));
+      t(`تم تجديد الاشتراك: ${editPlan}، الحالة: ${editStatus}، المقاعد: ${finalSeats}، ينتهي ${editEndDate}`,
+        `Subscription saved: ${editPlan}, status: ${editStatus}, seats: ${finalSeats}, expires ${editEndDate}`));
     onTriggerNotification(t("تم حفظ الاشتراك", "Subscription saved"), "success");
   };
 
@@ -729,6 +732,7 @@ export default function SuperAdminView({
             editDuration={editDuration} setEditDuration={setEditDuration}
             editEndDate={editEndDate} setEditEndDate={setEditEndDate}
             editSeatsLimit={editSeatsLimit} setEditSeatsLimit={setEditSeatsLimit}
+            editStatus={editStatus} setEditStatus={setEditStatus}
             onSaveSubscription={handleSaveSubscription}
             onCalcEndDate={calcEndDateLocal}
             daysRemaining={daysRemaining}
@@ -935,6 +939,7 @@ function CompanyDetailView({
   company, isRtl, t, onBack, onActivate, onSuspend, onDisable, onReactivate,
   editPlan, setEditPlan, editStartDate, setEditStartDate, editDuration, setEditDuration,
   editEndDate, setEditEndDate, editSeatsLimit, setEditSeatsLimit,
+  editStatus, setEditStatus,
   onSaveSubscription, onCalcEndDate, daysRemaining, onTriggerNotification,
   seatLimitInput, setSeatLimitInput, onIncreaseSeats, onDecreaseSeats, onCustomSeats,
   seatHistory
@@ -946,6 +951,7 @@ function CompanyDetailView({
   setEditStartDate: (v: string) => void; editDuration: string; setEditDuration: (v: string) => void;
   editEndDate: string; setEditEndDate: (v: string) => void;
   editSeatsLimit: number; setEditSeatsLimit: (v: number) => void;
+  editStatus: string; setEditStatus: (v: string) => void;
   onSaveSubscription: () => Promise<void>; onCalcEndDate: (start: string, dur: string) => void;
   daysRemaining: (d: string) => number; onTriggerNotification: (msg: string, type: "success" | "info") => void;
   seatLimitInput: number; setSeatLimitInput: (v: number) => void;
@@ -1056,10 +1062,10 @@ function CompanyDetailView({
         </div>
       </div>
 
-      {/* Subscription Edit */}
+      {/* Subscription Edit — Full Manual Control */}
       <div className="p-4 rounded-xl bg-[#121214] border border-[#27272a]">
-        <h3 className="text-xs font-bold text-slate-400 mb-3">{t("تعديل الاشتراك", "Edit Subscription")}</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <h3 className="text-xs font-bold text-slate-400 mb-3">{t("تعديل الاشتراك (تحكم يدوي كامل)", "Subscription Edit (Full Manual Control)")}</h3>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <div>
             <label className="text-[10px] text-slate-500 block mb-1">{t("الباقة", "Plan")}</label>
             <select value={editPlan} onChange={e => setEditPlan(e.target.value)}
@@ -1088,9 +1094,19 @@ function CompanyDetailView({
               className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-xs" />
           </div>
           <div>
-            <label className="text-[10px] text-slate-500 block mb-1">{t("المقاعد", "Seats")}</label>
+            <label className="text-[10px] text-slate-500 block mb-1">{t("عدد المقاعد", "Seats Limit")}</label>
             <input type="number" min={1} value={editSeatsLimit} onChange={e => setEditSeatsLimit(Math.max(1, parseInt(e.target.value) || 1))}
               className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-xs" />
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-500 block mb-1">{t("حالة الشركة", "Company Status")}</label>
+            <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
+              className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-xs">
+              <option value="Active">{t("نشط", "Active")}</option>
+              <option value="Suspended">{t("معلق", "Suspended")}</option>
+              <option value="Disabled">{t("معطل", "Disabled")}</option>
+              <option value="Read Only">{t("قراءة فقط", "Read Only")}</option>
+            </select>
           </div>
         </div>
         <button onClick={onSaveSubscription}
