@@ -66,6 +66,16 @@ export default function Sidebar({
   // Dynamic Chat messages unread badge counter
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
+  // Track checked notifications count to prevent red badge on old/read alerts
+  const [lastSeenNotificationsCount, setLastSeenNotificationsCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("corevia_last_seen_notifications_v1");
+      return saved ? Number(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
+
   useEffect(() => {
     const checkUnreadMessages = async () => {
       try {
@@ -79,13 +89,18 @@ export default function Sidebar({
           const msgs = raw ? JSON.parse(raw) : [];
           const companyMsgs = msgs.filter((m: any) => m.companyId === companyId);
           
-          const lastReadRaw = localStorage.getItem(`corevia_last_read_chat_${companyId}`);
-          const lastReadCount = lastReadRaw ? Number(lastReadRaw) : 0;
-          
-          if (companyMsgs.length > lastReadCount) {
-            setUnreadChatCount(companyMsgs.length - lastReadCount);
-          } else {
+          if (activeTab === "communication") {
+            localStorage.setItem(`corevia_last_read_chat_${companyId}`, String(companyMsgs.length));
             setUnreadChatCount(0);
+          } else {
+            const lastReadRaw = localStorage.getItem(`corevia_last_read_chat_${companyId}`);
+            const lastReadCount = lastReadRaw ? Number(lastReadRaw) : 0;
+            
+            if (companyMsgs.length > lastReadCount) {
+              setUnreadChatCount(companyMsgs.length - lastReadCount);
+            } else {
+              setUnreadChatCount(0);
+            }
           }
         }
       } catch (e) {}
@@ -96,6 +111,24 @@ export default function Sidebar({
 
     return () => clearInterval(interval);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (showNotifications) {
+      setLastSeenNotificationsCount(notifications.length);
+      try {
+        localStorage.setItem("corevia_last_seen_notifications_v1", String(notifications.length));
+      } catch (e) {}
+    }
+  }, [showNotifications, notifications.length]);
+
+  useEffect(() => {
+    if (notifications.length === 0 && lastSeenNotificationsCount > 0) {
+      setLastSeenNotificationsCount(0);
+      try {
+        localStorage.setItem("corevia_last_seen_notifications_v1", "0");
+      } catch (e) {}
+    }
+  }, [notifications.length, lastSeenNotificationsCount]);
 
   // Locked pages registry
   const lockedPages = ["workers", "expenses", "suppliers", "profit", "yearly"];
@@ -496,7 +529,7 @@ export default function Sidebar({
               className="p-2 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl transition-all border border-slate-700/20 relative cursor-pointer"
             >
               <Bell className="w-4 h-4" />
-              {notifications.length > 0 && (
+              {notifications.length > lastSeenNotificationsCount && !showNotifications && (
                 <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
               )}
             </button>
