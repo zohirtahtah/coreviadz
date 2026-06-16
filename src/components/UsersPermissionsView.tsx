@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee, createEmployeeWithAuth, generateInvitationToken } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -176,16 +176,17 @@ export default function UsersPermissionsView({
   const handleCopyLink = async (emp: Employee) => {
     try {
       let tokenToUse = emp.invitation_token;
-      let expiresToUse = emp.invitation_expires;
+      let expiresToUse = emp.invitation_expires_at || emp.invitation_expires;
 
       if (!tokenToUse) {
-        // Generate expiring (7 days) secure invitation link on the fly and sync
-        tokenToUse = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
-        expiresToUse = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { token, expiresAt } = generateInvitationToken();
+        tokenToUse = token;
+        expiresToUse = expiresAt;
         
         const updatedEmp = {
           ...emp,
           invitation_token: tokenToUse,
+          invitation_expires_at: expiresToUse,
           invitation_expires: expiresToUse,
           invitation_used: false
         };
@@ -463,45 +464,38 @@ export default function UsersPermissionsView({
 
     let authUserId = editingEmployee?.auth_user_id;
     let invitationToken = editingEmployee?.invitation_token;
-    let invitationExpires = editingEmployee?.invitation_expires;
+    let invitationExpires = editingEmployee?.invitation_expires_at || editingEmployee?.invitation_expires;
     let invitationUsed = editingEmployee?.invitation_used ?? false;
 
-    // Create a real Supabase Auth account for the new employee
     if (isNew) {
-      const signUpSecondary = createSecondaryClient();
-      if (signUpSecondary) {
-        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
-        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
-          email: userEmail,
-          password: password.trim(),
-          options: {
-            data: {
-              company_id: companyId,
-              employee_id: employeeId,
-              role: "employee",
-              username: username.trim().toLowerCase(),
-              full_name: fullName.trim()
-            }
-          }
-        });
+      // Use createEmployeeWithAuth which handles Supabase Auth creation + invitation token
+      const result = await createEmployeeWithAuth({
+        id: employeeId,
+        companyId,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        username: username.trim().toLowerCase(),
+        jobTitle: jobTitle.trim() || "موظف",
+        password: password.trim(),
+        allowedPages: selectedPages,
+        status,
+        assignedResponsibilities: assignedResponsibilities.trim() || undefined
+      });
 
-        if (authError) {
-          console.error("Supabase Auth SignUp error:", authError);
-          onTriggerNotification(
-            isRtl 
-              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
-              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        authUserId = authData.user?.id;
+      if (result.error) {
+        onTriggerNotification(
+          isRtl
+            ? `❌ فشل إنشاء حساب الموظف: ${result.error}`
+            : `❌ Failed to create employee account: ${result.error}`
+        );
+        setIsLoading(false);
+        return;
       }
 
-      // Generate expiring (7 days) secure invitation link
-      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
-      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      authUserId = result.employee.auth_user_id;
+      invitationToken = result.employee.invitation_token;
+      invitationExpires = result.employee.invitation_expires_at || result.employee.invitation_expires;
       invitationUsed = false;
     } else {
       // If editing employee and password changed, sync password back to Supabase Auth
@@ -523,46 +517,36 @@ export default function UsersPermissionsView({
           }
         }
       }
-    }
 
-    const payload: Employee = {
-      id: employeeId,
-      companyId,
-      fullName: fullName.trim(),
-      phone: phone.trim(),
-      email: email.trim() || undefined,
-      username: username.trim().toLowerCase(),
-      jobTitle: jobTitle.trim() || "موظف",
-      password: password.trim(),
-      allowedPages: selectedPages,
-      assignedResponsibilities: assignedResponsibilities.trim() || undefined,
-      status,
-      lastActivity: editingEmployee?.lastActivity,
-      createdAt: editingEmployee?.createdAt || new Date().toISOString(),
-      auth_user_id: authUserId,
-      invitation_token: invitationToken,
-      invitation_expires: invitationExpires,
-      invitation_used: invitationUsed
-    };
+      // Save employee updates (existing employee, no auth creation)
+      const payload: Employee = {
+        id: employeeId,
+        companyId,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        username: username.trim().toLowerCase(),
+        jobTitle: jobTitle.trim() || "موظف",
+        password: password.trim(),
+        allowedPages: selectedPages,
+        assignedResponsibilities: assignedResponsibilities.trim() || undefined,
+        status,
+        lastActivity: editingEmployee?.lastActivity,
+        createdAt: editingEmployee?.createdAt || new Date().toISOString(),
+        auth_user_id: authUserId,
+        invitation_token: invitationToken,
+        invitation_expires_at: invitationExpires,
+        invitation_used: invitationUsed
+      };
 
-    const success = await saveEmployee(payload);
-    if (!success) {
-      // Rollback: delete the auth account if save to DB failed
-      if (isNew && authUserId) {
-        try {
-          const sec = createSecondaryClient();
-          if (sec) {
-            await sec.auth.admin.deleteUser(authUserId);
-          }
-        } catch (cleanupErr) {
-          console.warn("Could not clean up auth account after DB failure:", cleanupErr);
-        }
+      const success = await saveEmployee(payload);
+      if (!success) {
+        onTriggerNotification(
+          isRtl ? "❌ فشل حفظ الموظف في قاعدة البيانات." : "❌ Failed to save employee to database."
+        );
+        setIsLoading(false);
+        return;
       }
-      onTriggerNotification(
-        isRtl ? "❌ فشل حفظ الموظف في قاعدة البيانات." : "❌ Failed to save employee to database."
-      );
-      setIsLoading(false);
-      return;
     }
 
       onTriggerNotification(
@@ -611,12 +595,26 @@ export default function UsersPermissionsView({
         console.error("Worker Profile auto-sync error:", err);
       }
 
-      // Log specific activities
+      // Build log payload from current form state
+      const logPayload = {
+        id: employeeId,
+        companyId,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        username: username.trim().toLowerCase(),
+        jobTitle: jobTitle.trim() || (isRtl ? "موظف" : "Employee"),
+        allowedPages: selectedPages,
+        status,
+        auth_user_id: authUserId,
+        invitation_token: invitationToken
+      };
+
       const actionType = isNew ? "Create User" : "Update User";
       const affectedRecord = `User: ${fullName} (${jobTitle})`;
-      
+
       let logAction = actionType;
-      if (!isNew && editingEmployee.status !== status) {
+      if (!isNew && editingEmployee?.status !== status) {
         logAction = status === "Suspended" ? "Suspend User" : "Reactivate User";
       }
 
@@ -629,7 +627,7 @@ export default function UsersPermissionsView({
         pageName: "Users & Permissions",
         affectedRecord,
         previousValue: editingEmployee ? JSON.stringify(editingEmployee) : "",
-        newValue: JSON.stringify(payload)
+        newValue: JSON.stringify(logPayload)
       });
 
       if (isNew) {

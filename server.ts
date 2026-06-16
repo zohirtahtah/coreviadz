@@ -132,12 +132,24 @@ app.post("/api/auth/login", async (req, res) => {
     let isSuspended = false;
 
     if (userMatched.userType === "employee") {
+      // Check employee_status (new migration column) first, fall back to status
+      const empStatus = userMatched.employee_status || userMatched.status || "active";
       isReadOnly = userMatched.status === "Read Only";
-      isSuspended = userMatched.status === "Suspended" || userMatched.status === "Disabled";
+      isSuspended = empStatus === "suspended" || empStatus === "inactive" || userMatched.status === "Suspended" || userMatched.status === "Disabled";
+
       if (isSuspended) {
         return res.status(403).json({
-          error_en: userMatched.status === "Disabled" ? "This employee account is disabled." : "This employee account is suspended.",
-          error_ar: userMatched.status === "Disabled" ? "هذا الحساب ملغي ومعطل حالياً." : "هذا الحساب موقوف ومعطل حالياً."
+          error_en: "This employee account is suspended or inactive.",
+          error_ar: "هذا الحساب موقوف أو غير نشط حالياً."
+        });
+      }
+
+      // Check if employee has not set password yet (invite not claimed)
+      const passwordSet = typeof userMatched.password_set === "boolean" ? userMatched.password_set : true;
+      if (!passwordSet && userMatched.invitation_token && !userMatched.invitation_used) {
+        return res.status(403).json({
+          error_en: "Please use your invitation link to set a password before logging in.",
+          error_ar: "يرجى استخدام رابط الدعوة لتعيين كلمة المرور قبل تسجيل الدخول."
         });
       }
     } else {
@@ -147,35 +159,39 @@ app.post("/api/auth/login", async (req, res) => {
       }
     }
 
-    // Perform real password validation via Supabase Auth or direct DB password check for employees
+    // Validate password via Supabase Auth first, then fall back to direct comparison
     let userId = "";
     let authValidated = false;
 
-    // Direct Match for employees/admins using their DB-assigned credentials
-    if (
-      (userMatched.password && String(userMatched.password).trim() === String(password).trim()) ||
-      (storedSaasPassword && String(storedSaasPassword).trim() === String(password).trim())
-    ) {
-      userId = userMatched.auth_user_id || userMatched.id || userMatched.user_id || `emp_${userMatched.id}`;
-      authValidated = true;
-      console.log(`[Auth API] Secure direct matches for ${userMatched.username || userMatched.full_name}. Bypassing Supabase Auth outer validation layer.`);
-    }
-
-    if (!authValidated) {
-      console.log(`[Auth API] Authenticating email: ${targetEmail} against Supabase...`);
+    // Try Supabase Auth sign-in first
+    try {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: targetEmail,
         password: password
       });
 
-      if (authError || !authData.user) {
-        console.warn("[Auth API] Sign-in rejection:", authError);
-        return res.status(401).json({
-          error_en: "Sign-in failed. Please verify your credentials and try again.",
-          error_ar: "فشل تسجيل الدخول. يرجى التحقق من أوراق اعتمادك والمحاولة مرة أخرى."
-        });
+      if (!authError && authData.user) {
+        userId = authData.user.id;
+        authValidated = true;
       }
-      userId = authData.user.id;
+    } catch (e) {
+      console.warn("Supabase Auth sign-in threw:", e);
+    }
+
+    // Fall back to direct DB password comparison for employees
+    if (!authValidated && userMatched.password) {
+      if (String(userMatched.password).trim() === String(password).trim() ||
+          (storedSaasPassword && String(storedSaasPassword).trim() === String(password).trim())) {
+        userId = userMatched.auth_user_id || userMatched.id || userMatched.user_id || `emp_${userMatched.id}`;
+        authValidated = true;
+      }
+    }
+
+    if (!authValidated) {
+      return res.status(401).json({
+        error_en: "Sign-in failed. Please verify your credentials and try again.",
+        error_ar: "فشل تسجيل الدخول. يرجى التحقق من أوراق اعتمادك والمحاولة مرة أخرى."
+      });
     }
 
     // Generate custom JWT token embedding user identity, role, and tenant isolation parameters
@@ -292,7 +308,7 @@ app.get("/api/auth/verify-invite", async (req, res) => {
     }
 
     let allowed = Array.isArray(record.allowed_pages) ? record.allowed_pages : [];
-    let expires = record.invitation_expires;
+    let expires = record.invitation_expires_at || record.invitation_expires;
     let used = typeof record.invitation_used === "boolean" ? record.invitation_used : false;
 
     if (record.allowed_pages && !Array.isArray(record.allowed_pages)) {
@@ -350,12 +366,17 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     });
   }
 
+  if (!password || password.length < 6) {
+    return res.status(400).json({
+      error_en: "Password must be at least 6 characters.",
+      error_ar: "كلمة المرور يجب أن تكون 6 أحرف على الأقل."
+    });
+  }
+
   try {
-    // 1. Look up the employee record with that invitation token (fully bypassing RLS since it's on the server side!)
     let record = null;
-    
-    // First query standard column
-    const { data: colsData, error: colsErr } = await supabase
+
+    const { data: colsData } = await supabase
       .from("corevia_company_users")
       .select("*")
       .eq("invitation_token", token)
@@ -364,7 +385,6 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     if (colsData) {
       record = colsData;
     } else {
-      // Try JSONB nested search fallback
       const { data: jsonbData } = await supabase
         .from("corevia_company_users")
         .select("*")
@@ -382,10 +402,8 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       });
     }
 
-    // 2. Parse nested fields from allowed_pages if JSONB formatted
     let allowed = Array.isArray(record.allowed_pages) ? record.allowed_pages : [];
-    let tokenVal = record.invitation_token || token;
-    let expires = record.invitation_expires;
+    let expires = record.invitation_expires_at || record.invitation_expires;
     let used = typeof record.invitation_used === "boolean" ? record.invitation_used : false;
     let authId = record.auth_user_id;
 
@@ -394,7 +412,6 @@ app.post("/api/auth/claim-invite", async (req, res) => {
         const parsed = typeof record.allowed_pages === "string" ? JSON.parse(record.allowed_pages) : record.allowed_pages;
         if (parsed && typeof parsed === "object") {
           allowed = parsed.pages || [];
-          tokenVal = parsed.invitation_token || tokenVal;
           expires = parsed.invitation_expires || expires;
           used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : used;
           authId = parsed.auth_user_id || authId;
@@ -404,7 +421,6 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       }
     }
 
-    // 3. Validation checks
     if (used) {
       return res.status(400).json({
         error_en: "This invitation link has already been used. Please log in using your password.",
@@ -419,25 +435,31 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       });
     }
 
-    // 4. Mark invitation as used, and optionally save the password
-    const finalAllowedPages = record.allowed_pages && !Array.isArray(record.allowed_pages)
-      ? {
-          pages: allowed,
-          invitation_token: tokenVal,
-          invitation_expires: expires,
-          invitation_used: true,
-          auth_user_id: authId
+    // Sync password to Supabase Auth
+    if (authId && password) {
+      try {
+        const userEmail = record.email || `${record.username ? record.username.toLowerCase() : "employee"}@corevia.dz`;
+        const testAuthClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+        const { error: signInErr } = await testAuthClient.auth.signInWithPassword({
+          email: userEmail,
+          password: record.password || ""
+        });
+        if (!signInErr) {
+          await testAuthClient.auth.updateUser({ password: password.trim() });
+          await testAuthClient.auth.signOut();
         }
-      : allowed;
+      } catch (ae) {
+        console.warn("Best effort Supabase auth password update skipped:", ae);
+      }
+    }
 
+    // Update DB: mark invitation used, set password_set, activate employee
     const updatePayload: any = {
       invitation_used: true,
-      allowed_pages: finalAllowedPages
+      password_set: true,
+      employee_status: "active",
+      password: password.trim()
     };
-
-    if (password) {
-      updatePayload.password = password.trim();
-    }
 
     const { error: updateErr } = await supabase
       .from("corevia_company_users")
@@ -448,57 +470,32 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       console.error("Failed to update invitation status in DB:", updateErr);
     }
 
-    // Direct pgPool write fallback for absolute speed and durability bypassing RLS completely!
     if (pgPool) {
       try {
-        if (password) {
-          await pgPool.query(
-            `UPDATE corevia_company_users SET invitation_used = true, password = $1, allowed_pages = $2 WHERE id = $3`,
-            [password.trim(), JSON.stringify(finalAllowedPages), record.id]
-          );
-        } else {
-          await pgPool.query(
-            `UPDATE corevia_company_users SET invitation_used = true, allowed_pages = $1 WHERE id = $2`,
-            [JSON.stringify(finalAllowedPages), record.id]
-          );
-        }
+        await pgPool.query(
+          `UPDATE corevia_company_users SET invitation_used = true, password_set = true, employee_status = 'active', password = $1 WHERE id = $2`,
+          [password.trim(), record.id]
+        );
       } catch (dbErr) {
         console.warn("pgPool sync update for invitation failed:", dbErr);
       }
     }
 
-    // Best-effort secondary auth user password update!
-    if (authId && password) {
-      try {
-        const userEmail = record.email || `${record.username.toLowerCase()}@corevia.dz`;
-        // Perform a sign-in with previous password to allow password change, or update directly if admin key present
-        const testAuthClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
-        const { data: signInData, error: signInErr } = await testAuthClient.auth.signInWithPassword({
-          email: userEmail,
-          password: record.password || ""
-        });
-        if (!signInErr && signInData.user) {
-          await testAuthClient.auth.updateUser({ password: password.trim() });
-        }
-      } catch (ae) {
-        console.warn("Best effort Supabase auth password update skipped or failed:", ae);
-      }
-    }
-
-    // 5. Generate secure JWT session cookie for instant session enrollment
-    const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration
+    // Generate JWT using auth_user_id (Supabase Auth user id) as user_id
+    const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60);
     const targetEmail = record.email || `${(record.username || record.id || "employee").toLowerCase()}@corevia.dz`;
-    
+    const jwtUserId = authId || record.id;
+
     const jwtToken = jwt.sign(
-      { 
-        user_id: record.id, 
-        tenant_id: record.company_id, 
-        role: "employee", 
+      {
+        user_id: jwtUserId,
+        tenant_id: record.company_id,
+        role: "employee",
         email: targetEmail,
-        is_read_only: record.status === "Read Only",
-        iat: Math.floor(Date.now() / 1000), 
-        exp: exp 
-      }, 
+        is_read_only: false,
+        iat: Math.floor(Date.now() / 1000),
+        exp: exp
+      },
       JWT_SECRET
     );
 
@@ -506,7 +503,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: "/"
     });
 
@@ -515,14 +512,14 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       email: targetEmail,
       isRegistered: true,
       isApproved: true,
-      isSuspended: record.status === "Suspended",
-      userId: record.id,
-      user_id: record.id,
+      isSuspended: false,
+      userId: jwtUserId,
+      user_id: jwtUserId,
       company_id: record.company_id,
       role: "employee",
       allowedPages: allowed,
       jobTitle: record.job_title || "Employee",
-      isReadOnly: record.status === "Read Only"
+      isReadOnly: false
     };
 
     return res.status(200).json({
@@ -620,6 +617,8 @@ app.get("/api/auth/session", async (req, res) => {
 
     const resolvedUsername = employees ? employees.username : (saasUsers ? saasUsers.username : "User");
 
+    const empStatus = employees ? (employees.employee_status || (employees.status === "Suspended" ? "suspended" : "active")) : "active";
+
     return res.status(200).json({
       authenticated: true,
       session: {
@@ -627,7 +626,7 @@ app.get("/api/auth/session", async (req, res) => {
         email: saasUsers ? saasUsers.email : (employees ? employees.email || `${employees.username}@corevia.dz` : "resolved@corevia.dz"),
         isRegistered: true,
         isApproved: true,
-        isSuspended: employees ? employees.status === "Suspended" : false,
+        isSuspended: empStatus === "suspended" || empStatus === "inactive",
         userId: decoded.user_id,
         user_id: decoded.user_id,
         company_id: decoded.tenant_id,

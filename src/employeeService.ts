@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { supabase, createSecondaryClient } from "./supabaseClient";
 
 export interface Employee {
   id: string;
@@ -12,12 +12,16 @@ export interface Employee {
   allowedPages: string[];
   assignedResponsibilities?: string;
   status: "Active" | "Read Only" | "Suspended";
+  employee_status?: string;
+  employee_role?: string;
   lastActivity?: string;
   createdAt: string;
   auth_user_id?: string;
   invitation_token?: string;
+  invitation_expires_at?: string;
   invitation_expires?: string;
   invitation_used?: boolean;
+  password_set?: boolean;
 }
 
 // Local Storage helper for holding offline/cached copies
@@ -95,9 +99,10 @@ export async function generateUniqueUsername(fullName: string): Promise<string> 
 
 /**
  * Generate a secure single-use invitation token (7-day expiry).
+ * Token format: hex-encoded 32 random bytes (64 chars).
  */
 export function generateInvitationToken(): { token: string; expiresAt: string } {
-  const raw = crypto.getRandomValues(new Uint8Array(24));
+  const raw = crypto.getRandomValues(new Uint8Array(32));
   const token = Array.from(raw, b => b.toString(16).padStart(2, "0")).join("");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   return { token, expiresAt };
@@ -165,11 +170,15 @@ export async function createEmployeeWithAuth(params: {
     allowedPages: params.allowedPages,
     assignedResponsibilities: params.assignedResponsibilities,
     status: params.status,
+    employee_status: "pending",
+    employee_role: "employee",
     createdAt: new Date().toISOString(),
     auth_user_id: authUserId,
     invitation_token: token,
+    invitation_expires_at: expiresAt,
     invitation_expires: expiresAt,
-    invitation_used: false
+    invitation_used: false,
+    password_set: false
   };
 
   const saveOk = await saveEmployee(employee);
@@ -213,10 +222,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
     if (data) {
       const mapped: Employee[] = data.map((item: any) => {
         let pages: string[] = [];
-        let token: string | undefined = undefined;
-        let expires: string | undefined = undefined;
-        let used: boolean | undefined = undefined;
-        let authId: string | undefined = undefined;
 
         if (item.allowed_pages) {
           try {
@@ -225,10 +230,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
               pages = parsed;
             } else if (parsed && typeof parsed === "object") {
               pages = parsed.pages || [];
-              token = parsed.invitation_token || undefined;
-              expires = parsed.invitation_expires || undefined;
-              used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : undefined;
-              authId = parsed.auth_user_id || undefined;
             }
           } catch (e) {
             console.warn("Parse allowed_pages failed:", e);
@@ -247,12 +248,16 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
           allowedPages: pages,
           assignedResponsibilities: item.assigned_responsibilities || undefined,
           status: item.status || "Active",
+          employee_status: item.employee_status || undefined,
+          employee_role: item.employee_role || undefined,
           lastActivity: item.last_activity || undefined,
           createdAt: item.created_at || new Date().toISOString(),
-          auth_user_id: authId,
-          invitation_token: token,
-          invitation_expires: expires,
-          invitation_used: used
+          auth_user_id: item.auth_user_id || undefined,
+          invitation_token: item.invitation_token || undefined,
+          invitation_expires_at: item.invitation_expires_at || undefined,
+          invitation_expires: item.invitation_expires || undefined,
+          invitation_used: typeof item.invitation_used === "boolean" ? item.invitation_used : undefined,
+          password_set: typeof item.password_set === "boolean" ? item.password_set : undefined
         };
       });
 
@@ -299,7 +304,7 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
   }
 
   try {
-    const dbPayload = {
+    const dbPayload: Record<string, any> = {
       id: employee.id,
       company_id: employee.companyId,
       full_name: employee.fullName,
@@ -309,15 +314,16 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       job_title: employee.jobTitle,
       password: employee.password || "",
       assigned_responsibilities: employee.assignedResponsibilities || null,
-      allowed_pages: {
-        pages: employee.allowedPages || [],
-        invitation_token: employee.invitation_token || null,
-        invitation_expires: employee.invitation_expires || null,
-        invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
-        auth_user_id: employee.auth_user_id || null
-      },
+      allowed_pages: employee.allowedPages || [],
       status: employee.status,
-      last_activity: employee.lastActivity || null
+      employee_status: employee.employee_status || (employee.status === "Active" ? "active" : employee.status === "Read Only" ? "active" : "inactive"),
+      employee_role: employee.employee_role || "employee",
+      last_activity: employee.lastActivity || null,
+      auth_user_id: employee.auth_user_id || null,
+      invitation_token: employee.invitation_token || null,
+      invitation_expires_at: employee.invitation_expires_at || employee.invitation_expires || null,
+      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
+      password_set: typeof employee.password_set === "boolean" ? employee.password_set : null
     };
 
     const { error } = await supabase
