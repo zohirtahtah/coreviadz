@@ -953,6 +953,7 @@ CREATE OR REPLACE FUNCTION get_current_company_id()
 RETURNS TEXT
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT COALESCE(
@@ -966,6 +967,7 @@ CREATE OR REPLACE FUNCTION is_super_admin()
 RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT EXISTS (
@@ -1385,6 +1387,10 @@ CREATE INDEX IF NOT EXISTS idx_sub_reminders_sent ON corevia_subscription_remind
 CREATE INDEX IF NOT EXISTS idx_admin_audit_time ON corevia_admin_audit_logs(created_at DESC);
 
 COMMIT;
+
+-- Grant function execute to anon role (required for RLS policies with SECURITY DEFINER)
+GRANT EXECUTE ON FUNCTION get_current_company_id() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION is_super_admin() TO anon, authenticated;
 
 -- VERIFICATION QUERIES (run after migration)
 -- SELECT column_name, data_type FROM information_schema.columns

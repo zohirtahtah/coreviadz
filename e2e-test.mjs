@@ -144,7 +144,7 @@ try {
   };
   if (hasCol["corevia_company_users"]?.invitation_token === "exists") {
     empPayload.invitation_token = token;
-    empPayload.invitation_expires_at_at = expiresAt;
+    empPayload.invitation_expires_at = expiresAt;
     empPayload.invitation_used = false;
     empPayload.password_set = true;
   }
