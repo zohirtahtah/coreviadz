@@ -1,4 +1,4 @@
-import { supabase, createSecondaryClient } from "./supabaseClient";
+import { supabase } from "./supabaseClient";
 
 export interface Employee {
   id: string;
@@ -8,7 +8,6 @@ export interface Employee {
   email?: string;
   username?: string;
   jobTitle: string;
-  password?: string;
   allowedPages: string[];
   assignedResponsibilities?: string;
   status: "Active" | "Read Only" | "Suspended";
@@ -24,7 +23,6 @@ export interface Employee {
   password_set?: boolean;
 }
 
-// Local Storage helper for holding offline/cached copies
 const STORAGE_KEY = "corevia_employees_list_v2";
 
 export function getLocalEmployees(): Employee[] {
@@ -37,18 +35,15 @@ export function getLocalEmployees(): Employee[] {
   }
 }
 
-export function saveLocalEmployees(employees: Employee[]): void {
+function saveLocalEmployees(employees: Employee[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(employees));
+    const sanitized = employees.map(({ ...e }) => e);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
   } catch (e) {
     console.error("Failed to save local employees", e);
   }
 }
 
-/**
- * Generate a globally unique username based on the employee's full name.
- * Pattern: firstname.lastname or firstname.lastname.NNN
- */
 export async function generateUniqueUsername(fullName: string): Promise<string> {
   const base = fullName
     .toLowerCase()
@@ -97,10 +92,6 @@ export async function generateUniqueUsername(fullName: string): Promise<string> 
   return candidate;
 }
 
-/**
- * Generate a secure single-use invitation token (7-day expiry).
- * Token format: hex-encoded 32 random bytes (64 chars).
- */
 export function generateInvitationToken(): { token: string; expiresAt: string } {
   const raw = crypto.getRandomValues(new Uint8Array(32));
   const token = Array.from(raw, b => b.toString(16).padStart(2, "0")).join("");
@@ -108,11 +99,6 @@ export function generateInvitationToken(): { token: string; expiresAt: string } 
   return { token, expiresAt };
 }
 
-/**
- * Create a real Supabase Auth account for the employee,
- * upsert the employee record into corevia_company_users,
- * and return the full Employee object.
- */
 export async function createEmployeeWithAuth(params: {
   id: string;
   companyId: string;
@@ -121,42 +107,35 @@ export async function createEmployeeWithAuth(params: {
   email?: string;
   username: string;
   jobTitle: string;
-  password: string;
   allowedPages: string[];
   status: "Active" | "Read Only" | "Suspended";
   assignedResponsibilities?: string;
 }): Promise<{ employee: Employee; error?: string }> {
-  const signUpSecondary = createSecondaryClient();
-  if (!signUpSecondary) {
-    return { employee: null as any, error: "Supabase client not available" };
-  }
-
   const loginEmail = params.email || `${params.username}@corevia.dz`;
-
-  const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
-    email: loginEmail,
-    password: params.password,
-    options: {
-      data: {
-        company_id: params.companyId,
-        employee_id: params.id,
-        role: "employee",
-        username: params.username,
-        full_name: params.fullName
-      }
-    }
-  });
-
-  if (authError) {
-    return { employee: null as any, error: authError.message };
-  }
-
-  const authUserId = authData.user?.id;
-  if (!authUserId) {
-    return { employee: null as any, error: "Failed to get auth user ID" };
-  }
-
   const { token, expiresAt } = generateInvitationToken();
+
+  let authUserId = "";
+  try {
+    const res = await fetch("/api/auth/invite-employee", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: loginEmail,
+        fullName: params.fullName,
+        username: params.username,
+        companyId: params.companyId,
+        employeeId: params.id,
+        invitationToken: token
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { employee: null as any, error: data.error || "Failed to create auth account" };
+    }
+    authUserId = data.authUserId;
+  } catch (e: any) {
+    return { employee: null as any, error: "Server offline: " + e.message };
+  }
 
   const employee: Employee = {
     id: params.id,
@@ -166,7 +145,6 @@ export async function createEmployeeWithAuth(params: {
     email: params.email,
     username: params.username,
     jobTitle: params.jobTitle,
-    password: params.password,
     allowedPages: params.allowedPages,
     assignedResponsibilities: params.assignedResponsibilities,
     status: params.status,
@@ -183,59 +161,31 @@ export async function createEmployeeWithAuth(params: {
 
   const saveOk = await saveEmployee(employee);
   if (!saveOk) {
-    try {
-      await signUpSecondary.auth.admin.deleteUser(authUserId);
-    } catch (cleanupErr) {
-      console.warn("Failed to clean up auth account after DB save failure:", cleanupErr);
-    }
-    return { employee: null as any, error: "Failed to save employee record. Auth account cleaned up." };
+    return { employee: null as any, error: "Failed to save employee record." };
   }
 
   return { employee };
 }
 
-/**
- * Fetch all employees for this company from Supabase,
- * falling back to local cache if offline.
- */
 export async function getEmployees(companyId: string): Promise<Employee[]> {
   const localList = getLocalEmployees().filter(e => e.companyId === companyId);
 
-  if (!supabase) {
-    return localList;
-  }
-
   try {
-    const { data, error } = await supabase
-      .from("corevia_company_users")
-      .select("*")
-      .eq("company_id", companyId);
-
-    if (error) {
-      if (error.code === "PGRST116" || error.code === "42P01") {
-        // Table not created yet, return local cached state
-        return localList;
-      }
-      throw error;
+    const res = await fetch("/api/employees?companyId=" + encodeURIComponent(companyId));
+    if (!res.ok) {
+      return localList;
     }
-
-    if (data) {
+    const data = await res.json();
+    if (Array.isArray(data)) {
       const mapped: Employee[] = data.map((item: any) => {
         let pages: string[] = [];
-
         if (item.allowed_pages) {
           try {
             const parsed = typeof item.allowed_pages === "string" ? JSON.parse(item.allowed_pages) : item.allowed_pages;
-            if (Array.isArray(parsed)) {
-              pages = parsed;
-            } else if (parsed && typeof parsed === "object") {
-              pages = parsed.pages || [];
-            }
-          } catch (e) {
-            console.warn("Parse allowed_pages failed:", e);
-          }
+            if (Array.isArray(parsed)) pages = parsed;
+            else if (parsed && typeof parsed === "object") pages = parsed.pages || [];
+          } catch (e) {}
         }
-
         return {
           id: item.id,
           companyId: item.company_id,
@@ -244,7 +194,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
           email: item.email || undefined,
           username: item.username || undefined,
           jobTitle: item.job_title || "",
-          password: item.password,
           allowedPages: pages,
           assignedResponsibilities: item.assigned_responsibilities || undefined,
           status: item.status || "Active",
@@ -261,35 +210,24 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         };
       });
 
-      // Cache back locally for stability, sorting by creation date
       const otherCompaniesObj = getLocalEmployees().filter(e => e.companyId !== companyId);
-      
       const mergedList = [...localList];
       mapped.forEach(dbEmp => {
         const idx = mergedList.findIndex(e => e.id === dbEmp.id);
-        if (idx !== -1) {
-          mergedList[idx] = dbEmp;
-        } else {
-          mergedList.push(dbEmp);
-        }
+        if (idx !== -1) mergedList[idx] = dbEmp;
+        else mergedList.push(dbEmp);
       });
-
       saveLocalEmployees([...otherCompaniesObj, ...mergedList]);
-
       return mergedList;
     }
   } catch (e) {
-    console.warn("Failed to fetch employees from Supabase, reverting to local cache:", e);
+    console.warn("Failed to fetch employees from server, using local cache:", e);
   }
 
   return localList;
 }
 
-/**
- * Saves or updates an employee onto both local storage and Supabase database.
- */
 export async function saveEmployee(employee: Employee): Promise<boolean> {
-  // Update local storage first
   const currentLocal = getLocalEmployees();
   const index = currentLocal.findIndex(e => e.id === employee.id);
   if (index !== -1) {
@@ -299,80 +237,55 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
   }
   saveLocalEmployees(currentLocal);
 
-  if (!supabase) {
-    return true;
-  }
-
   try {
-    const dbPayload: Record<string, any> = {
-      id: employee.id,
-      company_id: employee.companyId,
-      full_name: employee.fullName,
-      phone: employee.phone,
-      email: employee.email || null,
-      username: employee.username || null,
-      job_title: employee.jobTitle,
-      password: employee.password || "",
-      assigned_responsibilities: employee.assignedResponsibilities || null,
-      allowed_pages: employee.allowedPages || [],
-      status: employee.status,
-      employee_status: employee.employee_status || (employee.status === "Active" ? "active" : employee.status === "Read Only" ? "active" : "inactive"),
-      employee_role: employee.employee_role || "employee",
-      last_activity: employee.lastActivity || null,
-      auth_user_id: employee.auth_user_id || null,
-      invitation_token: employee.invitation_token || null,
-      invitation_expires_at: employee.invitation_expires_at || employee.invitation_expires || null,
-      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
-      password_set: typeof employee.password_set === "boolean" ? employee.password_set : null
-    };
-
-    const { error } = await supabase
-      .from("corevia_company_users")
-      .upsert(dbPayload);
-
-    if (error) {
-      console.warn("Could not save employee to remote db table:", error);
-      return false;
-    }
-    return true;
+    const res = await fetch("/api/employees", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: employee.id,
+        company_id: employee.companyId,
+        full_name: employee.fullName,
+        phone: employee.phone,
+        email: employee.email || null,
+        username: employee.username || null,
+        job_title: employee.jobTitle,
+        assigned_responsibilities: employee.assignedResponsibilities || null,
+        allowed_pages: employee.allowedPages || [],
+        status: employee.status,
+        employee_status: employee.employee_status || (employee.status === "Active" ? "active" : "inactive"),
+        employee_role: employee.employee_role || "employee",
+        last_activity: employee.lastActivity || null,
+        auth_user_id: employee.auth_user_id || null,
+        invitation_token: employee.invitation_token || null,
+        invitation_expires_at: employee.invitation_expires_at || employee.invitation_expires || null,
+        invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
+        password_set: typeof employee.password_set === "boolean" ? employee.password_set : null
+      })
+    });
+    return res.ok;
   } catch (err) {
-    console.warn("Network offline or missing table during employee save:", err);
+    console.warn("Network offline during employee save:", err);
     return false;
   }
 }
 
-/**
- * Removes an employee from both local storage and Supabase database.
- */
 export async function deleteEmployee(employeeId: string, companyId: string): Promise<boolean> {
   const currentLocal = getLocalEmployees().filter(e => e.id !== employeeId);
   saveLocalEmployees(currentLocal);
 
-  if (!supabase) {
-    return true;
-  }
-
   try {
-    const { error } = await supabase
-      .from("corevia_company_users")
-      .delete()
-      .eq("id", employeeId)
-      .eq("company_id", companyId);
-
-    if (error) {
-      console.warn("Could not delete employee on remote database table:", error);
-      return false;
-    }
-    return true;
+    const res = await fetch("/api/employees/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: employeeId, company_id: companyId })
+    });
+    return res.ok;
   } catch (err) {
-    console.warn("Network offline or missing database table during employee delete:", err);
+    console.warn("Network offline during employee delete:", err);
     return false;
   }
 }
 
-/**
- * Updates the last active time of an employee.
- */
 export async function updateEmployeeLastActive(employeeId: string, activeTime: string): Promise<void> {
   const currentLocal = getLocalEmployees();
   const index = currentLocal.findIndex(e => e.id === employeeId);
@@ -381,14 +294,11 @@ export async function updateEmployeeLastActive(employeeId: string, activeTime: s
     saveLocalEmployees(currentLocal);
   }
 
-  if (!supabase) return;
-
   try {
-    await supabase
-      .from("corevia_company_users")
-      .update({ last_activity: activeTime })
-      .eq("id", employeeId);
-  } catch (e) {
-    // Silent fail
-  }
+    await fetch("/api/employees/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: employeeId, last_activity: activeTime })
+    });
+  } catch (e) {}
 }

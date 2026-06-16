@@ -339,22 +339,8 @@ export default function Auth({
     setIsSubmitting(true);
 
     if (authMode === "login") {
-      let finalEmail = emailInput.trim();
-      let finalPassword = passwordInput;
-
-      // Fail-safe URL credential recovery to completely bypass synchronous React state closure latencies
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const urlEmail = params.get("email") || params.get("login_email") || params.get("username") || params.get("user");
-        const urlPass = params.get("pass") || params.get("password") || params.get("login_password");
-        if ((!finalEmail || !finalPassword) && urlEmail && urlPass) {
-          finalEmail = decodeURIComponent(urlEmail).trim();
-          finalPassword = decodeURIComponent(urlPass);
-          
-          setEmailInput(finalEmail);
-          setPasswordInput(finalPassword);
-        }
-      } catch (err) {}
+      const finalEmail = emailInput.trim();
+      const finalPassword = passwordInput;
 
       if (!finalEmail || !finalPassword) {
         onTriggerNotification(isRtl ? "يرجى ملء جميع الحقول المطلوبة" : "Please fill in all fields", "info");
@@ -384,7 +370,7 @@ export default function Auth({
 
         const authenticatedSession: UserSession = resData.session;
 
-        // Optionally cache to local storage in parallel for fallback
+        // Cache session metadata to local storage
         try {
           const currentLocal = getLocalEmployees();
           const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
@@ -396,7 +382,6 @@ export default function Auth({
             phone: "",
             jobTitle: authenticatedSession.jobTitle || "Employee",
             allowedPages: authenticatedSession.allowedPages || [],
-            password: finalPassword,
             status: "Active",
             createdAt: new Date().toISOString()
           };
@@ -443,79 +428,10 @@ export default function Auth({
 
       } catch (err: any) {
         console.error("Auth login api error:", err);
-
-        // A. Check local backup employees lists for quick success robust fallback
-        try {
-          const cachedEmployees = getLocalEmployees();
-          const matchedEmployee = cachedEmployees.find(emp => {
-            const empNum = emp.phone ? emp.phone.replace(/[^0-9]/g, "") : "";
-            const inputNum = finalEmail.replace(/[^0-9]/g, "");
-            const isMatchEmail = emp.email && emp.email.toLowerCase().trim() === finalEmail.toLowerCase().trim();
-            const isMatchUsername = emp.username && emp.username.toLowerCase().trim() === finalEmail.toLowerCase().trim();
-            const isMatchPhone = empNum && inputNum && (empNum.length > 5 && inputNum.length > 5 && (empNum.includes(inputNum) || inputNum.includes(empNum)));
-            return (isMatchEmail || isMatchUsername || isMatchPhone) && String(emp.password).trim() === String(finalPassword).trim();
-          });
-
-          if (matchedEmployee) {
-            if (matchedEmployee.status === "Suspended") {
-              onTriggerNotification(isRtl ? "هذا الحساب معطل وموقوف حالياً" : "This account is suspended", "info");
-              setIsSubmitting(false);
-              return;
-            }
-
-            const employeeSession: UserSession = {
-              username: matchedEmployee.fullName,
-              email: matchedEmployee.email || `${matchedEmployee.username}@corevia.dz`,
-              isRegistered: true,
-              isApproved: true,
-              isSuspended: false,
-              userId: matchedEmployee.id,
-              user_id: matchedEmployee.id,
-              company_id: matchedEmployee.companyId,
-              role: "employee",
-              allowedPages: matchedEmployee.allowedPages,
-              jobTitle: matchedEmployee.jobTitle,
-              isReadOnly: matchedEmployee.status === "Read Only"
-            };
-
-            onAuthSuccess(employeeSession);
-            onTriggerNotification(
-              isRtl 
-                ? `تم تسجيل دخول الموظف ${matchedEmployee.fullName} بنجاح!` 
-                : `Logged in offline employee account ${matchedEmployee.fullName} successfully!`, 
-              "success"
-            );
-            setIsSubmitting(false);
-            return;
-          }
-        } catch (localCheckErr) {
-          console.warn("[Auth Fallback Error]", localCheckErr);
-        }
-
-        // Fallback to local simulation in case server is not fully up or offline
-        if (!supabase || finalEmail.toLowerCase().trim() === "coreviadz@gmail.com") {
-          const adminUserId = "usr_super_admin_coreviadz";
-          const isSuperAdminEmail = finalEmail.toLowerCase().trim() === "coreviadz@gmail.com";
-          const emailPrefix = finalEmail.split("@")[0] || "usr";
-          const fallbackSession: UserSession = {
-            username: isSuperAdminEmail ? "Zohir Corevia" : (finalEmail.split("@")[0] || "User"),
-            email: finalEmail,
-            isRegistered: true,
-            isApproved: true,
-            isSuspended: false,
-            user_id: adminUserId,
-            userId: adminUserId,
-            company_id: isSuperAdminEmail ? `cop_${adminUserId.substring(0, 15)}` : `cop_${emailPrefix.substring(0, 10)}`,
-            role: isSuperAdminEmail ? "super_admin" : "admin"
-          };
-          onAuthSuccess(fallbackSession);
-          onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح (وضع المحاكاة المتصل بنظام التخزين المحلي)!" : "Logged in successfully (Simulated mode)!", "success");
-        } else {
-          onTriggerNotification(
-            isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
-            "info"
-          );
-        }
+        onTriggerNotification(
+          isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
+          "info"
+        );
       } finally {
         setIsSubmitting(false);
       }

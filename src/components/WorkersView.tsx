@@ -1162,7 +1162,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
           email: matchingEmp?.email || `${slug}@corevia.dz`,
           username: matchingEmp?.username || slug,
           jobTitle: formRole || "موظف",
-          password: matchingEmp?.password || Math.floor(100000 + Math.random() * 900000).toString(),
           allowedPages: matchingEmp?.allowedPages || ["my-profile"], // only personal info view
           status: matchingEmp?.status || "Active",
           createdAt: matchingEmp?.createdAt || new Date().toISOString()

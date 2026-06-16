@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import cookieParser from "cookie-parser";
@@ -23,6 +24,12 @@ app.use(cookieParser());
 const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://yuuqxprqvlqvoyoltwiw.supabase.co";
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1dXF4cHJxdmxxdm95b2x0d2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjAwMTksImV4cCI6MjA5NjMzNjAxOX0.mPInS2oEpM7_M1mPbCiLTf2ntK5M7uhrySWNEYLvNr8";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Admin client with service_role key for employee management (bypasses RLS)
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || "";
+const supabaseAdmin = supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } })
+  : supabase;
 
 // Initialize Raw Postgres Connection Pool (If DATABASE_URL environment variable is provided)
 let pgPool: pg.Pool | null = null;
@@ -64,8 +71,98 @@ function broadcastToTenant(tenantId: string, payload: any) {
 }
 
 // -------------------------------------------------------------
-// AUTHENTICATION AND SECURITY API ENDPOINTS
+// EMPLOYEE CRUD ENDPOINTS (use supabaseAdmin to bypass RLS)
 // -------------------------------------------------------------
+
+// GET /api/employees -> List employees for a company
+app.get("/api/employees", async (req, res) => {
+  const { companyId } = req.query;
+  if (!companyId) return res.status(400).json({ error: "companyId required" });
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("corevia_company_users")
+      .select("*")
+      .eq("company_id", companyId);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/employees -> Upsert an employee
+app.post("/api/employees", async (req, res) => {
+  try {
+    const payload = req.body;
+    const { error } = await supabaseAdmin
+      .from("corevia_company_users")
+      .upsert(payload);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/employees/delete -> Delete an employee
+app.post("/api/employees/delete", async (req, res) => {
+  const { id, company_id } = req.body;
+  if (!id) return res.status(400).json({ error: "id required" });
+  try {
+    const query = supabaseAdmin.from("corevia_company_users").delete().eq("id", id);
+    if (company_id) query.eq("company_id", company_id);
+    const { error } = await query;
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/employees/active -> Update last activity
+app.post("/api/employees/active", async (req, res) => {
+  const { id, last_activity } = req.body;
+  if (!id) return res.status(400).json({ error: "id required" });
+  try {
+    await supabaseAdmin
+      .from("corevia_company_users")
+      .update({ last_activity })
+      .eq("id", id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/invite-employee -> Create Supabase Auth account + store invite token
+app.post("/api/auth/invite-employee", async (req, res) => {
+  const { email, fullName, username, companyId, employeeId, invitationToken } = req.body;
+  if (!email) return res.status(400).json({ error: "Email required" });
+
+  try {
+    if (!supabaseServiceKey) {
+      return res.status(500).json({ error: "SUPABASE_SERVICE_KEY not configured. Set it in your environment." });
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: {
+        company_id: companyId,
+        employee_id: employeeId,
+        role: "employee",
+        username: username,
+        full_name: fullName,
+        invitation_token: invitationToken
+      }
+    });
+
+    if (error) throw error;
+    if (!data.user) throw new Error("No user returned");
+
+    res.json({ authUserId: data.user.id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------------------------------------
 // AUTHENTICATION AND SECURITY API ENDPOINTS
@@ -159,11 +256,10 @@ app.post("/api/auth/login", async (req, res) => {
       }
     }
 
-    // Validate password via Supabase Auth first, then fall back to direct comparison
+    // Validate password via Supabase Auth only (single source of truth)
     let userId = "";
     let authValidated = false;
 
-    // Try Supabase Auth sign-in first
     try {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: targetEmail,
@@ -176,15 +272,6 @@ app.post("/api/auth/login", async (req, res) => {
       }
     } catch (e) {
       console.warn("Supabase Auth sign-in threw:", e);
-    }
-
-    // Fall back to direct DB password comparison for employees
-    if (!authValidated && userMatched.password) {
-      if (String(userMatched.password).trim() === String(password).trim() ||
-          (storedSaasPassword && String(storedSaasPassword).trim() === String(password).trim())) {
-        userId = userMatched.auth_user_id || userMatched.id || userMatched.user_id || `emp_${userMatched.id}`;
-        authValidated = true;
-      }
     }
 
     if (!authValidated) {
@@ -279,8 +366,8 @@ app.get("/api/auth/verify-invite", async (req, res) => {
   try {
     let record = null;
     
-    // Query standard column first
-    const { data: colsData } = await supabase
+    // Query standard column first (use supabaseAdmin to bypass RLS for unauthenticated users)
+    const { data: colsData } = await supabaseAdmin
       .from("corevia_company_users")
       .select("*")
       .eq("invitation_token", token)
@@ -376,7 +463,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
   try {
     let record = null;
 
-    const { data: colsData } = await supabase
+    const { data: colsData } = await supabaseAdmin
       .from("corevia_company_users")
       .select("*")
       .eq("invitation_token", token)
@@ -385,7 +472,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     if (colsData) {
       record = colsData;
     } else {
-      const { data: jsonbData } = await supabase
+      const { data: jsonbData } = await supabaseAdmin
         .from("corevia_company_users")
         .select("*")
         .eq("allowed_pages->>invitation_token", token)
@@ -435,50 +522,29 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       });
     }
 
-    // Sync password to Supabase Auth
+    // Set password in Supabase Auth using admin API
     if (authId && password) {
       try {
-        const userEmail = record.email || `${record.username ? record.username.toLowerCase() : "employee"}@corevia.dz`;
-        const testAuthClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
-        const { error: signInErr } = await testAuthClient.auth.signInWithPassword({
-          email: userEmail,
-          password: record.password || ""
-        });
-        if (!signInErr) {
-          await testAuthClient.auth.updateUser({ password: password.trim() });
-          await testAuthClient.auth.signOut();
-        }
+        await supabaseAdmin.auth.admin.updateUserById(authId, { password: password.trim() });
       } catch (ae) {
-        console.warn("Best effort Supabase auth password update skipped:", ae);
+        console.warn("Supabase Auth admin password update failed:", ae);
       }
     }
 
-    // Update DB: mark invitation used, set password_set, activate employee
+    // Update DB: mark invitation used, set password_set, activate employee (no password stored)
     const updatePayload: any = {
       invitation_used: true,
       password_set: true,
-      employee_status: "active",
-      password: password.trim()
+      employee_status: "active"
     };
 
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await supabaseAdmin
       .from("corevia_company_users")
       .update(updatePayload)
       .eq("id", record.id);
 
     if (updateErr) {
       console.error("Failed to update invitation status in DB:", updateErr);
-    }
-
-    if (pgPool) {
-      try {
-        await pgPool.query(
-          `UPDATE corevia_company_users SET invitation_used = true, password_set = true, employee_status = 'active', password = $1 WHERE id = $2`,
-          [password.trim(), record.id]
-        );
-      } catch (dbErr) {
-        console.warn("pgPool sync update for invitation failed:", dbErr);
-      }
     }
 
     // Generate JWT using auth_user_id (Supabase Auth user id) as user_id
@@ -600,16 +666,16 @@ app.get("/api/auth/session", async (req, res) => {
     const decoded: any = jwt.verify(token, JWT_SECRET);
     
     // Validate with Supabase auth instance that user session is still alive
-    const { data: authUserRecord, error: authUserErr } = await supabase.auth.admin.getUserById(decoded.user_id).catch(() => ({ data: { user: null }, error: null }));
+    const { data: authUserRecord, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(decoded.user_id).catch(() => ({ data: { user: null }, error: null }));
 
     // Generate responsive active session response
-    const { data: saasUsers } = await supabase
+    const { data: saasUsers } = await supabaseAdmin
       .from("corevia_saas_users")
       .select("*")
       .eq("user_id", decoded.user_id)
       .maybeSingle();
 
-    const { data: employees } = await supabase
+    const { data: employees } = await supabaseAdmin
       .from("corevia_company_users")
       .select("*")
       .or(`auth_user_id.eq.${decoded.user_id},id.eq.${decoded.user_id}`)
