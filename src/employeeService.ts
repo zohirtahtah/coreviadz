@@ -42,8 +42,152 @@ export function saveLocalEmployees(employees: Employee[]): void {
 }
 
 /**
- * Fetch all employees for this company from Supabase if configured,
- * falling back and syncing with local storage.
+ * Generate a globally unique username based on the employee's full name.
+ * Pattern: firstname.lastname or firstname.lastname.NNN
+ */
+export async function generateUniqueUsername(fullName: string): Promise<string> {
+  const base = fullName
+    .toLowerCase()
+    .trim()
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[^a-zA-Z0-9\u0621-\u064a\s]/g, "")
+    .replace(/\s+/g, ".")
+    .replace(/^\.|\.$/g, "")
+    .substring(0, 30);
+
+  if (!base) return "user." + Math.floor(100 + Math.random() * 900);
+
+  let maxCounter = 0;
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from("corevia_company_users")
+        .select("username")
+        .like("username", base + ".%")
+        .limit(1000);
+
+      if (data) {
+        data.forEach((row: any) => {
+          const suffix = row.username?.substring(base.length + 1);
+          const num = parseInt(suffix, 10);
+          if (!isNaN(num) && num > maxCounter) {
+            maxCounter = num;
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Could not query usernames for uniqueness:", e);
+    }
+  }
+
+  const candidate = base + "." + String(maxCounter + 1).padStart(3, "0");
+
+  const local = getLocalEmployees();
+  const localExists = local.some(e => e.username === candidate);
+  if (localExists) {
+    return base + "." + String(maxCounter + 2).padStart(3, "0");
+  }
+
+  return candidate;
+}
+
+/**
+ * Generate a secure single-use invitation token (7-day expiry).
+ */
+export function generateInvitationToken(): { token: string; expiresAt: string } {
+  const raw = crypto.getRandomValues(new Uint8Array(24));
+  const token = Array.from(raw, b => b.toString(16).padStart(2, "0")).join("");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  return { token, expiresAt };
+}
+
+/**
+ * Create a real Supabase Auth account for the employee,
+ * upsert the employee record into corevia_company_users,
+ * and return the full Employee object.
+ */
+export async function createEmployeeWithAuth(params: {
+  id: string;
+  companyId: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  username: string;
+  jobTitle: string;
+  password: string;
+  allowedPages: string[];
+  status: "Active" | "Read Only" | "Suspended";
+  assignedResponsibilities?: string;
+}): Promise<{ employee: Employee; error?: string }> {
+  const signUpSecondary = createSecondaryClient();
+  if (!signUpSecondary) {
+    return { employee: null as any, error: "Supabase client not available" };
+  }
+
+  const loginEmail = params.email || `${params.username}@corevia.dz`;
+
+  const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
+    email: loginEmail,
+    password: params.password,
+    options: {
+      data: {
+        company_id: params.companyId,
+        employee_id: params.id,
+        role: "employee",
+        username: params.username,
+        full_name: params.fullName
+      }
+    }
+  });
+
+  if (authError) {
+    return { employee: null as any, error: authError.message };
+  }
+
+  const authUserId = authData.user?.id;
+  if (!authUserId) {
+    return { employee: null as any, error: "Failed to get auth user ID" };
+  }
+
+  const { token, expiresAt } = generateInvitationToken();
+
+  const employee: Employee = {
+    id: params.id,
+    companyId: params.companyId,
+    fullName: params.fullName,
+    phone: params.phone,
+    email: params.email,
+    username: params.username,
+    jobTitle: params.jobTitle,
+    password: params.password,
+    allowedPages: params.allowedPages,
+    assignedResponsibilities: params.assignedResponsibilities,
+    status: params.status,
+    createdAt: new Date().toISOString(),
+    auth_user_id: authUserId,
+    invitation_token: token,
+    invitation_expires: expiresAt,
+    invitation_used: false
+  };
+
+  const saveOk = await saveEmployee(employee);
+  if (!saveOk) {
+    try {
+      await signUpSecondary.auth.admin.deleteUser(authUserId);
+    } catch (cleanupErr) {
+      console.warn("Failed to clean up auth account after DB save failure:", cleanupErr);
+    }
+    return { employee: null as any, error: "Failed to save employee record. Auth account cleaned up." };
+  }
+
+  return { employee };
+}
+
+/**
+ * Fetch all employees for this company from Supabase,
+ * falling back to local cache if offline.
  */
 export async function getEmployees(companyId: string): Promise<Employee[]> {
   const localList = getLocalEmployees().filter(e => e.companyId === companyId);
@@ -182,13 +326,12 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
 
     if (error) {
       console.warn("Could not save employee to remote db table:", error);
-      // Return true anyway so local storage save continues and UI is not frozen
-      return true;
+      return false;
     }
     return true;
   } catch (err) {
     console.warn("Network offline or missing table during employee save:", err);
-    return true;
+    return false;
   }
 }
 

@@ -133,11 +133,11 @@ app.post("/api/auth/login", async (req, res) => {
 
     if (userMatched.userType === "employee") {
       isReadOnly = userMatched.status === "Read Only";
-      isSuspended = userMatched.status === "Suspended";
+      isSuspended = userMatched.status === "Suspended" || userMatched.status === "Disabled";
       if (isSuspended) {
         return res.status(403).json({
-          error_en: "This employee account is suspended.",
-          error_ar: "هذا الحساب معطل وموقوف حالياً."
+          error_en: userMatched.status === "Disabled" ? "This employee account is disabled." : "This employee account is suspended.",
+          error_ar: userMatched.status === "Disabled" ? "هذا الحساب ملغي ومعطل حالياً." : "هذا الحساب موقوف ومعطل حالياً."
         });
       }
     } else {

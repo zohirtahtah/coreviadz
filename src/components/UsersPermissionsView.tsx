@@ -546,7 +546,25 @@ export default function UsersPermissionsView({
     };
 
     const success = await saveEmployee(payload);
-    if (success) {
+    if (!success) {
+      // Rollback: delete the auth account if save to DB failed
+      if (isNew && authUserId) {
+        try {
+          const sec = createSecondaryClient();
+          if (sec) {
+            await sec.auth.admin.deleteUser(authUserId);
+          }
+        } catch (cleanupErr) {
+          console.warn("Could not clean up auth account after DB failure:", cleanupErr);
+        }
+      }
+      onTriggerNotification(
+        isRtl ? "❌ فشل حفظ الموظف في قاعدة البيانات." : "❌ Failed to save employee to database."
+      );
+      setIsLoading(false);
+      return;
+    }
+
       onTriggerNotification(
         isRtl
           ? `✅ تم ${isNew ? "إنشاء" : "تحديث"} حساب الموظف (${fullName}) بنجاح`
@@ -626,9 +644,6 @@ export default function UsersPermissionsView({
         setIsModalOpen(false);
         loadEmployeesData();
       }
-    } else {
-      onTriggerNotification(isRtl ? "❌ فشل حفظ تفاصيل الحساب" : "❌ Failed to save account details");
-    }
     
     setIsLoading(false);
   };
