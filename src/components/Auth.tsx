@@ -24,7 +24,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password";
+type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "activate_invite";
 
 export default function Auth({
   lang,
@@ -56,6 +56,10 @@ export default function Auth({
   // Pending Session State to mock Waiting List
   const [pendingSession, setPendingSession] = useState<UserSession | null>(null);
 
+  // Active secure invitation validation state
+  const [activeInviteToken, setActiveInviteToken] = useState<string | null>(null);
+  const [invitedEmployee, setInvitedEmployee] = useState<{ fullName: string, email: string, username: string, jobTitle: string } | null>(null);
+
   // URL Hash Verification monitor for Password Recovery
   useEffect(() => {
     try {
@@ -85,40 +89,43 @@ export default function Auth({
       if (inviteToken) {
         onTriggerNotification(
           isRtl 
-            ? "🔍 جاري التحقق من رمز الدعوة للموظف واسترداد الهوية..." 
-            : "🔍 Validating employee invitation token...", 
+            ? "🔍 جاري التحقق من رمز الدعوة واسترداد الهوية للبدء..." 
+            : "🔍 Validating invitation token and retrieving identity...", 
           "info"
         );
 
-        // Secure Server-Side Invitation Claiming Endpoint
-        fetch("/api/auth/claim-invite", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: inviteToken })
-        })
+        fetch(`/api/auth/verify-invite?token=${inviteToken}`)
           .then(async (res) => {
-            const resData = await res.json();
+            const data = await res.json();
             if (!res.ok) {
-              throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
+              throw new Error(isRtl ? (data.error_ar || data.error_en) : (data.error_en || data.error_ar));
             }
-            return resData;
+            return data;
           })
-          .then((resData) => {
+          .then((data) => {
             onTriggerNotification(
               isRtl 
-                ? `🎉 مرحباً بك! تم التحقق من هويتك بنجاح وجاري تهيئة مكان العمل...` 
-                : `🎉 Welcome! Identity verified successfully. Launching workspace...`, 
+                ? `👋 أهلاً بك يا ${data.fullName}! يرجى تعيين كلمة مرور لتفعيل حسابك.` 
+                : `👋 Welcome, ${data.fullName}! Please set your account password to activate access.`, 
               "success"
             );
-            // Instantly pass the session back up, completely circumventing manual input submissions or RLS failures!
-            onAuthSuccess(resData.session);
+            setActiveInviteToken(inviteToken);
+            setInvitedEmployee({
+              fullName: data.fullName,
+              email: data.email,
+              username: data.username,
+              jobTitle: data.jobTitle
+            });
+            setPasswordInput("");
+            setConfirmPasswordInput("");
+            setAuthMode("activate_invite");
           })
           .catch((err) => {
-            console.error("claim-invite error:", err);
+            console.error("verify-invite error:", err);
             onTriggerNotification(
               isRtl 
-                ? `❌ فشل تفعيل رابط الدعوة: ${err.message}` 
-                : `❌ Failed to claim invitation link: ${err.message}`, 
+                ? `❌ رابط الدعوة غير صالح أو منتهي: ${err.message}` 
+                : `❌ Invalid or expired invitation link: ${err.message}`, 
               "info"
             );
           });
@@ -127,7 +134,7 @@ export default function Auth({
           try {
             window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
           } catch (histErr) {}
-        }, 3000);
+        }, 4000);
 
         return;
       }
@@ -257,6 +264,60 @@ export default function Auth({
   // Toggle Theme
   const handleToggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light");
+  };
+
+  // Secure Invitation Activation Submission Handler
+  const handleActivateInviteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const isRtl = lang === "ar";
+    if (!passwordInput) {
+      onTriggerNotification(isRtl ? "الرجاء إدخال كلمة المرور" : "Please enter your password", "info");
+      return;
+    }
+    if (passwordInput.length < 6) {
+      onTriggerNotification(isRtl ? "يجب أن تكون كلمة المرور مكونة من 6 أحرف على الأقل" : "Password must be at least 6 characters", "info");
+      return;
+    }
+    if (passwordInput !== confirmPasswordInput) {
+      onTriggerNotification(isRtl ? "كلمات المرور غير متطابقة" : "Passwords do not match", "info");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/auth/claim-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: activeInviteToken, password: passwordInput })
+      });
+
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
+      }
+
+      onTriggerNotification(
+        isRtl 
+          ? `🎉 تم تفعيل حسابك بنجاح! جاري تهيئة مكان العمل...` 
+          : `🎉 Account activated successfully! Launching workspace...`, 
+        "success"
+      );
+
+      // Pass the session down up to the application state
+      onAuthSuccess(resData.session);
+
+    } catch (err: any) {
+      console.error("claim-invite submit error:", err);
+      onTriggerNotification(
+        isRtl 
+          ? `❌ فشل تفعيل الحساب: ${err.message}` 
+          : `❌ Failed to activate account: ${err.message}`, 
+        "info"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Submit Handler
@@ -1171,6 +1232,100 @@ export default function Auth({
               >
                 <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span>{isRtl ? "تأكيد الرمز" : "Verify Code"}</span>
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                  className="text-slate-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto"
+                >
+                  {isRtl ? <ArrowRight className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
+                  <span>{t.backToLogin}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ACTIVATE EMPLOYEE INVITATION FORM */}
+          {authMode === "activate_invite" && (
+            <form onSubmit={handleActivateInviteSubmit} className="space-y-4" id="activate_invite_form">
+              <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl mb-4 text-center">
+                <p className="text-xs text-indigo-400 font-extrabold mb-1">
+                  {isRtl 
+                    ? `مرحباً بك يا ${invitedEmployee?.fullName || "الموظف"}!` 
+                    : `Welcome, ${invitedEmployee?.fullName || "Employee"}!`}
+                </p>
+                <p className="text-[11px] text-slate-300 font-medium leading-relaxed">
+                  {isRtl 
+                    ? `يرجى تحديد كلمة مرور لحسابك (${invitedEmployee?.username}) لتفعيل اشتراكك والدخول إلى النظام.`
+                    : `Please choose a password for your account (${invitedEmployee?.username}) to activate your access.`}
+                </p>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "كلمة المرور الجديدة" : "Choose Password"}
+                </label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
+                  >
+                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "تأكيد كلمة المرور الجديدة" : "Confirm Password"}
+                </label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group overflow-hidden bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white rounded-xl py-3 text-xs font-black shadow-lg hover:shadow-indigo-500/20 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-emerald-500/10"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isRtl ? "جاري تفعيل الحساب وتسجيل الدخول..." : "Activating account..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{isRtl ? "تفعيل حساب الموظف والدخول" : "Activate Account & Login"}</span>
+                  </>
+                )}
               </button>
 
               <div className="text-center pt-2">

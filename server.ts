@@ -249,9 +249,99 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// POST /api/auth/claim-invite -> Validates invitation token, marks as used, and logs the employee in securely
+// GET /api/auth/verify-invite -> Validates invitation token and retrieves employee metadata
+app.get("/api/auth/verify-invite", async (req, res) => {
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).json({
+      error_en: "Invitation token query parameter is required.",
+      error_ar: "رمز الدعوة مطلوب في معامل الطلب."
+    });
+  }
+
+  try {
+    let record = null;
+    
+    // Query standard column first
+    const { data: colsData } = await supabase
+      .from("corevia_company_users")
+      .select("*")
+      .eq("invitation_token", token)
+      .maybeSingle();
+
+    if (colsData) {
+      record = colsData;
+    } else {
+      // JSONB fallback
+      const { data: jsonbData } = await supabase
+        .from("corevia_company_users")
+        .select("*")
+        .eq("allowed_pages->>invitation_token", token)
+        .maybeSingle();
+      if (jsonbData) {
+        record = jsonbData;
+      }
+    }
+
+    if (!record) {
+      return res.status(404).json({
+        error_en: "Invalid or non-existent invitation token.",
+        error_ar: "رمز الدعوة غير صالح أو غير موجود."
+      });
+    }
+
+    let allowed = Array.isArray(record.allowed_pages) ? record.allowed_pages : [];
+    let expires = record.invitation_expires;
+    let used = typeof record.invitation_used === "boolean" ? record.invitation_used : false;
+
+    if (record.allowed_pages && !Array.isArray(record.allowed_pages)) {
+      try {
+        const parsed = typeof record.allowed_pages === "string" ? JSON.parse(record.allowed_pages) : record.allowed_pages;
+        if (parsed && typeof parsed === "object") {
+          allowed = parsed.pages || [];
+          expires = parsed.invitation_expires || expires;
+          used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : used;
+        }
+      } catch (e) {
+        console.warn("Parse allowed_pages failed in verify-invite API:", e);
+      }
+    }
+
+    if (used) {
+      return res.status(400).json({
+        error_en: "This invitation link has already been used. Please log in using your password.",
+        error_ar: "تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول باستخدام كلمة المرور الخاصة بك."
+      });
+    }
+
+    if (expires && new Date(expires).getTime() < Date.now()) {
+      return res.status(400).json({
+        error_en: "This invitation link has expired. Please contact your administrator.",
+        error_ar: "انتهت صلاحية رابط الدعوة هذا. يرجى مراجعة مدير النظام للحصول على دعوة جديدة."
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      fullName: record.full_name,
+      email: record.email || `${(record.username || record.id || "employee").toLowerCase()}@corevia.dz`,
+      username: record.username,
+      jobTitle: record.job_title || "Employee"
+    });
+
+  } catch (err: any) {
+    console.error("[Verify Invite API] error:", err);
+    return res.status(500).json({
+      error_en: "Failed to verify invitation: " + err.message,
+      error_ar: "فشل التحقق من رابط الدعوة: " + err.message
+    });
+  }
+});
+
+// POST /api/auth/claim-invite -> Validates invitation token, registers employee chosen password, marks as used, and logs the employee in securely
 app.post("/api/auth/claim-invite", async (req, res) => {
-  const { token } = req.body;
+  const { token, password } = req.body;
 
   if (!token) {
     return res.status(400).json({
@@ -329,7 +419,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
       });
     }
 
-    // 4. Mark invitation as used in the database
+    // 4. Mark invitation as used, and optionally save the password
     const finalAllowedPages = record.allowed_pages && !Array.isArray(record.allowed_pages)
       ? {
           pages: allowed,
@@ -340,10 +430,14 @@ app.post("/api/auth/claim-invite", async (req, res) => {
         }
       : allowed;
 
-    const updatePayload = {
+    const updatePayload: any = {
       invitation_used: true,
       allowed_pages: finalAllowedPages
     };
+
+    if (password) {
+      updatePayload.password = password.trim();
+    }
 
     const { error: updateErr } = await supabase
       .from("corevia_company_users")
@@ -357,12 +451,37 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     // Direct pgPool write fallback for absolute speed and durability bypassing RLS completely!
     if (pgPool) {
       try {
-        await pgPool.query(
-          `UPDATE corevia_company_users SET invitation_used = true, allowed_pages = $1 WHERE id = $2`,
-          [JSON.stringify(finalAllowedPages), record.id]
-        );
+        if (password) {
+          await pgPool.query(
+            `UPDATE corevia_company_users SET invitation_used = true, password = $1, allowed_pages = $2 WHERE id = $3`,
+            [password.trim(), JSON.stringify(finalAllowedPages), record.id]
+          );
+        } else {
+          await pgPool.query(
+            `UPDATE corevia_company_users SET invitation_used = true, allowed_pages = $1 WHERE id = $2`,
+            [JSON.stringify(finalAllowedPages), record.id]
+          );
+        }
       } catch (dbErr) {
         console.warn("pgPool sync update for invitation failed:", dbErr);
+      }
+    }
+
+    // Best-effort secondary auth user password update!
+    if (authId && password) {
+      try {
+        const userEmail = record.email || `${record.username.toLowerCase()}@corevia.dz`;
+        // Perform a sign-in with previous password to allow password change, or update directly if admin key present
+        const testAuthClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+        const { data: signInData, error: signInErr } = await testAuthClient.auth.signInWithPassword({
+          email: userEmail,
+          password: record.password || ""
+        });
+        if (!signInErr && signInData.user) {
+          await testAuthClient.auth.updateUser({ password: password.trim() });
+        }
+      } catch (ae) {
+        console.warn("Best effort Supabase auth password update skipped or failed:", ae);
       }
     }
 
