@@ -304,6 +304,19 @@ export default function Auth({
         "success"
       );
 
+      // Sign in to Supabase Auth so auth.uid() works for RLS
+      try {
+        if (supabase && passwordInput) {
+          const emailForAuth = resData.session?.email || `${resData.session?.username || "employee"}@corevia.dz`;
+          await supabase.auth.signInWithPassword({
+            email: emailForAuth,
+            password: passwordInput
+          });
+        }
+      } catch (supabaseAuthErr) {
+        console.warn("Supabase Auth sign-in after claim-invite failed:", supabaseAuthErr);
+      }
+
       // Pass the session down up to the application state
       onAuthSuccess(resData.session);
 
@@ -407,6 +420,18 @@ export default function Auth({
             affectedRecord: `User: ${authenticatedSession.username}`
           });
         } catch (logErr) {}
+
+        // Sign in to Supabase Auth for RLS (so auth.uid() returns the user's UUID)
+        try {
+          if (supabase) {
+            await supabase.auth.signInWithPassword({
+              email: finalEmail,
+              password: finalPassword
+            });
+          }
+        } catch (supabaseAuthErr) {
+          console.warn("Supabase Auth sign-in failed (RLS won't work for direct queries):", supabaseAuthErr);
+        }
 
         onAuthSuccess(authenticatedSession);
         onTriggerNotification(

@@ -958,7 +958,9 @@ SET search_path = public
 AS $$
   SELECT COALESCE(
     current_setting('app.current_tenant_id', true),
-    (SELECT raw_user_meta_data->>'company_id' FROM auth.users WHERE id = auth.uid())
+    (SELECT raw_user_meta_data->>'company_id' FROM auth.users WHERE id = auth.uid()),
+    (SELECT company_id::text FROM corevia_saas_users WHERE user_id = auth.uid()::text LIMIT 1),
+    (SELECT company_id::text FROM corevia_company_users WHERE auth_user_id = auth.uid() LIMIT 1)
   );
 $$;
 
