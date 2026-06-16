@@ -171,7 +171,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
   const localList = getLocalEmployees().filter(e => e.companyId === companyId);
 
   try {
-    const res = await fetch("/api/employees?companyId=" + encodeURIComponent(companyId));
+    const res = await fetch("/api/employees");
     if (!res.ok) {
       return localList;
     }

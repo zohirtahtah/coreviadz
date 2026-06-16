@@ -71,18 +71,48 @@ function broadcastToTenant(tenantId: string, payload: any) {
 }
 
 // -------------------------------------------------------------
+// AUTHENTICATION & AUTHORIZATION MIDDLEWARE
+// -------------------------------------------------------------
+const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.cookies.corevia_session_v1_cookie;
+  if (!token) {
+    return res.status(411).json({ error: "Missing required authorization cookie credentials." });
+  }
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    if (!decoded.user_id || !decoded.tenant_id) {
+      return res.status(401).json({ error: "Invalid session credentials." });
+    }
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Unauthorized session credentials." });
+  }
+};
+
+const requireRole = (...roles: string[]) => {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const userRole = req.user?.role;
+    if (!userRole || !roles.includes(userRole)) {
+      return res.status(403).json({ error: "Access denied. Insufficient permissions." });
+    }
+    next();
+  };
+};
+
+// -------------------------------------------------------------
 // EMPLOYEE CRUD ENDPOINTS (use supabaseAdmin to bypass RLS)
 // -------------------------------------------------------------
 
-// GET /api/employees -> List employees for a company
-app.get("/api/employees", async (req, res) => {
-  const { companyId } = req.query;
-  if (!companyId) return res.status(400).json({ error: "companyId required" });
+// GET /api/employees -> List employees for the authenticated user's company
+app.get("/api/employees", requireAuth, async (req, res) => {
+  const tenantId = req.user!.tenant_id;
   try {
     const { data, error } = await supabaseAdmin
       .from("corevia_company_users")
       .select("*")
-      .eq("company_id", companyId);
+      .eq("company_id", tenantId);
     if (error) throw error;
     res.json(data || []);
   } catch (err: any) {
@@ -90,10 +120,11 @@ app.get("/api/employees", async (req, res) => {
   }
 });
 
-// POST /api/employees -> Upsert an employee
-app.post("/api/employees", async (req, res) => {
+// POST /api/employees -> Upsert an employee (tenant-isolated)
+app.post("/api/employees", requireAuth, requireRole("admin", "owner"), async (req, res) => {
   try {
-    const payload = req.body;
+    const tenantId = req.user!.tenant_id;
+    const payload = { ...req.body, company_id: tenantId };
     const { error } = await supabaseAdmin
       .from("corevia_company_users")
       .upsert(payload);
@@ -104,14 +135,17 @@ app.post("/api/employees", async (req, res) => {
   }
 });
 
-// POST /api/employees/delete -> Delete an employee
-app.post("/api/employees/delete", async (req, res) => {
-  const { id, company_id } = req.body;
+// POST /api/employees/delete -> Delete an employee (tenant-isolated)
+app.post("/api/employees/delete", requireAuth, requireRole("admin", "owner"), async (req, res) => {
+  const { id } = req.body;
+  const tenantId = req.user!.tenant_id;
   if (!id) return res.status(400).json({ error: "id required" });
   try {
-    const query = supabaseAdmin.from("corevia_company_users").delete().eq("id", id);
-    if (company_id) query.eq("company_id", company_id);
-    const { error } = await query;
+    const { error } = await supabaseAdmin
+      .from("corevia_company_users")
+      .delete()
+      .eq("id", id)
+      .eq("company_id", tenantId);
     if (error) throw error;
     res.json({ success: true });
   } catch (err: any) {
@@ -119,24 +153,27 @@ app.post("/api/employees/delete", async (req, res) => {
   }
 });
 
-// POST /api/employees/active -> Update last activity
-app.post("/api/employees/active", async (req, res) => {
+// POST /api/employees/active -> Update last activity (tenant-isolated)
+app.post("/api/employees/active", requireAuth, async (req, res) => {
   const { id, last_activity } = req.body;
+  const tenantId = req.user!.tenant_id;
   if (!id) return res.status(400).json({ error: "id required" });
   try {
     await supabaseAdmin
       .from("corevia_company_users")
       .update({ last_activity })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("company_id", tenantId);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/auth/invite-employee -> Create Supabase Auth account + store invite token
-app.post("/api/auth/invite-employee", async (req, res) => {
-  const { email, fullName, username, companyId, employeeId, invitationToken } = req.body;
+// POST /api/auth/invite-employee -> Create Supabase Auth account + store invite token (tenant-isolated, seat-limited)
+app.post("/api/auth/invite-employee", requireAuth, requireRole("admin", "owner"), async (req, res) => {
+  const { email, fullName, username, employeeId, invitationToken } = req.body;
+  const tenantId = req.user!.tenant_id;
   if (!email) return res.status(400).json({ error: "Email required" });
 
   try {
@@ -144,9 +181,33 @@ app.post("/api/auth/invite-employee", async (req, res) => {
       return res.status(500).json({ error: "SUPABASE_SERVICE_KEY not configured. Set it in your environment." });
     }
 
+    // Server-side seat limit enforcement
+    const { data: company, error: companyErr } = await supabaseAdmin
+      .from("corevia_companies")
+      .select("seatsLimit, subscriptionPlan")
+      .eq("id", tenantId)
+      .maybeSingle();
+
+    if (companyErr) throw companyErr;
+
+    const seatsLimit = company?.seatsLimit ?? 5;
+    const { count, error: countErr } = await supabaseAdmin
+      .from("corevia_company_users")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", tenantId)
+      .not("employee_status", "eq", "deleted");
+
+    if (countErr) throw countErr;
+
+    if (count !== null && count >= seatsLimit) {
+      return res.status(403).json({
+        error: `Seat limit reached (${seatsLimit}). Upgrade your subscription to add more employees.`
+      });
+    }
+
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: {
-        company_id: companyId,
+        company_id: tenantId,
         employee_id: employeeId,
         role: "employee",
         username: username,
@@ -601,24 +662,6 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     });
   }
 });
-
-// -------------------------------------------------------------
-// HELPER MIDDLEWARES FOR MULTI-TENANT RLS ENFORCEMENT
-// -------------------------------------------------------------
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const token = req.cookies.corevia_session_v1_cookie;
-  if (!token) {
-    return res.status(411).json({ error: "Missing required authorization cookie credentials." });
-  }
-
-  try {
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { user_id, tenant_id, role, is_read_only }
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Unauthorized session credentials." });
-  }
-};
 
 // GET /api/auth/verify-super-admin -> Server side gate for super admin validation
 app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {

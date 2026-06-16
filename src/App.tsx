@@ -40,6 +40,7 @@ import UsersPermissionsView from "./components/UsersPermissionsView";
 import ActivityLogView from "./components/ActivityLogView";
 import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
+import { PermissionGuard } from "./components/PermissionGuard";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -2038,199 +2039,225 @@ export default function App() {
         
         {/* Render Tab Screens */}
         {activeTab === "dashboard" && (
-          <DashboardView 
-            orders={orders} 
-            products={products} 
-            lang={lang} 
-          />
+          <PermissionGuard session={session} requiredPage="dashboard">
+            <DashboardView 
+              orders={orders} 
+              products={products} 
+              lang={lang} 
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "orders" && (
-          <OrdersView
-            orders={orders}
-            onSaveOrders={saveOrdersAndPersist}
-            products={products}
-            basicInventory={basicInventory}
-            subInventory={subInventory}
-            returnInventory={returnInventory}
-            lang={lang}
-            businessName={activeProfile.businessName}
-            profile={activeProfile}
-            onSoftDelete={handleSoftDeleteOrder}
-            onTriggerNotification={triggerToast}
-          />
+          <PermissionGuard session={session} requiredPage="orders">
+            <OrdersView
+              orders={orders}
+              onSaveOrders={saveOrdersAndPersist}
+              products={products}
+              basicInventory={basicInventory}
+              subInventory={subInventory}
+              returnInventory={returnInventory}
+              lang={lang}
+              businessName={activeProfile.businessName}
+              profile={activeProfile}
+              onSoftDelete={handleSoftDeleteOrder}
+              onTriggerNotification={triggerToast}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "inventory" && (
-          <InventoryView
-            basicInventory={basicInventory}
-            subInventory={subInventory}
-            returnInventory={returnInventory}
-            onSaveBasic={(arr) => {
-              setBasicInventory(arr);
-              saveBasicInventory(arr);
-              logInventoryAdjustment("Basic Stock");
-              if (session?.company_id) {
-                pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
-                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
-              }
-            }}
-            onSaveSub={(arr) => {
-              setSubInventory(arr);
-              saveSubInventory(arr);
-              logInventoryAdjustment("Sub Stock");
-              if (session?.company_id) {
-                pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
-                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
-              }
-            }}
-            onSaveReturn={(arr) => {
-              setReturnInventory(arr);
-              saveReturnInventory(arr);
-              logInventoryAdjustment("Returned Stock");
-              if (session?.company_id) {
-                pushSingleDatasetToCloud(session.company_id, "inventory_return", arr);
-                pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
-              }
-            }}
-            products={products}
-            lang={lang}
-            onSoftDeleteProduct={handleSoftDeleteProduct}
-          />
+          <PermissionGuard session={session} requiredPage="inventory">
+            <InventoryView
+              basicInventory={basicInventory}
+              subInventory={subInventory}
+              returnInventory={returnInventory}
+              onSaveBasic={(arr) => {
+                setBasicInventory(arr);
+                saveBasicInventory(arr);
+                logInventoryAdjustment("Basic Stock");
+                if (session?.company_id) {
+                  pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
+                  pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+                }
+              }}
+              onSaveSub={(arr) => {
+                setSubInventory(arr);
+                saveSubInventory(arr);
+                logInventoryAdjustment("Sub Stock");
+                if (session?.company_id) {
+                  pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
+                  pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+                }
+              }}
+              onSaveReturn={(arr) => {
+                setReturnInventory(arr);
+                saveReturnInventory(arr);
+                logInventoryAdjustment("Returned Stock");
+                if (session?.company_id) {
+                  pushSingleDatasetToCloud(session.company_id, "inventory_return", arr);
+                  pushSingleDatasetToCloud(session.company_id, "stock_movements", getStockMovements());
+                }
+              }}
+              products={products}
+              lang={lang}
+              onSoftDeleteProduct={handleSoftDeleteProduct}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "products" && (
-          <ProductsView
-            products={products}
-            onSaveProducts={saveProductsAndPersist}
-            lang={lang}
-            customColorsList={customColorsList}
-            onSoftDeleteProduct={handleSoftDeleteProduct}
-            onTriggerNotification={triggerToast}
-            suppliers={suppliers}
-            onSaveSuppliers={saveSuppliersAndPersist}
-            invoices={invoices}
-            onSaveInvoices={saveInvoicesAndPersist}
-            basicInventory={basicInventory}
-            onSaveBasic={(arr) => {
-              setBasicInventory(arr);
-              saveBasicInventory(arr);
-              if (session?.company_id) {
-                pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
-              }
-            }}
-            subInventory={subInventory}
-            onSaveSub={(arr) => {
-              setSubInventory(arr);
-              saveSubInventory(arr);
-              if (session?.company_id) {
-                pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
-              }
-            }}
-            onSoftDeleteInvoice={handleSoftDeleteInvoice}
-          />
+          <PermissionGuard session={session} requiredPage="products">
+            <ProductsView
+              products={products}
+              onSaveProducts={saveProductsAndPersist}
+              lang={lang}
+              customColorsList={customColorsList}
+              onSoftDeleteProduct={handleSoftDeleteProduct}
+              onTriggerNotification={triggerToast}
+              suppliers={suppliers}
+              onSaveSuppliers={saveSuppliersAndPersist}
+              invoices={invoices}
+              onSaveInvoices={saveInvoicesAndPersist}
+              basicInventory={basicInventory}
+              onSaveBasic={(arr) => {
+                setBasicInventory(arr);
+                saveBasicInventory(arr);
+                if (session?.company_id) {
+                  pushSingleDatasetToCloud(session.company_id, "inventory_basic", arr);
+                }
+              }}
+              subInventory={subInventory}
+              onSaveSub={(arr) => {
+                setSubInventory(arr);
+                saveSubInventory(arr);
+                if (session?.company_id) {
+                  pushSingleDatasetToCloud(session.company_id, "inventory_sub", arr);
+                }
+              }}
+              onSoftDeleteInvoice={handleSoftDeleteInvoice}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "suppliers" && (
-          <SuppliersView
-            suppliers={suppliers}
-            onSaveSuppliers={saveSuppliersAndPersist}
-            invoices={invoices}
-            onSaveInvoices={saveInvoicesAndPersist}
-            products={products}
-            lang={lang}
-            onSoftDeleteInvoice={handleSoftDeleteInvoice}
-            onTriggerNotification={triggerToast}
-          />
+          <PermissionGuard session={session} requiredPage="suppliers">
+            <SuppliersView
+              suppliers={suppliers}
+              onSaveSuppliers={saveSuppliersAndPersist}
+              invoices={invoices}
+              onSaveInvoices={saveInvoicesAndPersist}
+              products={products}
+              lang={lang}
+              onSoftDeleteInvoice={handleSoftDeleteInvoice}
+              onTriggerNotification={triggerToast}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "workers" && (
-          <WorkersView
-            workers={workers}
-            onSaveWorkers={saveWorkersAndPersist}
-            lang={lang}
-            onSoftDeleteWorker={handleSoftDeleteWorker}
-            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-            onTriggerNotification={triggerToast}
-            orders={orders}
-            onSectionChange={setActiveTab}
-            session={session}
-          />
+          <PermissionGuard session={session} requiredPage="workers">
+            <WorkersView
+              workers={workers}
+              onSaveWorkers={saveWorkersAndPersist}
+              lang={lang}
+              onSoftDeleteWorker={handleSoftDeleteWorker}
+              onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+              onTriggerNotification={triggerToast}
+              orders={orders}
+              onSectionChange={setActiveTab}
+              session={session}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "expenses" && (
-          <ExpensesView
-            expenses={expenses}
-            onSaveExpenses={saveExpensesAndPersist}
-            lang={lang}
-            onSoftDeleteExpense={handleSoftDeleteExpense}
-            onTriggerNotification={triggerToast}
-            onSectionChange={setActiveTab}
-          />
+          <PermissionGuard session={session} requiredPage="expenses">
+            <ExpensesView
+              expenses={expenses}
+              onSaveExpenses={saveExpensesAndPersist}
+              lang={lang}
+              onSoftDeleteExpense={handleSoftDeleteExpense}
+              onTriggerNotification={triggerToast}
+              onSectionChange={setActiveTab}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "profit" && (
-          <ProfitView
-            orders={orders}
-            expenses={expenses}
-            workers={workers}
-            lang={lang}
-            products={products}
-            basicInventory={basicInventory}
-            subInventory={subInventory}
-            returnInventory={returnInventory}
-          />
+          <PermissionGuard session={session} requiredPage="profit">
+            <ProfitView
+              orders={orders}
+              expenses={expenses}
+              workers={workers}
+              lang={lang}
+              products={products}
+              basicInventory={basicInventory}
+              subInventory={subInventory}
+              returnInventory={returnInventory}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "yearly" && (
-          <YearlyView
-            orders={orders}
-            expenses={expenses}
-            workers={workers}
-            lang={lang}
-          />
+          <PermissionGuard session={session} requiredPage="yearly">
+            <YearlyView
+              orders={orders}
+              expenses={expenses}
+              workers={workers}
+              lang={lang}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "trash" && (
-          <TrashView
-            trashItems={trashItems}
-            onRestoreItem={handleRestoreItem}
-            onClearTrashAll={handleClearTrashAll}
-            lang={lang}
-          />
+          <PermissionGuard session={session} requiredPage="trash">
+            <TrashView
+              trashItems={trashItems}
+              onRestoreItem={handleRestoreItem}
+              onClearTrashAll={handleClearTrashAll}
+              lang={lang}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "settings" && (
-          <SettingsView
-            profile={profile}
-            onSaveProfile={saveProfileAndPersist}
-            lang={lang}
-            customColorsList={customColorsList}
-            onSaveCustomColors={saveCustomColorsAndPersist}
-            onTriggerNotification={triggerToast}
-            onTriggerRefreshOrders={() => setOrders(getOrders())}
-            session={session}
-            seatsLimit={seatsLimit}
-          />
+          <PermissionGuard session={session} requiredPage="settings">
+            <SettingsView
+              profile={profile}
+              onSaveProfile={saveProfileAndPersist}
+              lang={lang}
+              customColorsList={customColorsList}
+              onSaveCustomColors={saveCustomColorsAndPersist}
+              onTriggerNotification={triggerToast}
+              onTriggerRefreshOrders={() => setOrders(getOrders())}
+              session={session}
+              seatsLimit={seatsLimit}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "users-permissions" && (
-          <UsersPermissionsView
-            lang={lang}
-            session={session}
-            onTriggerNotification={triggerToast}
-            seatsLimit={seatsLimit}
-            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-            workers={workers}
-          />
+          <PermissionGuard session={session} requiredPage="users-permissions">
+            <UsersPermissionsView
+              lang={lang}
+              session={session}
+              onTriggerNotification={triggerToast}
+              seatsLimit={seatsLimit}
+              onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+              workers={workers}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "activity-log" && (
-          <ActivityLogView
-            lang={lang}
-            session={session}
-            onTriggerNotification={triggerToast}
-          />
+          <PermissionGuard session={session} requiredPage="activity-log">
+            <ActivityLogView
+              lang={lang}
+              session={session}
+              onTriggerNotification={triggerToast}
+            />
+          </PermissionGuard>
         )}
 
         {activeTab === "communication" && (
