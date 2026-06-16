@@ -365,7 +365,7 @@ export interface SaaSCompany {
   subscriptionPlan: "Free" | "Basic" | "Pro" | "Enterprise";
   seatsLimit: number;
   seatsUsed: number;
-  accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled" | "Expired";
+  accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled";
   expirationDate: string;
   activeDevices: ActiveDevice[];
   twoFactorEnabled?: boolean;
@@ -386,61 +386,6 @@ export interface SuperAdminConfig {
   twoFactorGlobalState: boolean;
   failedLoginAttemptsCount: number;
   ipTrackingEnabled: boolean;
-}
-
-export interface SubscriptionRecord {
-  id: string;
-  company_id: string;
-  plan_name: string;
-  start_date: string;
-  duration_months: number;
-  end_date: string;
-  seats_limit: number;
-  seats_used: number;
-  status: string;
-  auto_renew: boolean;
-  renewed_at?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface SubscriptionHistoryRecord {
-  id: string;
-  company_id: string;
-  renewal_date: string;
-  duration_months: number;
-  plan_name: string;
-  seats_purchased: number;
-  amount_paid: number;
-  admin_user: string;
-  notes?: string;
-  created_at: string;
-}
-
-export interface SubscriptionNotificationRecord {
-  id: string;
-  company_id: string;
-  days_before: number;
-  message: string;
-  sent_to_super_admin: boolean;
-  sent_to_company_owner: boolean;
-  acknowledged: boolean;
-  sent_at: string;
-  created_at: string;
-}
-
-export interface SeatManagementRecord {
-  id: string;
-  company_id: string;
-  current_seats_limit: number;
-  used_seats: number;
-  available_seats: number;
-  increased_at?: string;
-  decreased_at?: string;
-  custom_set_at?: string;
-  last_modified_by?: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ChatMessage {

@@ -89,8 +89,7 @@ async function lookupUser(identifier: string): Promise<any | null> {
   const { data: employees } = await supabase
     .from("corevia_company_users")
     .select("*")
-    .or(`username.ilike.${normCred},email.ilike.${normCred},phone.eq.${normCred}`)
-    .is("deleted_at", null);
+    .or(`username.ilike.${normCred},email.ilike.${normCred},phone.eq.${normCred}`);
 
   if (employees && employees.length > 0) {
     return { ...employees[0], userType: "employee" };
@@ -120,8 +119,14 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    let targetEmail = userMatched.email || `${userMatched.username.toLowerCase()}@corevia.dz`;
+    let targetEmail = userMatched.email || `${(userMatched.username || userMatched.id || "employee").toLowerCase()}@corevia.dz`;
     let resolvedRole = userMatched.role || userMatched.userType;
+    let storedSaasPassword = "";
+    if (resolvedRole && resolvedRole.includes(":")) {
+      const parts = resolvedRole.split(":");
+      resolvedRole = parts[0];
+      storedSaasPassword = parts[1];
+    }
     let companyId = userMatched.company_id || "cop_default";
     let isReadOnly = false;
     let isSuspended = false;
@@ -147,7 +152,10 @@ app.post("/api/auth/login", async (req, res) => {
     let authValidated = false;
 
     // Direct Match for employees/admins using their DB-assigned credentials
-    if (userMatched.password && String(userMatched.password).trim() === String(password).trim()) {
+    if (
+      (userMatched.password && String(userMatched.password).trim() === String(password).trim()) ||
+      (storedSaasPassword && String(storedSaasPassword).trim() === String(password).trim())
+    ) {
       userId = userMatched.auth_user_id || userMatched.id || userMatched.user_id || `emp_${userMatched.id}`;
       authValidated = true;
       console.log(`[Auth API] Secure direct matches for ${userMatched.username || userMatched.full_name}. Bypassing Supabase Auth outer validation layer.`);
@@ -204,7 +212,21 @@ app.post("/api/auth/login", async (req, res) => {
       user_id: userId,
       company_id: companyId,
       role: resolvedRole,
-      allowedPages: userMatched.userType === "employee" ? (Array.isArray(userMatched.allowed_pages) ? userMatched.allowed_pages : JSON.parse(userMatched.allowed_pages || "[]")) : undefined,
+      allowedPages: userMatched.userType === "employee" 
+        ? (() => {
+            const val = userMatched.allowed_pages;
+            if (!val) return [];
+            try {
+              const parsed = typeof val === "string" ? JSON.parse(val) : val;
+              if (Array.isArray(parsed)) return parsed;
+              if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) return parsed.pages;
+              return [];
+            } catch (pErr) {
+              console.warn("Error parsing allowedPages:", pErr);
+              return [];
+            }
+          })()
+        : undefined,
       jobTitle: userMatched.job_title || undefined,
       isReadOnly: isReadOnly
     };
@@ -212,7 +234,9 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(200).json({
       success: true,
       redirect: "/dashboard",
-      session: finalSession
+      session: finalSession,
+      company_id: companyId,
+      role: resolvedRole
     });
 
   } catch (err: any) {

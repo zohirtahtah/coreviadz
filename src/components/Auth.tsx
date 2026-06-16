@@ -24,7 +24,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "setup_password";
+type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password";
 
 export default function Auth({
   lang,
@@ -56,10 +56,6 @@ export default function Auth({
   // Pending Session State to mock Waiting List
   const [pendingSession, setPendingSession] = useState<UserSession | null>(null);
 
-  // Invitation token state for first-login password setup
-  const [inviteRecord, setInviteRecord] = useState<any>(null);
-  const [isInviteProcessing, setIsInviteProcessing] = useState(false);
-
   // URL Hash Verification monitor for Password Recovery
   useEffect(() => {
     try {
@@ -82,11 +78,19 @@ export default function Auth({
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
+      const isRtl = lang === "ar";
       
       // Check if this is a secure single-use invitation token link
       const inviteToken = params.get("invite_token");
       if (inviteToken) {
-        // Try decoding as Base64 JSON token (from server.ts invitation links)
+        onTriggerNotification(
+          isRtl 
+            ? "🔍 جاري التحقق من رمز الدعوة للموظف واسترداد الهوية..." 
+            : "🔍 Validating employee invitation token...", 
+          "info"
+        );
+
+        // Try decoding as Base64 JSON token
         let decodedPayload: any = null;
         try {
           if (!inviteToken.includes("-") && inviteToken.length > 15) {
@@ -98,65 +102,129 @@ export default function Auth({
         if (decodedPayload && decodedPayload.email && decodedPayload.password) {
           setEmailInput(decodedPayload.email);
           setPasswordInput(decodedPayload.password);
-          setAuthMode("setup_password");
+
           onTriggerNotification(
-            isRtl
-              ? `🎉 تم التحقق من هويتك بنجاح كموظف! يرجى تعيين كلمة المرور.`
-              : `🎉 Identity verified! Please set your password.`,
+            isRtl 
+              ? `🎉 تم التحقق من هويتك بنجاح كموظف! جاري تهيئة مكان العمل...` 
+              : `🎉 Identity verified! Launching employee workspace...`, 
             "success"
           );
         } else if (supabase) {
-          setIsInviteProcessing(true);
+          // Robust query: check JSONB field first, fallback to standard column if table has it
           supabase
             .from("corevia_company_users")
             .select("*")
-            .eq("invitation_token", inviteToken)
+            .eq("allowed_pages->>invitation_token", inviteToken)
             .maybeSingle()
-            .then(async ({ data: invRecord, error: inviteErr }) => {
-              if (inviteErr || !invRecord) {
+            .then(async ({ data: maybeRecord, error: maybeErr }) => {
+              let inviteRecord = maybeRecord;
+              
+              if (maybeErr || !inviteRecord) {
+                const { data: colRecord } = await supabase
+                  .from("corevia_company_users")
+                  .select("*")
+                  .eq("invitation_token", inviteToken)
+                  .maybeSingle();
+                if (colRecord) {
+                  inviteRecord = colRecord;
+                }
+              }
+
+              if (!inviteRecord) {
                 onTriggerNotification(
-                  isRtl
-                    ? "❌ رمز الدعوة غير صالح أو غير موجود."
-                    : "❌ Invalid or non-existent invitation token.",
+                  isRtl 
+                    ? "❌ رمز الدعوة غير صالح أو غير موجود." 
+                    : "❌ Invalid or non-existent invitation token.", 
                   "info"
                 );
-                setIsInviteProcessing(false);
                 return;
               }
 
-              if (invRecord.invitation_used) {
+              // Parse extra properties from JSONB if nested
+              let allowed = Array.isArray(inviteRecord.allowed_pages) ? inviteRecord.allowed_pages : [];
+              let token = inviteRecord.invitation_token;
+              let expires = inviteRecord.invitation_expires;
+              let used = typeof inviteRecord.invitation_used === "boolean" ? inviteRecord.invitation_used : false;
+              let authId = inviteRecord.auth_user_id;
+
+              if (inviteRecord.allowed_pages && !Array.isArray(inviteRecord.allowed_pages)) {
+                try {
+                  const parsed = typeof inviteRecord.allowed_pages === "string" ? JSON.parse(inviteRecord.allowed_pages) : inviteRecord.allowed_pages;
+                  if (parsed && typeof parsed === "object") {
+                    allowed = parsed.pages || [];
+                    token = parsed.invitation_token || token;
+                    expires = parsed.invitation_expires || expires;
+                    used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : used;
+                    authId = parsed.auth_user_id || authId;
+                  }
+                } catch (e) {
+                  console.warn("Parse allowed_pages failed in Auth:", e);
+                }
+              }
+
+              if (used) {
                 onTriggerNotification(
-                  isRtl
-                    ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة."
-                    : "⚠️ This invitation has already been used. Please log in directly.",
+                  isRtl 
+                    ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة بالأسفل." 
+                    : "⚠️ This invitation has already been used. Please log in directly below.", 
                   "info"
                 );
-                setIsInviteProcessing(false);
                 return;
               }
 
-              if (invRecord.invitation_expires && new Date(invRecord.invitation_expires).getTime() < Date.now()) {
+              if (expires && new Date(expires).getTime() < Date.now()) {
                 onTriggerNotification(
-                  isRtl
-                    ? "❌ انتهت صلاحية رابط الدعوة هذا. يرجى طلب رابط جديد."
-                    : "❌ This invitation link has expired. Please contact your administrator.",
+                  isRtl 
+                    ? "❌ انتهت صلاحية رابط الدعوة هذا (صلاحية الرابط 7 أيام). يرجى طلب رابط جديد من المسؤول." 
+                    : "❌ This invitation link has expired. Please contact your administrator.", 
                   "info"
                 );
-                setIsInviteProcessing(false);
                 return;
               }
 
-              setInviteRecord(invRecord);
-              setEmailInput(invRecord.username || invRecord.email || "");
-              setAuthMode("setup_password");
+              // Mark invitation token as used in DB to prevent multi-use
+              const finalAllowedPages = inviteRecord.allowed_pages && !Array.isArray(inviteRecord.allowed_pages)
+                ? {
+                    pages: allowed,
+                    invitation_token: token,
+                    invitation_expires: expires,
+                    invitation_used: true,
+                    auth_user_id: authId
+                  }
+                : allowed;
+
+              const updatePayload: any = {
+                allowed_pages: finalAllowedPages
+              };
+              if (inviteRecord.invitation_used !== undefined) {
+                updatePayload.invitation_used = true;
+              }
+
+              await supabase
+                .from("corevia_company_users")
+                .update(updatePayload)
+                .eq("id", inviteRecord.id);
+
+              const recUser = inviteRecord.username || inviteRecord.email;
+              const recPass = inviteRecord.password;
+              
+              setEmailInput(recUser || "");
+              setPasswordInput(recPass || "");
 
               onTriggerNotification(
-                isRtl
-                  ? `🎉 تم التحقق من هويتك كـ ${invRecord.full_name}. يرجى تعيين كلمة المرور الخاصة بك.`
-                  : `🎉 Identity verified as ${invRecord.full_name}. Please set your password.`,
+                isRtl 
+                  ? `🎉 تم التحقق من هويتك بنجاح كموظف (${inviteRecord.full_name})! جاري تهيئة مكان العمل...` 
+                  : `🎉 Identity verified as ${inviteRecord.full_name}! Launching employee workspace...`, 
                 "success"
               );
-              setIsInviteProcessing(false);
+
+              // Auto-trigger setup submission
+              setTimeout(() => {
+                const btn = document.getElementById("auth-submit-btn");
+                if (btn) {
+                  btn.click();
+                }
+              }, 800);
             });
         }
 
@@ -186,7 +254,7 @@ export default function Auth({
             pagesArr = JSON.parse(pagesStr);
           } catch(e) {}
           
-          // Import or update local cache list
+          // Import or update local cache list (Always upsert to handle stale records or password updates!)
           const cached = getLocalEmployees();
           const index = cached.findIndex(emp => emp.id === id);
           const freshEmp = {
@@ -208,23 +276,13 @@ export default function Auth({
           } else {
             cached.push(freshEmp);
           }
+          // Save to localStorage
           localStorage.setItem("corevia_employees_list_v2", JSON.stringify(cached));
           
           setEmailInput(user);
           setPasswordInput(pass);
 
-          // Attempt Supabase Auth sign-in when online
-          if (supabase) {
-            const loginEmail = freshEmp.email || `${user.toLowerCase()}@corevia.dz`;
-            supabase.auth.signInWithPassword({
-              email: loginEmail,
-              password: pass
-            }).then(({ error }) => {
-              if (error) console.warn("setup_worker Supabase Auth sign-in (non-blocking):", error.message);
-            });
-          }
-
-          // Build session and log in immediately
+          // Build session and log in immediately! No waiting for button clicks or closure state update delays
           const directSession: UserSession = {
             username: name || user,
             email: user,
@@ -249,13 +307,14 @@ export default function Auth({
             "success"
           );
 
+          // Clear parameters from search bar after a tiny delay
           setTimeout(() => {
             try {
               window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
             } catch (histErr) {}
           }, 1500);
 
-          return;
+          return; // Skip further prefilling setup check
         }
       } else {
         const urlEmail = params.get("email") || params.get("login_email") || params.get("username");
@@ -735,117 +794,6 @@ export default function Auth({
         );
       } finally {
          setIsSubmitting(false);
-      }
-    } else if (authMode === "setup_password") {
-      if (!inviteRecord) {
-        onTriggerNotification(
-          isRtl ? "❌ بيانات الدعوة غير متاحة. يرجى فتح رابط الدعوة مرة أخرى." : "❌ Invitation data not available. Please open the invitation link again.",
-          "info"
-        );
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!passwordInput || passwordInput.length < 6) {
-        onTriggerNotification(
-          isRtl ? "❌ كلمة المرور يجب أن تتكون من 6 أحرف على الأقل." : "❌ Password must be at least 6 characters.",
-          "info"
-        );
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (passwordInput !== confirmPasswordInput) {
-        onTriggerNotification(
-          isRtl ? "❌ كلمات المرور غير متطابقة." : "❌ Passwords do not match.",
-          "info"
-        );
-        setIsSubmitting(false);
-        return;
-      }
-
-      try {
-        const tempPass = inviteRecord.password;
-        const loginEmail = inviteRecord.email || `${inviteRecord.username}@corevia.dz`;
-
-        // Step 1: Authenticate with temp password
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: loginEmail,
-          password: tempPass
-        });
-
-        if (signInError) {
-          onTriggerNotification(
-            isRtl
-              ? `❌ فشل التحقق الأولي: ${signInError.message}`
-              : `❌ Initial authentication failed: ${signInError.message}`,
-            "info"
-          );
-          setIsSubmitting(false);
-          return;
-        }
-
-        // Step 2: Update password to user's choice
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: passwordInput
-        });
-
-        if (updateError) {
-          onTriggerNotification(
-            isRtl
-              ? `❌ فشل تعيين كلمة المرور: ${updateError.message}`
-              : `❌ Failed to set password: ${updateError.message}`,
-            "info"
-          );
-          setIsSubmitting(false);
-          return;
-        }
-
-        // Step 3: Mark invitation as used
-        await supabase
-          .from("corevia_company_users")
-          .update({
-            invitation_used: true,
-            password: passwordInput
-          })
-          .eq("id", inviteRecord.id);
-
-        // Step 4: Build the employee session
-        const employeePages = Array.isArray(inviteRecord.allowed_pages)
-          ? inviteRecord.allowed_pages
-          : JSON.parse(inviteRecord.allowed_pages || "[]");
-
-        const employeeSession: UserSession = {
-          username: inviteRecord.full_name,
-          email: loginEmail,
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false,
-          user_id: inviteRecord.id,
-          userId: inviteRecord.id,
-          company_id: inviteRecord.company_id,
-          role: "employee",
-          allowedPages: employeePages,
-          jobTitle: inviteRecord.job_title || "موظف",
-          isReadOnly: inviteRecord.status === "Read Only"
-        };
-
-        onAuthSuccess(employeeSession);
-        onTriggerNotification(
-          isRtl
-            ? `🎉 تم إنشاء كلمة المرور بنجاح! أهلاً بك ${inviteRecord.full_name}`
-            : `🎉 Password set successfully! Welcome ${inviteRecord.full_name}`,
-          "success"
-        );
-        setInviteRecord(null);
-
-      } catch (err: any) {
-        onTriggerNotification(
-          isRtl ? `❌ خطأ: ${err.message}` : `❌ Error: ${err.message}`,
-          "info"
-        );
-      } finally {
-        setIsSubmitting(false);
       }
     }
   };
@@ -1425,105 +1373,6 @@ export default function Auth({
                   <span>{t.backToLogin}</span>
                 </button>
               </div>
-            </form>
-          )}
-
-          {/* SETUP PASSWORD (FIRST-LOGIN / INVITATION) */}
-          {authMode === "setup_password" && (
-            <form onSubmit={handleSubmit} className="space-y-4" id="setup_password_form">
-              <div className="p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl mb-4 text-center">
-                <p className="text-[11px] text-indigo-400 font-bold leading-relaxed">
-                  {isRtl
-                    ? `🎉 أهلاً بك ${inviteRecord?.full_name || ""}! يرجى تعيين كلمة المرور الخاصة بك للدخول الأول.`
-                    : `🎉 Welcome ${inviteRecord?.full_name || ""}! Please set your password for first login.`}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "اسم المستخدم" : "Username"}
-                </label>
-                <div className="relative">
-                  <User className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type="text"
-                    value={inviteRecord?.username || emailInput}
-                    readOnly
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-400 text-xs cursor-not-allowed ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "كلمة المرور الجديدة" : "New Password"}
-                </label>
-                <div className="relative">
-                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="••••••••"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
-                  >
-                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "تأكيد كلمة المرور" : "Confirm Password"}
-                </label>
-                <div className="relative">
-                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={confirmPasswordInput}
-                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                    placeholder="••••••••"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting || isInviteProcessing}
-                className="w-full relative group overflow-hidden bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:via-indigo-400 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg shadow-indigo-500/20 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-indigo-400/10"
-              >
-                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span className="tracking-wide">{isRtl ? "جاري إعداد كلمة المرور..." : "Setting up password..."}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="tracking-wide">{isRtl ? "تعيين كلمة المرور والدخول" : "Set Password & Login"}</span>
-                    <span className={`transition-transform duration-300 ${
-                      isRtl ? "group-hover:-translate-x-1" : "group-hover:translate-x-1"
-                    }`}>
-                      {isRtl ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-                    </span>
-                  </>
-                )}
-              </button>
             </form>
           )}
 

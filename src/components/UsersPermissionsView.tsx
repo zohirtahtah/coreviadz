@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee, generateUniqueUsername, createEmployeeWithAuth, generateInvitationToken } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -91,17 +91,46 @@ export default function UsersPermissionsView({
   useEffect(() => {
     if (!editingEmployee && fullName) {
       const cleanArabicName = (name: string) => {
+        return name.toLowerCase().trim()
+          .replace(/\s+/g, ".")
+          .replace(/[أإآا]/g, "a")
+          .replace(/[ب]/g, "b")
+          .replace(/[ت]/g, "t")
+          .replace(/[ث]/g, "th")
+          .replace(/[ج]/g, "j")
+          .replace(/[حخ]/g, "kh")
+          .replace(/[دذ]/g, "d")
+          .replace(/[ر]/g, "r")
+          .replace(/[ز]/g, "z")
+          .replace(/[سش]/g, "s")
+          .replace(/[صض]/g, "sh")
+          .replace(/[طظ]/g, "t")
+          .replace(/[عغ]/g, "g")
+          .replace(/[ف]/g, "f")
+          .replace(/[قك]/g, "k")
+          .replace(/[ل]/g, "l")
+          .replace(/[من]/g, "n")
+          .replace(/[ه]/g, "h")
+          .replace(/[وي]/g, "y")
+          .replace(/[^a-z0-9.]/g, "");
       };
-    }
 
-    const nameToUse = editingEmployee?.fullName || fullName;
-    if (nameToUse) {
-      generateUniqueUsername(nameToUse).then(uniqueSlug => {
-        setUsername(uniqueSlug);
-        if (!email) setEmail(`${uniqueSlug}@corevia.dz`);
-      });
+      let baseSlug = cleanArabicName(fullName);
+      if (!baseSlug || baseSlug === ".") {
+        baseSlug = "user";
+      }
+
+      let counter = 1;
+      let uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
+      while (employees.some(emp => emp.username?.toLowerCase() === uniqueSlug)) {
+        counter++;
+        uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
+      }
+
+      setUsername(uniqueSlug);
+      setEmail(`${uniqueSlug}@corevia.dz`);
     }
-  }, [fullName, editingEmployee]);
+  }, [fullName, editingEmployee, employees]);
 
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -113,21 +142,17 @@ export default function UsersPermissionsView({
   const [linkedWorkerFound, setLinkedWorkerFound] = useState<any | null>(null);
   const [subTab, setSubTab] = useState<"accounts" | "salary_profiles">("accounts");
 
-  const handleCreateAccountForWorker = async (worker: any) => {
+  const handleCreateAccountForWorker = (worker: any) => {
     setEditingEmployee(null);
     setSelectedWorkerId(worker.id);
     setFullName(worker.name);
     setPhone(worker.phone || "");
     setEmail("");
     
-    if (worker.name) {
-      const uniqueSlug = await generateUniqueUsername(worker.name);
-      setUsername(uniqueSlug);
-    } else {
-      const cleanNum = worker.phone ? worker.phone.replace(/\D/g, "") : "";
-      const suffix = cleanNum.length >= 6 ? cleanNum.slice(-6) : Math.floor(1000 + Math.random() * 9000).toString();
-      setUsername(`worker_${suffix}`);
-    }
+    // Auto generate clean username from phone or code
+    const cleanNum = worker.phone ? worker.phone.replace(/\D/g, "") : "";
+    const suffix = cleanNum.length >= 6 ? cleanNum.slice(-6) : Math.floor(1000 + Math.random() * 9000).toString();
+    setUsername(`worker_${suffix}`);
     
     setJobTitle(worker.role || "موظف");
     setPassword(Math.floor(100000 + Math.random() * 900000).toString());
@@ -154,9 +179,9 @@ export default function UsersPermissionsView({
       let expiresToUse = emp.invitation_expires;
 
       if (!tokenToUse) {
-        const newToken = generateInvitationToken();
-        tokenToUse = newToken.token;
-        expiresToUse = newToken.expiresAt;
+        // Generate expiring (7 days) secure invitation link on the fly and sync
+        tokenToUse = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+        expiresToUse = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
         
         const updatedEmp = {
           ...emp,
@@ -173,8 +198,8 @@ export default function UsersPermissionsView({
       setCopiedId(emp.id);
       onTriggerNotification(
         isRtl 
-          ? `📋 تم نسخ رابط الدعوة الخاص بـ (${emp.fullName})! يمكنك إرساله له الآن.` 
-          : `📋 Invitation link for (${emp.fullName}) copied to clipboard!`
+          ? `📋 تم نسخ رابط الدخول المباشر الآمن الخاص بـ (${emp.fullName})! يمكنك إرساله له الآن.` 
+          : `📋 Secure pre-filled login link for (${emp.fullName}) copied to clipboard!`
       );
       setTimeout(() => {
         setCopiedId(null);
@@ -475,9 +500,8 @@ export default function UsersPermissionsView({
       }
 
       // Generate expiring (7 days) secure invitation link
-      const newToken = generateInvitationToken();
-      invitationToken = newToken.token;
-      invitationExpires = newToken.expiresAt;
+      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       invitationUsed = false;
     } else {
       // If editing employee and password changed, sync password back to Supabase Auth

@@ -140,11 +140,10 @@ export default function App() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
 
-  // Double-verify Super Admin privileges server-side when Express server is running
-  // Falls back to session role check for static Vite deployments.
+  // Double-verify Super Admin privileges server-side to secure the admin layout
   useEffect(() => {
     if (session && (session.role === "super_admin" || session.role === "super-admin")) {
-      fetch("/api/auth/verify-super-admin", { signal: AbortSignal.timeout(3000) })
+      fetch("/api/auth/verify-super-admin")
         .then(res => {
           if (res.ok) return res.json();
           throw new Error("Super admin verification failed");
@@ -157,9 +156,7 @@ export default function App() {
           }
         })
         .catch(() => {
-          // Server not available (static Vite/Vercel deployment) — trust session role
-          console.warn("Server-side super admin verification unavailable, falling back to session role.");
-          setIsServerSuperAdmin(true);
+          setIsServerSuperAdmin(false);
         });
     } else {
       setIsServerSuperAdmin(false);
@@ -197,13 +194,6 @@ export default function App() {
           localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
         }
 
-        // Check persistent OTP verified flag — immune to Supabase sync overwrites
-        const otpFlagKey = `corevia_otp_verified_${session.email.toLowerCase()}`;
-        if (localStorage.getItem(otpFlagKey) === "true") {
-          found.accountStatus = "Active";
-          found.emailVerified = true;
-        }
-
         // Auto-heal of account status to Active if user-onboarding is completed
         const hasOnboarded = getBusinessProfile()?.businessName;
         if (found.accountStatus === "Pending Verification" && hasOnboarded) {
@@ -223,15 +213,15 @@ export default function App() {
         if (found.expirationDate && found.accountStatus === "Active") {
           const expTime = new Date(found.expirationDate).getTime();
           if (expTime < Date.now()) {
-            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Setting status to Expired.`);
-            found.accountStatus = "Expired";
+            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
+            found.accountStatus = "Suspended";
             localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
             
             // Sync status to Supabase in background
             if (supabase) {
               supabase
                 .from("corevia_companies")
-                .update({ accountStatus: "Expired" })
+                .update({ accountStatus: "Suspended" })
                 .eq("id", found.id)
                 .then(() => {
                   console.log("[Auto-Billing] Safely updated company status on Supabase.");
@@ -249,16 +239,11 @@ export default function App() {
   };
 
   const saasAccount = getSaaSAccountForSession();
-  const isExpiredSub = saasAccount && saasAccount.expirationDate
-    ? Math.ceil((new Date(saasAccount.expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 0
-    : false;
-  const isReadOnly = saasAccount
-    ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended" || saasAccount.accountStatus === "Expired" || isExpiredSub)
-    : false;
+  const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
   const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
-    ? (saasAccount.accountStatus === "Pending Verification" || (saasAccount.otpCode && !saasAccount.emailVerified))
+    ? saasAccount.accountStatus === "Pending Verification" 
     : false;
   const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
 
@@ -445,76 +430,6 @@ export default function App() {
         }
       });
   }, []);
-
-  // Permission re-verification for employee sessions on every session restore
-  useEffect(() => {
-    if (session?.role === "employee" && supabase) {
-      const verifyPermissions = async () => {
-        try {
-          const { data, error } = await supabase
-            .from("corevia_company_users")
-            .select("status, allowed_pages, company_id")
-            .or(`auth_user_id.eq.${session.userId},id.eq.${session.userId}`)
-            .maybeSingle();
-
-          if (error) {
-            console.warn("Permission re-verification error:", error);
-            return;
-          }
-
-          if (!data) {
-            console.warn("Employee record not found in Supabase, logging out.");
-            setSession(null);
-            setProfile(null);
-            localStorage.removeItem("corevia_session_v1");
-            localStorage.removeItem("corevia_user_session_v1");
-            return;
-          }
-
-          if (data.status === "Suspended" || data.status === "Disabled") {
-            setSession(null);
-            setProfile(null);
-            localStorage.removeItem("corevia_session_v1");
-            localStorage.removeItem("corevia_user_session_v1");
-            return;
-          }
-
-          // Update allowed pages and isReadOnly if they changed server-side
-          const serverPages = Array.isArray(data.allowed_pages)
-            ? data.allowed_pages
-            : JSON.parse(data.allowed_pages || "[]");
-          const serverReadOnly = data.status === "Read Only";
-          let needsUpdate = false;
-          let updatedSession = { ...session };
-
-          if (JSON.stringify(serverPages) !== JSON.stringify(session.allowedPages)) {
-            updatedSession.allowedPages = serverPages;
-            needsUpdate = true;
-          }
-          if (serverReadOnly !== session.isReadOnly) {
-            updatedSession.isReadOnly = serverReadOnly;
-            needsUpdate = true;
-          }
-          if (needsUpdate) {
-            setSession(updatedSession);
-            saveUserSession(updatedSession);
-          }
-
-          // Verify company_id matches
-          if (data.company_id !== session.company_id) {
-            console.warn("Company ID mismatch, logging out employee.");
-            setSession(null);
-            setProfile(null);
-            localStorage.removeItem("corevia_session_v1");
-            localStorage.removeItem("corevia_user_session_v1");
-          }
-        } catch (err) {
-          console.warn("Permission re-verification exception:", err);
-        }
-      };
-      verifyPermissions();
-    }
-  }, [session?.userId, session?.role]);
 
   // Helper to load localized database and configuration records from local cache
   const loadStateFromLocal = () => {
@@ -1959,11 +1874,6 @@ export default function App() {
               list[idx].emailVerified = true;
               localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
               
-              // Set persistent OTP verified flag (immune to Supabase sync overwrites)
-              if (session?.email) {
-                localStorage.setItem(`corevia_otp_verified_${session.email.toLowerCase()}`, "true");
-              }
-
               // Log otp success activation
               const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
               let logsList: any[] = [];
@@ -2075,19 +1985,8 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended || isExpiredSub ? "pt-10" : ""}`} id="applet_main_scaffold">
+    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended ? "pt-10" : ""}`} id="applet_main_scaffold">
       
-      {/* SaaS Expired subscription red banner */}
-      {(isExpiredSub || saasAccount?.accountStatus === "Expired") && !isSuspended && !isDisabled && (
-        <div className="fixed top-0 inset-x-0 h-10 bg-red-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="expired_danger_banner">
-          <AlertCircle className="w-4 h-4 text-white shrink-0 animate-pulse" />
-          <span>
-            {lang === "ar"
-              ? "تنبيه: اشتراك مؤسستكم منتهي. البيانات متاحة للعرض فقط. يرجى تجديد الاشتراك لاستخدام Corevia."
-              : "Your subscription has expired. Please renew your subscription to continue using Corevia."}
-          </span>
-        </div>
-      )}
       {/* SaaS Suspended warning banner */}
       {isSuspended && (
         <div className="fixed top-0 inset-x-0 h-10 bg-rose-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="suspension_danger_banner">
@@ -2131,8 +2030,7 @@ export default function App() {
           <DashboardView 
             orders={orders} 
             products={products} 
-            lang={lang}
-            saasAccount={saasAccount}
+            lang={lang} 
           />
         )}
 
