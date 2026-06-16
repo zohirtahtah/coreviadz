@@ -90,143 +90,38 @@ export default function Auth({
           "info"
         );
 
-        // Try decoding as Base64 JSON token
-        let decodedPayload: any = null;
-        try {
-          if (!inviteToken.includes("-") && inviteToken.length > 15) {
-            const raw = decodeURIComponent(escape(atob(inviteToken)));
-            decodedPayload = JSON.parse(raw);
-          }
-        } catch (e) {}
-
-        if (decodedPayload && decodedPayload.email && decodedPayload.password) {
-          setEmailInput(decodedPayload.email);
-          setPasswordInput(decodedPayload.password);
-
-          onTriggerNotification(
-            isRtl 
-              ? `🎉 تم التحقق من هويتك بنجاح كموظف! جاري تهيئة مكان العمل...` 
-              : `🎉 Identity verified! Launching employee workspace...`, 
-            "success"
-          );
-        } else if (supabase) {
-          // Robust query: check JSONB field first, fallback to standard column if table has it
-          supabase
-            .from("corevia_company_users")
-            .select("*")
-            .eq("allowed_pages->>invitation_token", inviteToken)
-            .maybeSingle()
-            .then(async ({ data: maybeRecord, error: maybeErr }) => {
-              let inviteRecord = maybeRecord;
-              
-              if (maybeErr || !inviteRecord) {
-                const { data: colRecord } = await supabase
-                  .from("corevia_company_users")
-                  .select("*")
-                  .eq("invitation_token", inviteToken)
-                  .maybeSingle();
-                if (colRecord) {
-                  inviteRecord = colRecord;
-                }
-              }
-
-              if (!inviteRecord) {
-                onTriggerNotification(
-                  isRtl 
-                    ? "❌ رمز الدعوة غير صالح أو غير موجود." 
-                    : "❌ Invalid or non-existent invitation token.", 
-                  "info"
-                );
-                return;
-              }
-
-              // Parse extra properties from JSONB if nested
-              let allowed = Array.isArray(inviteRecord.allowed_pages) ? inviteRecord.allowed_pages : [];
-              let token = inviteRecord.invitation_token;
-              let expires = inviteRecord.invitation_expires;
-              let used = typeof inviteRecord.invitation_used === "boolean" ? inviteRecord.invitation_used : false;
-              let authId = inviteRecord.auth_user_id;
-
-              if (inviteRecord.allowed_pages && !Array.isArray(inviteRecord.allowed_pages)) {
-                try {
-                  const parsed = typeof inviteRecord.allowed_pages === "string" ? JSON.parse(inviteRecord.allowed_pages) : inviteRecord.allowed_pages;
-                  if (parsed && typeof parsed === "object") {
-                    allowed = parsed.pages || [];
-                    token = parsed.invitation_token || token;
-                    expires = parsed.invitation_expires || expires;
-                    used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : used;
-                    authId = parsed.auth_user_id || authId;
-                  }
-                } catch (e) {
-                  console.warn("Parse allowed_pages failed in Auth:", e);
-                }
-              }
-
-              if (used) {
-                onTriggerNotification(
-                  isRtl 
-                    ? "⚠️ تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول مباشرة بالأسفل." 
-                    : "⚠️ This invitation has already been used. Please log in directly below.", 
-                  "info"
-                );
-                return;
-              }
-
-              if (expires && new Date(expires).getTime() < Date.now()) {
-                onTriggerNotification(
-                  isRtl 
-                    ? "❌ انتهت صلاحية رابط الدعوة هذا (صلاحية الرابط 7 أيام). يرجى طلب رابط جديد من المسؤول." 
-                    : "❌ This invitation link has expired. Please contact your administrator.", 
-                  "info"
-                );
-                return;
-              }
-
-              // Mark invitation token as used in DB to prevent multi-use
-              const finalAllowedPages = inviteRecord.allowed_pages && !Array.isArray(inviteRecord.allowed_pages)
-                ? {
-                    pages: allowed,
-                    invitation_token: token,
-                    invitation_expires: expires,
-                    invitation_used: true,
-                    auth_user_id: authId
-                  }
-                : allowed;
-
-              const updatePayload: any = {
-                allowed_pages: finalAllowedPages
-              };
-              if (inviteRecord.invitation_used !== undefined) {
-                updatePayload.invitation_used = true;
-              }
-
-              await supabase
-                .from("corevia_company_users")
-                .update(updatePayload)
-                .eq("id", inviteRecord.id);
-
-              const recUser = inviteRecord.username || inviteRecord.email;
-              const recPass = inviteRecord.password;
-              
-              setEmailInput(recUser || "");
-              setPasswordInput(recPass || "");
-
-              onTriggerNotification(
-                isRtl 
-                  ? `🎉 تم التحقق من هويتك بنجاح كموظف (${inviteRecord.full_name})! جاري تهيئة مكان العمل...` 
-                  : `🎉 Identity verified as ${inviteRecord.full_name}! Launching employee workspace...`, 
-                "success"
-              );
-
-              // Auto-trigger setup submission
-              setTimeout(() => {
-                const btn = document.getElementById("auth-submit-btn");
-                if (btn) {
-                  btn.click();
-                }
-              }, 800);
-            });
-        }
+        // Secure Server-Side Invitation Claiming Endpoint
+        fetch("/api/auth/claim-invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: inviteToken })
+        })
+          .then(async (res) => {
+            const resData = await res.json();
+            if (!res.ok) {
+              throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
+            }
+            return resData;
+          })
+          .then((resData) => {
+            onTriggerNotification(
+              isRtl 
+                ? `🎉 مرحباً بك! تم التحقق من هويتك بنجاح وجاري تهيئة مكان العمل...` 
+                : `🎉 Welcome! Identity verified successfully. Launching workspace...`, 
+              "success"
+            );
+            // Instantly pass the session back up, completely circumventing manual input submissions or RLS failures!
+            onAuthSuccess(resData.session);
+          })
+          .catch((err) => {
+            console.error("claim-invite error:", err);
+            onTriggerNotification(
+              isRtl 
+                ? `❌ فشل تفعيل رابط الدعوة: ${err.message}` 
+                : `❌ Failed to claim invitation link: ${err.message}`, 
+              "info"
+            );
+          });
 
         setTimeout(() => {
           try {

@@ -249,6 +249,177 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// POST /api/auth/claim-invite -> Validates invitation token, marks as used, and logs the employee in securely
+app.post("/api/auth/claim-invite", async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({
+      error_en: "Invitation token is required.",
+      error_ar: "رمز الدعوة مطلوب."
+    });
+  }
+
+  try {
+    // 1. Look up the employee record with that invitation token (fully bypassing RLS since it's on the server side!)
+    let record = null;
+    
+    // First query standard column
+    const { data: colsData, error: colsErr } = await supabase
+      .from("corevia_company_users")
+      .select("*")
+      .eq("invitation_token", token)
+      .maybeSingle();
+
+    if (colsData) {
+      record = colsData;
+    } else {
+      // Try JSONB nested search fallback
+      const { data: jsonbData } = await supabase
+        .from("corevia_company_users")
+        .select("*")
+        .eq("allowed_pages->>invitation_token", token)
+        .maybeSingle();
+      if (jsonbData) {
+        record = jsonbData;
+      }
+    }
+
+    if (!record) {
+      return res.status(404).json({
+        error_en: "Invalid or non-existent invitation token.",
+        error_ar: "رمز الدعوة غير صالح أو غير موجود."
+      });
+    }
+
+    // 2. Parse nested fields from allowed_pages if JSONB formatted
+    let allowed = Array.isArray(record.allowed_pages) ? record.allowed_pages : [];
+    let tokenVal = record.invitation_token || token;
+    let expires = record.invitation_expires;
+    let used = typeof record.invitation_used === "boolean" ? record.invitation_used : false;
+    let authId = record.auth_user_id;
+
+    if (record.allowed_pages && !Array.isArray(record.allowed_pages)) {
+      try {
+        const parsed = typeof record.allowed_pages === "string" ? JSON.parse(record.allowed_pages) : record.allowed_pages;
+        if (parsed && typeof parsed === "object") {
+          allowed = parsed.pages || [];
+          tokenVal = parsed.invitation_token || tokenVal;
+          expires = parsed.invitation_expires || expires;
+          used = typeof parsed.invitation_used === "boolean" ? parsed.invitation_used : used;
+          authId = parsed.auth_user_id || authId;
+        }
+      } catch (e) {
+        console.warn("Parse allowed_pages failed in API:", e);
+      }
+    }
+
+    // 3. Validation checks
+    if (used) {
+      return res.status(400).json({
+        error_en: "This invitation link has already been used. Please log in using your password.",
+        error_ar: "تم استخدام رابط الدعوة هذا مسبقاً. يرجى تسجيل الدخول باستخدام كلمة المرور الخاصة بك."
+      });
+    }
+
+    if (expires && new Date(expires).getTime() < Date.now()) {
+      return res.status(400).json({
+        error_en: "This invitation link has expired. Please contact your administrator.",
+        error_ar: "انتهت صلاحية رابط الدعوة هذا. يرجى مراجعة مدير النظام للحصول على دعوة جديدة."
+      });
+    }
+
+    // 4. Mark invitation as used in the database
+    const finalAllowedPages = record.allowed_pages && !Array.isArray(record.allowed_pages)
+      ? {
+          pages: allowed,
+          invitation_token: tokenVal,
+          invitation_expires: expires,
+          invitation_used: true,
+          auth_user_id: authId
+        }
+      : allowed;
+
+    const updatePayload = {
+      invitation_used: true,
+      allowed_pages: finalAllowedPages
+    };
+
+    const { error: updateErr } = await supabase
+      .from("corevia_company_users")
+      .update(updatePayload)
+      .eq("id", record.id);
+
+    if (updateErr) {
+      console.error("Failed to update invitation status in DB:", updateErr);
+    }
+
+    // Direct pgPool write fallback for absolute speed and durability bypassing RLS completely!
+    if (pgPool) {
+      try {
+        await pgPool.query(
+          `UPDATE corevia_company_users SET invitation_used = true, allowed_pages = $1 WHERE id = $2`,
+          [JSON.stringify(finalAllowedPages), record.id]
+        );
+      } catch (dbErr) {
+        console.warn("pgPool sync update for invitation failed:", dbErr);
+      }
+    }
+
+    // 5. Generate secure JWT session cookie for instant session enrollment
+    const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration
+    const targetEmail = record.email || `${(record.username || record.id || "employee").toLowerCase()}@corevia.dz`;
+    
+    const jwtToken = jwt.sign(
+      { 
+        user_id: record.id, 
+        tenant_id: record.company_id, 
+        role: "employee", 
+        email: targetEmail,
+        is_read_only: record.status === "Read Only",
+        iat: Math.floor(Date.now() / 1000), 
+        exp: exp 
+      }, 
+      JWT_SECRET
+    );
+
+    res.cookie("corevia_session_v1_cookie", jwtToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      path: "/"
+    });
+
+    const finalSession = {
+      username: record.username || record.full_name || targetEmail.split("@")[0],
+      email: targetEmail,
+      isRegistered: true,
+      isApproved: true,
+      isSuspended: record.status === "Suspended",
+      userId: record.id,
+      user_id: record.id,
+      company_id: record.company_id,
+      role: "employee",
+      allowedPages: allowed,
+      jobTitle: record.job_title || "Employee",
+      isReadOnly: record.status === "Read Only"
+    };
+
+    return res.status(200).json({
+      success: true,
+      session: finalSession
+    });
+
+  } catch (err: any) {
+    console.error("[Claim Invite API] error:", err);
+    return res.status(500).json({
+      error_en: "Failed to claim invitation: " + err.message,
+      error_ar: "فشل استرداد وتأكيد رابط الدعوة: " + err.message
+    });
+  }
+});
+
 // -------------------------------------------------------------
 // HELPER MIDDLEWARES FOR MULTI-TENANT RLS ENFORCEMENT
 // -------------------------------------------------------------
