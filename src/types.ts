@@ -365,7 +365,7 @@ export interface SaaSCompany {
   subscriptionPlan: "Free" | "Basic" | "Pro" | "Enterprise";
   seatsLimit: number;
   seatsUsed: number;
-  accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled";
+  accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled" | "Expired";
   expirationDate: string;
   activeDevices: ActiveDevice[];
   twoFactorEnabled?: boolean;

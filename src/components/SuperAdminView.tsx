@@ -227,8 +227,9 @@ export default function SuperAdminView({
     companies.forEach(c => {
       if (c.accountStatus === "Active") active++;
       else if (c.accountStatus === "Suspended") suspended++;
+      else if (c.accountStatus === "Expired") expired++;
       else if (c.subscriptionPlan === "Free" || c.subscriptionPlan === "Trial") trial++;
-      if (c.expirationDate && new Date(c.expirationDate) < new Date()) expired++;
+      if (!expired && c.expirationDate && new Date(c.expirationDate) < new Date()) expired++;
       if (c.accountStatus === "Pending Verification") pending++;
       totalSeatsUsed += c.seatsUsed || 1;
       totalSeatsLimit += c.seatsLimit;
@@ -984,7 +985,7 @@ function CompanyDetailView({
           <p className="text-xs text-slate-500 mt-0.5">{company.country} • ID: {company.id}</p>
         </div>
         <div className="flex items-center gap-2">
-          {company.accountStatus === "Suspended" || company.accountStatus === "Disabled" ? (
+          {company.accountStatus === "Suspended" || company.accountStatus === "Disabled" || company.accountStatus === "Expired" ? (
             <button onClick={() => onReactivate(company)}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all">
               {t("إعادة التفعيل", "Reactivate")}
@@ -1106,6 +1107,7 @@ function CompanyDetailView({
               <option value="Suspended">{t("معلق", "Suspended")}</option>
               <option value="Disabled">{t("معطل", "Disabled")}</option>
               <option value="Read Only">{t("قراءة فقط", "Read Only")}</option>
+              <option value="Expired">{t("منتهي", "Expired")}</option>
             </select>
           </div>
         </div>

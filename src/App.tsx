@@ -223,15 +223,15 @@ export default function App() {
         if (found.expirationDate && found.accountStatus === "Active") {
           const expTime = new Date(found.expirationDate).getTime();
           if (expTime < Date.now()) {
-            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
-            found.accountStatus = "Suspended";
+            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Setting status to Expired.`);
+            found.accountStatus = "Expired";
             localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
             
             // Sync status to Supabase in background
             if (supabase) {
               supabase
                 .from("corevia_companies")
-                .update({ accountStatus: "Suspended" })
+                .update({ accountStatus: "Expired" })
                 .eq("id", found.id)
                 .then(() => {
                   console.log("[Auto-Billing] Safely updated company status on Supabase.");
@@ -253,7 +253,7 @@ export default function App() {
     ? Math.ceil((new Date(saasAccount.expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 0
     : false;
   const isReadOnly = saasAccount
-    ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended" || isExpiredSub)
+    ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended" || saasAccount.accountStatus === "Expired" || isExpiredSub)
     : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
@@ -454,7 +454,7 @@ export default function App() {
           const { data, error } = await supabase
             .from("corevia_company_users")
             .select("status, allowed_pages, company_id")
-            .eq("id", session.userId)
+            .or(`auth_user_id.eq.${session.userId},id.eq.${session.userId}`)
             .maybeSingle();
 
           if (error) {
@@ -471,7 +471,7 @@ export default function App() {
             return;
           }
 
-          if (data.status === "Suspended") {
+          if (data.status === "Suspended" || data.status === "Disabled") {
             setSession(null);
             setProfile(null);
             localStorage.removeItem("corevia_session_v1");
@@ -479,13 +479,23 @@ export default function App() {
             return;
           }
 
-          // Update allowed pages if they changed server-side
+          // Update allowed pages and isReadOnly if they changed server-side
           const serverPages = Array.isArray(data.allowed_pages)
             ? data.allowed_pages
             : JSON.parse(data.allowed_pages || "[]");
+          const serverReadOnly = data.status === "Read Only";
+          let needsUpdate = false;
+          let updatedSession = { ...session };
 
           if (JSON.stringify(serverPages) !== JSON.stringify(session.allowedPages)) {
-            const updatedSession = { ...session, allowedPages: serverPages };
+            updatedSession.allowedPages = serverPages;
+            needsUpdate = true;
+          }
+          if (serverReadOnly !== session.isReadOnly) {
+            updatedSession.isReadOnly = serverReadOnly;
+            needsUpdate = true;
+          }
+          if (needsUpdate) {
             setSession(updatedSession);
             saveUserSession(updatedSession);
           }
@@ -2068,7 +2078,7 @@ export default function App() {
     <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended || isExpiredSub ? "pt-10" : ""}`} id="applet_main_scaffold">
       
       {/* SaaS Expired subscription red banner */}
-      {isExpiredSub && !isSuspended && !isDisabled && (
+      {(isExpiredSub || saasAccount?.accountStatus === "Expired") && !isSuspended && !isDisabled && (
         <div className="fixed top-0 inset-x-0 h-10 bg-red-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="expired_danger_banner">
           <AlertCircle className="w-4 h-4 text-white shrink-0 animate-pulse" />
           <span>
