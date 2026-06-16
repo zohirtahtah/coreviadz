@@ -342,7 +342,21 @@ app.get("/api/auth/session", async (req, res) => {
         user_id: decoded.user_id,
         company_id: decoded.tenant_id,
         role: decoded.role,
-        allowedPages: employees ? (Array.isArray(employees.allowed_pages) ? employees.allowed_pages : JSON.parse(employees.allowed_pages || "[]")) : undefined,
+        allowedPages: employees 
+          ? (() => {
+              const val = employees.allowed_pages;
+              if (!val) return [];
+              try {
+                const parsed = typeof val === "string" ? JSON.parse(val) : val;
+                if (Array.isArray(parsed)) return parsed;
+                if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) return parsed.pages;
+                return [];
+              } catch (pErr) {
+                console.warn("Error parsing allowedPages in session:", pErr);
+                return [];
+              }
+            })()
+          : undefined,
         jobTitle: employees ? employees.job_title : undefined,
         isReadOnly: decoded.is_read_only
       }
