@@ -515,6 +515,7 @@ export default function Auth({
         if (!supabase || finalEmail.toLowerCase().trim() === "coreviadz@gmail.com") {
           const adminUserId = "usr_super_admin_coreviadz";
           const isSuperAdminEmail = finalEmail.toLowerCase().trim() === "coreviadz@gmail.com";
+          const emailPrefix = finalEmail.split("@")[0] || "usr";
           const fallbackSession: UserSession = {
             username: isSuperAdminEmail ? "Zohir Corevia" : (finalEmail.split("@")[0] || "User"),
             email: finalEmail,
@@ -523,7 +524,7 @@ export default function Auth({
             isSuspended: false,
             user_id: adminUserId,
             userId: adminUserId,
-            company_id: isSuperAdminEmail ? `cop_${adminUserId.substring(0, 15)}` : "cop_mock",
+            company_id: isSuperAdminEmail ? `cop_${adminUserId.substring(0, 15)}` : `cop_${emailPrefix.substring(0, 10)}`,
             role: isSuperAdminEmail ? "super_admin" : "admin"
           };
           onAuthSuccess(fallbackSession);
