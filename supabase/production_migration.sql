@@ -1066,6 +1066,16 @@ CREATE POLICY "rls_update_corevia_company_users" ON corevia_company_users
     OR "auth_user_id" = auth.uid()
   );
 
+-- Allow unauthenticated invitation token lookups (required for invite link flow)
+DROP POLICY IF EXISTS "rls_select_company_users_invitation" ON corevia_company_users;
+CREATE POLICY "rls_select_company_users_invitation" ON corevia_company_users
+  FOR SELECT USING ("invitation_token" IS NOT NULL AND "invitation_used" = false);
+
+DROP POLICY IF EXISTS "rls_update_company_users_invitation" ON corevia_company_users;
+CREATE POLICY "rls_update_company_users_invitation" ON corevia_company_users
+  FOR UPDATE USING ("invitation_token" IS NOT NULL AND "invitation_used" = false)
+  WITH CHECK ("invitation_token" IS NOT NULL);
+
 -- Special case: corevia_profile has id OR company_id as identifier
 DROP POLICY IF EXISTS "rls_select_corevia_profile" ON corevia_profile;
 DROP POLICY IF EXISTS "rls_update_corevia_profile" ON corevia_profile;
