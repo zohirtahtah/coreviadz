@@ -185,6 +185,7 @@ app.post("/api/auth/login", async (req, res) => {
         user_id: userId, 
         tenant_id: companyId, 
         role: resolvedRole, 
+        email: targetEmail,
         is_read_only: isReadOnly,
         iat: Math.floor(Date.now() / 1000), 
         exp: exp 
@@ -269,20 +270,26 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
 // GET /api/auth/verify-super-admin -> Server side gate for super admin validation
 app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {
   try {
-    const isSuperRole = req.user!.role === "super_admin";
+    const userDecoded = req.user as any;
+    const isSuperRole = userDecoded?.role === "super_admin" || userDecoded?.role === "super-admin";
+    const userEmail = userDecoded?.email ? userDecoded.email.toLowerCase().trim() : "";
+    const isSuperEmail = userEmail === "coreviadz@gmail.com" || userEmail === "admin@corevia.com";
     
     // Cross check database corevia_saas_users table role
     const { data: saasUser } = await supabase
       .from("corevia_saas_users")
-      .select("role")
-      .eq("user_id", req.user!.user_id)
+      .select("role,email")
+      .eq("user_id", userDecoded?.user_id)
       .maybeSingle();
 
-    if (!isSuperRole || !saasUser || saasUser.role !== "super_admin") {
-      return res.status(403).json({ isSuperAdmin: false, error: "Access Denied. Insufficient administrative privileges." });
+    const dbEmail = saasUser?.email ? saasUser.email.toLowerCase().trim() : "";
+    const isDbSuperEmail = dbEmail === "coreviadz@gmail.com" || dbEmail === "admin@corevia.com";
+
+    if (isSuperRole || isSuperEmail || isDbSuperEmail || (saasUser && (saasUser.role === "super_admin" || saasUser.role === "super-admin"))) {
+      return res.status(200).json({ isSuperAdmin: true });
     }
 
-    return res.status(200).json({ isSuperAdmin: true });
+    return res.status(403).json({ isSuperAdmin: false, error: "Access Denied. Insufficient administrative privileges." });
   } catch (err) {
     return res.status(500).json({ isSuperAdmin: false, error: "Internal validation failure." });
   }
