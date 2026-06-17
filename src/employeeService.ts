@@ -208,7 +208,10 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(worker)
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const ok = await updateUserPages(employee.id, employee.allowedPages);
+    if (!ok) console.warn("saveEmployee: updateUserPages failed for", employee.id);
+    return true;
   } catch { return false; }
 }
 
