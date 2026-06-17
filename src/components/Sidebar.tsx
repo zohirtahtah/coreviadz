@@ -137,8 +137,8 @@ export default function Sidebar({
 
   // Read local storage/prop to check for Super Admin session
   let isSuperAdmin = false;
-  if (isServerSuperAdmin !== undefined && isServerSuperAdmin !== null) {
-    isSuperAdmin = isServerSuperAdmin === true;
+  if (isServerSuperAdmin === true) {
+    isSuperAdmin = true;
   } else {
     const currentEmail = session?.email || "";
     if (

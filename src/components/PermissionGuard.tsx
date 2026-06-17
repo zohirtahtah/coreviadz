@@ -1,8 +1,38 @@
 import React, { useEffect, useState } from "react";
 
+// Maps each page tab to the required permission code
+const PAGE_PERMISSION_MAP: Record<string, string | null> = {
+  "dashboard": null,
+  "orders": "orders.view",
+  "customers": "customers.view",
+  "inventory": "inventory.view",
+  "products": null,
+  "suppliers": "suppliers.view",
+  "workers": "employees.view",
+  "expenses": "expenses.view",
+  "profit": "reports.view",
+  "yearly": "reports.view",
+  "settings": "settings.view",
+  "users-permissions": "company_users.view",
+  "activity-log": null,
+  "communication": null,
+  "my-profile": null,
+  "super-admin": null,
+};
+
 interface PermissionCheck {
   status: "loading" | "granted" | "denied";
   reason?: string;
+}
+
+function checkBackendPermission(page: string): Promise<boolean> {
+  const permCode = PAGE_PERMISSION_MAP[page];
+  if (!permCode) return Promise.resolve(true);
+  // Cookie-based auth via requireAuth middleware
+  return fetch(`/api/permissions/check?code=${encodeURIComponent(permCode)}`)
+    .then(r => r.json())
+    .then(d => d.granted === true)
+    .catch(() => true);
 }
 
 export function usePermissions(
@@ -17,14 +47,9 @@ export function usePermissions(
       return;
     }
 
-    // Super admins have full access
-    if (session.role === "super_admin" || session.role === "super-admin") {
-      setResult({ status: "granted" });
-      return;
-    }
-
-    // Admins/owners have full access
-    if (session.role === "admin" || session.role === "owner") {
+    // Super admins / admin / owner have full access
+    const adminRoles = ["super_admin", "super-admin", "admin", "owner"];
+    if (adminRoles.includes(session.role)) {
       setResult({ status: "granted" });
       return;
     }
@@ -38,15 +63,26 @@ export function usePermissions(
         return;
       }
 
+      // Check allowed_pages (frontend list)
       const allowedPages = session.allowedPages || [];
-      if (allowedPages.includes(requestedPage)) {
-        setResult({ status: "granted" });
+      if (!allowedPages.includes(requestedPage)) {
+        setResult({
+          status: "denied",
+          reason: `Access denied. You do not have permission for this page.`
+        });
         return;
       }
 
-      setResult({
-        status: "denied",
-        reason: `Access denied. You do not have permission for this page.`
+      // Check backend permission code (async)
+      checkBackendPermission(requestedPage).then(granted => {
+        if (granted) {
+          setResult({ status: "granted" });
+        } else {
+          setResult({
+            status: "denied",
+            reason: "Access denied. Missing required permission."
+          });
+        }
       });
       return;
     }

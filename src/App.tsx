@@ -4,26 +4,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { 
-  getBusinessProfile, saveBusinessProfile, getUserSession, saveUserSession,
-  getOrders, saveOrders, getProducts, saveProducts, getBasicInventory, saveBasicInventory,
-  getSubInventory, saveSubInventory, getReturnInventory, saveReturnInventory,
-  getSuppliers, saveSuppliers, getSupplierInvoices, saveSupplierInvoices,
-  getWorkers, saveWorkers, getTrashItems, saveTrashItems, initializeDatabase,
-  deleteOrderSoft, deleteInvoiceSoft, deleteWorkerSoft, deleteProductSoft, deleteEntireWorkerProfileSoft,
-  restoreOrderSoft, restoreInvoiceSoft, restoreWorkerSoft, restoreProductSoft,
-  getStockMovements, saveStockMovements
-} from "./storageUtils";
-import { 
-  BusinessProfile, Order, Product, BasicInventoryItem, SubInventoryItem, 
-  ReturnInventoryItem, Supplier, SupplierInvoice, Worker, Expense, TrashItem,
-  StockMovement
-} from "./types";
 import { LanguageType, ThemeType, UserSession } from "./types";
 import Auth from "./components/Auth";
 import Onboarding from "./components/Onboarding";
 import Sidebar from "./components/Sidebar";
-import { Flag } from "./components/Flag";
 import DashboardView from "./components/DashboardView";
 import OrdersView from "./components/OrdersView";
 import InventoryView from "./components/InventoryView";
@@ -42,138 +26,15 @@ import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
 import { PermissionGuard } from "./components/PermissionGuard";
 import { logActivity } from "./activityLogService";
-import { SaaSCompany } from "./types";
-import { 
-  getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
-  serializeOrderToRow, getDynamicOrderColumns, logSyncAudit 
-} from "./googleSyncUtils";
 import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { 
-  fetchUserSaaSMeta, 
-  saveOnboardingCompletionInCloud, 
-  pushSingleDatasetToCloud, 
-  pullMultiTenantData, 
-  pushFullTenantData,
-  cleanSlateResetSandbox
-} from "./supabaseSync";
+import { getUserSession, saveUserSession } from "./storageUtils";
 
-// =========================================================================
-// AUTOMATIC SaaS TENANCY BINDING & SIGNUP ROUTING AGENT
-// =========================================================================
-export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: string) => {
-  const stored = localStorage.getItem("corevia_saas_companies_v1");
-  let list: SaaSCompany[] = [];
-  try {
-    if (stored) list = JSON.parse(stored);
-  } catch (e) {
-    list = [];
-  }
-
-  const exists = list.some(c => c.email.toLowerCase() === email.toLowerCase().trim());
-  if (!exists) {
-    // Generate a fresh 6-digit verification code OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const newCompany: SaaSCompany = {
-      id: `cop-${Date.now()}`,
-      companyName: `${fullName || email.split("@")[0]} Trading`,
-      ownerName: fullName || email.split("@")[0],
-      email: email.toLowerCase().trim(),
-      phone: "+213 550 00 00 00",
-      country: "Algeria",
-      registrationDate: new Date().toISOString().split("T")[0],
-      lastLogin: new Date().toISOString().replace("T", " ").substr(0, 16),
-      emailVerified: false,
-      subscriptionPlan: "Basic",
-      seatsLimit: 5,
-      seatsUsed: 1,
-      accountStatus: "Pending Verification",
-      expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      otpCode: otp,
-      activeDevices: [
-        { id: `dev-${Date.now()}-1`, browser: "Chrome", os: "Windows", activityType: "Desktop Session", lastActive: new Date().toISOString().replace("T", " ").substr(0, 16) }
-      ]
-    };
-    list.push(newCompany);
-    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-    
-    // Seed system registration log
-    const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
-    let logsList: any[] = [];
-    try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
-    logsList.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      companyName: newCompany.companyName,
-      email: email.toLowerCase().trim(),
-      operation: "إنشاء حساب",
-      details: `تم توفير ترخيص سحابي تلقائي لمدير جديد وبانتظار التحقق بكود OTP ذو 6 أرقام: ${otp}`,
-      ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-    });
-    localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
-  } else {
-    // Sync login audit entry
-    const matched = list.find(c => c.email.toLowerCase() === email.toLowerCase().trim());
-    if (matched) {
-      matched.lastLogin = new Date().toISOString().replace("T", " ").substr(0, 16);
-      localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-
-      const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
-      let logsList: any[] = [];
-      try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
-      logsList.unshift({
-        id: `log-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        companyName: matched.companyName,
-        email: email.toLowerCase().trim(),
-        operation: "تسجيل دخول",
-        details: `تسجيل دخول ناجح لنظام الإدارة السحابي`,
-        ipAddress: "197.220." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-      });
-      localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
-    }
-  }
-};
 
 export default function App() {
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
-  const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
-
-  // Double-verify Super Admin privileges server-side to secure the admin layout
-  useEffect(() => {
-    const isSuperAdminEmail = session?.email?.toLowerCase().trim() === "coreviadz@gmail.com" || session?.email?.toLowerCase().trim() === "admin@corevia.com";
-    if (session && (session.role === "super_admin" || session.role === "super-admin" || isSuperAdminEmail)) {
-      fetch("/api/auth/verify-super-admin")
-        .then(res => {
-          if (res.ok) return res.json();
-          throw new Error("Super admin verification failed");
-        })
-        .then(data => {
-          if (data && data.isSuperAdmin) {
-            setIsServerSuperAdmin(true);
-          } else {
-            // Robust local fallback for founder/platform manager
-            if (isSuperAdminEmail) {
-              setIsServerSuperAdmin(true);
-            } else {
-              setIsServerSuperAdmin(false);
-            }
-          }
-        })
-        .catch(() => {
-          // Robust local fallback for founder/platform manager on network glitches
-          if (isSuperAdminEmail) {
-            setIsServerSuperAdmin(true);
-          } else {
-            setIsServerSuperAdmin(false);
-          }
-        });
-    } else {
-      setIsServerSuperAdmin(false);
-    }
-  }, [session]);
 
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
@@ -190,74 +51,8 @@ export default function App() {
   });
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
 
-  // ==========================================
-  // MULTI-TENANT SaaS COMPLETED INTEGRATION
-  // ==========================================
-  const getSaaSAccountForSession = () => {
-    if (!session || !session.email) return null;
-    const stored = localStorage.getItem("corevia_saas_companies_v1");
-    if (!stored) return null;
-    try {
-      const parsed: SaaSCompany[] = JSON.parse(stored);
-      const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
-      if (found) {
-        if (!found.otpCode || found.otpCode.trim() === "") {
-          found.otpCode = "123456";
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-        }
-
-        // Auto-heal of account status to Active if user-onboarding is completed
-        const hasOnboarded = getBusinessProfile()?.businessName;
-        if (found.accountStatus === "Pending Verification" && hasOnboarded) {
-          found.accountStatus = "Active";
-          found.emailVerified = true;
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-          if (supabase) {
-            supabase
-              .from("corevia_companies")
-              .update({ accountStatus: "Active" })
-              .eq("id", found.id)
-              .then(() => console.log("[Auto-Heal] Activated company on login."));
-          }
-        }
-
-        // Automated Check for Expired Subscriptions
-        if (found.expirationDate && found.accountStatus === "Active") {
-          const expTime = new Date(found.expirationDate).getTime();
-          if (expTime < Date.now()) {
-            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
-            found.accountStatus = "Suspended";
-            localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-            
-            // Sync status to Supabase in background
-            if (supabase) {
-              supabase
-                .from("corevia_companies")
-                .update({ accountStatus: "Suspended" })
-                .eq("id", found.id)
-                .then(() => {
-                  console.log("[Auto-Billing] Safely updated company status on Supabase.");
-                });
-            }
-          }
-        }
-
-        return found;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  };
-
-  const saasAccount = getSaaSAccountForSession();
-  const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
-  const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
-  const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
-  const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
-    ? saasAccount.accountStatus === "Pending Verification" 
-    : false;
-  const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
+  const isReadOnly = session?.role === "read_only" || session?.isReadOnly === true;
+  const isSuspended = session?.isSuspended === true;
 
   // OTP Validation code entry state
   const [typedOtpCode, setTypedOtpCode] = useState("");
@@ -349,67 +144,32 @@ export default function App() {
 
   const [showLangDropdown, setShowLangDropdown] = useState(false);
 
-  // Unified Handler when Supabase session changes (Syncs, Caches, Seeds)
+  // Unified Handler when Supabase session changes
   const handleAuthSessionChange = async (supabaseSession: any) => {
     if (!supabaseSession?.user) return;
     const user = supabaseSession.user;
     setIsSyncingOnAuth(true);
 
     try {
-      const userMeta = await fetchUserSaaSMeta(
-        user.id,
-        user.email,
-        user.user_metadata?.full_name || user.email?.split("@")[0] || "User"
-      );
+      const meta = user.user_metadata || {};
+      const appMeta = user.app_metadata || {};
+      const companyId = meta.company_id || appMeta.company_id || `cop_${user.id.substring(0, 15)}`;
 
       const activeSession: UserSession = {
-        username: userMeta.username,
-        email: userMeta.email,
+        username: meta.full_name || meta.username || user.email?.split("@")[0] || "User",
+        email: user.email || "",
         isRegistered: true,
         isApproved: true,
-        isSuspended: userMeta.role === "suspended" || userMeta.role === "Suspended",
-        user_id: userMeta.userId,
-        company_id: userMeta.companyId,
-        role: userMeta.role
+        isSuspended: false,
+        userId: user.id,
+        user_id: user.id,
+        company_id: companyId,
+        role: meta.role || appMeta.role || "admin"
       };
 
-      // Auto provision company details in local tenant log
-      registerSaaSCompanyOnLoginAndSignUp(userMeta.email, userMeta.username);
-
-      // Save user session locally which patches the activeLocalStorage Multi-Tenant key immediately
-      saveUserSession(activeSession);
       setSession(activeSession);
-
-      if (userMeta.hasCompletedOnboarding) {
-        // Download all cloud records instantly
-        const pullSuccess = await pullMultiTenantData(userMeta.companyId);
-        
-        // Load the pulled values to memory
-        const currentProfile = getBusinessProfile();
-        setProfile(currentProfile);
-        if (currentProfile) {
-          setLangState(currentProfile.defaultLanguage || "ar");
-          setTheme(currentProfile.preferredTheme || "dark");
-        }
-        setOrders(getOrders());
-        setProducts(getProducts());
-        setBasicInventory(getBasicInventory());
-        setSubInventory(getSubInventory());
-        setReturnInventory(getReturnInventory());
-        setSuppliers(getSuppliers());
-        setInvoices(getSupplierInvoices());
-        setWorkers(getWorkers());
-        
-        const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
-        let parsedExpenses = [];
-        try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
-        setExpenses(parsedExpenses);
-      } else {
-        // Workspace onboarding questions required
-        setProfile(null);
-      }
     } catch (err) {
-      console.error("Multi-tenant auth sync hook error:", err);
+      console.error("Auth session error:", err);
     } finally {
       setIsSyncingOnAuth(false);
     }
@@ -417,30 +177,27 @@ export default function App() {
 
   // 1. Core Session persistence and automatic session restoration
   useEffect(() => {
-    // Attempt to restore server-side JWT cookie-based session first as single source of truth
-    fetch("/api/auth/session")
-      .then(res => {
-        if (res.ok) {
-          return res.json();
-        }
-        throw new Error("No server session available");
-      })
-      .then(data => {
-        if (data.authenticated && data.session) {
-          console.log("🟩 Server session validated and restored successfully:", data.session);
-          setSession(data.session);
-          saveUserSession(data.session);
-        } else {
-          throw new Error("Unauthenticated server session");
-        }
-      })
-      .catch(err => {
-        console.warn("Server session validation offline - restoring from cache:", err);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        handleAuthSessionChange(session);
+        saveUserSession({
+          username: session.user?.user_metadata?.full_name || session.user?.user_metadata?.username || session.user?.email?.split("@")[0] || "User",
+          email: session.user?.email || "",
+          isRegistered: true,
+          isApproved: true,
+          isSuspended: false,
+          userId: session.user?.id || "",
+          user_id: session.user?.id || "",
+          company_id: session.user?.user_metadata?.company_id || session.user?.app_metadata?.company_id || "",
+          role: session.user?.user_metadata?.role || session.user?.app_metadata?.role || "admin"
+        });
+      } else {
         const cachedSess = getUserSession();
         if (cachedSess && cachedSess.isRegistered) {
           setSession(cachedSess);
         }
-      });
+      }
+    });
   }, []);
 
   // Helper to load localized database and configuration records from local cache
@@ -1278,11 +1035,11 @@ export default function App() {
     // enforces Seat Limits constraints
     const uniqueWorkerCodes = new Set(newWorkers.map(w => w.code));
     const currentUniqueCodes = new Set(workers.map(w => w.code));
-    if (uniqueWorkerCodes.size > currentUniqueCodes.size && uniqueWorkerCodes.size > seatsLimit) {
+    if (uniqueWorkerCodes.size > currentUniqueCodes.size && uniqueWorkerCodes.size > 9999) {
       triggerToast(
         lang === "ar" 
-          ? `عذراً! تم الوصول للحد الأقصى للمقاعد المسموحة مسبقاً (${seatsLimit} مقعد) الموظفين.` 
-          : `Sorry! Maximum seats limit (${seatsLimit}) reached for your subscription.`, 
+          ? `عذراً! تم الوصول للحد الأقصى للمقاعد المسموحة مسبقاً.` 
+          : `Sorry! Maximum seats limit reached for your subscription.`, 
         "info"
       );
       return;
@@ -1658,12 +1415,6 @@ export default function App() {
         setTheme={setTheme}
         onAuthSuccess={(newSession) => {
           setSession(newSession);
-          saveUserSession(newSession);
-          
-          // Auto sync tenant list on login or sign-up!
-          if (newSession && newSession.email) {
-            registerSaaSCompanyOnLoginAndSignUp(newSession.email, newSession.username || newSession.email.split("@")[0]);
-          }
         }}
         onTriggerNotification={triggerToast}
       />
@@ -1800,7 +1551,7 @@ export default function App() {
   // ==========================================
 
   // GATE I: DISABLED TENANT BLOCKADE
-  if (isDisabled) {
+  if (isSuspended) {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_disabled">
@@ -1869,106 +1620,7 @@ export default function App() {
     );
   }
 
-  // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN)
-  if (isPendingVerification && saasAccount) {
-    const isRtl = lang === "ar";
-    
-    const handleVerifyOtpSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (typedOtpCode.trim() === saasAccount.otpCode) {
-        const stored = localStorage.getItem("corevia_saas_companies_v1");
-        if (stored) {
-          try {
-            const list: SaaSCompany[] = JSON.parse(stored);
-            const idx = list.findIndex(c => c.id === saasAccount.id);
-            if (idx !== -1) {
-              list[idx].accountStatus = "Active";
-              list[idx].emailVerified = true;
-              localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-              
-              // Log otp success activation
-              const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
-              let logsList: any[] = [];
-              try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
-              logsList.unshift({
-                id: `log-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                companyName: saasAccount.companyName,
-                email: saasAccount.email,
-                operation: "تفعيل بريد",
-                details: `تم تفعيل وتوثيق الحساب بنجاح من المالك بإدخال رمز OTP الصحيح الميداني: ${saasAccount.otpCode}`,
-                ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-              });
-              localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
-            }
-          } catch (e) {}
-        }
-        triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
-        setTypedOtpCode("");
-        // Force session refresh
-        setSession({ ...session!, isApproved: true });
-      } else {
-        triggerToast(isRtl ? "رمز التحقق OTP خاطئ، يرجى المحاولة مرة أخرى." : "Invalid OTP verification code.", "info");
-      }
-    };
-
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_verification">
-        
-        {/* Cheat indicator for preview convenience */}
-        <div className="absolute top-4 inset-x-4 max-w-sm mx-auto p-3 bg-indigo-950 border border-indigo-900 rounded-xl text-center space-y-1">
-          <span className="text-[10px] text-indigo-400 font-bold block">🔐 SIMULATED OTP MAILBOX HINT</span>
-          <span className="text-xs text-white">Your OTP verification code: <strong className="text-amber-450 px-1.5 py-0.5 bg-black rounded font-mono text-sm">{saasAccount.otpCode}</strong></span>
-        </div>
-
-        <div className="w-full max-w-md bg-[#121214] border border-indigo-500/20 rounded-2xl p-6 space-y-5 shadow-xl">
-          <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto">
-            <KeyRound className="w-8 h-8 animate-pulse" />
-          </div>
-          
-          <div className="space-y-1">
-            <h2 className="text-xl font-black text-white">{isRtl ? "تفعيل حسابك بالبريد الإلكتروني" : "Verify Corporate Account"}</h2>
-            <p className="text-xs text-slate-400">
-              {isRtl 
-                ? "لقد أرسلنا رمز تحقق (OTP) مكوناً من 6 أرقام إلى بريدك المعتمد. يرجى كتابته بالأسفل للتفعيل وتلقي رخصة ERP للعمل."
-                : "Enter the simulated 6-digit confirmation key deployed to your mailbox credentials to activate your subscription ledger."}
-            </p>
-          </div>
-
-          <form onSubmit={handleVerifyOtpSubmit} className="space-y-4">
-            <input
-              type="text"
-              required
-              maxLength={6}
-              placeholder="0 0 0 0 0 0"
-              value={typedOtpCode}
-              onChange={(e) => setTypedOtpCode(e.target.value.replace(/[^0-9]/g, ""))}
-              className="w-full p-3 bg-slate-900 border border-slate-800 text-center tracking-[0.5em] font-mono text-lg text-white rounded-xl placeholder-slate-750 outline-none focus:border-indigo-600 transition-colors"
-            />
-            
-            <button
-              type="submit"
-              className="w-full py-2.5 bg-indigo-650 hover:bg-indigo-600 text-xs font-extrabold text-white rounded-xl shadow-lg shadow-indigo-505/10 transition-colors cursor-pointer"
-            >
-              {isRtl ? "تفعيل وتأكيد الحساب" : "Confirm and Activate"}
-            </button>
-          </form>
-
-          <div className="pt-2">
-            <button
-              onClick={() => {
-                setSession(null);
-                saveUserSession(null as any);
-              }}
-              className="text-xs text-slate-500 hover:text-white underline cursor-pointer"
-            >
-              {isRtl ? "تسجيل الخروج وحساب آخر" : "Log out and switch tenant"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // GATE III: PENDING VERIFICATION — removed, handled server-side
 
   const logInventoryAdjustment = (type: string) => {
     if (session) {
@@ -2029,7 +1681,6 @@ export default function App() {
         notifications={dynamicAlerts}
         clearNotifications={handleClearNotifications}
         session={session}
-        isServerSuperAdmin={isServerSuperAdmin}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}
@@ -2232,7 +1883,6 @@ export default function App() {
               onTriggerNotification={triggerToast}
               onTriggerRefreshOrders={() => setOrders(getOrders())}
               session={session}
-              seatsLimit={seatsLimit}
             />
           </PermissionGuard>
         )}
@@ -2243,7 +1893,7 @@ export default function App() {
               lang={lang}
               session={session}
               onTriggerNotification={triggerToast}
-              seatsLimit={seatsLimit}
+              seatsLimit={9999}
               onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
               workers={workers}
             />
@@ -2276,20 +1926,16 @@ export default function App() {
         )}
 
         {activeTab === "super-admin" && (
-          isServerSuperAdmin === true ? (
+          session?.role === "super_admin" ? (
             <SuperAdminView
               lang={lang}
               onTriggerNotification={triggerToast}
               onLogout={handleLogout}
               session={session}
               profile={profile}
-              onCleanSlate={async () => {
-                if (session && session.user_id && session.company_id) {
-                  await cleanSlateResetSandbox(session.user_id, session.company_id, session.email);
-                }
-              }}
+              onCleanSlate={async () => {}}
             />
-          ) : isServerSuperAdmin === false ? (
+          ) : (
             <div className="flex flex-col items-center justify-center p-12 bg-slate-900/50 border-2 border-red-500/20 rounded-2xl text-center max-w-xl mx-auto my-12" id="super_admin_unauthorized_state_banner">
               <Shield className="w-16 h-16 text-red-500 mb-4 animate-pulse" />
               <h2 className="text-xl font-bold text-slate-100 mb-2 font-sans">
@@ -2299,13 +1945,6 @@ export default function App() {
                 {lang === "ar" 
                   ? "عذراً، هذا القسم يتطلب صلاحيات إدارية عليا تم التحقق منها من الخادم." 
                   : "Sorry, this section requires verified super administrative permissions from the server."}
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center p-12 bg-slate-900/50 border border-slate-800 rounded-2xl text-center max-w-xl mx-auto my-12" id="super_admin_loading_state_banner">
-              <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-sm text-slate-400 font-sans">
-                {lang === "ar" ? "جاري التحقق من صلاحيات الإدارة العليا..." : "Verifying super administrative status..."}
               </p>
             </div>
           )

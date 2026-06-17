@@ -16,26 +16,6 @@ export interface ActivityLogEntry {
   newValue?: string;
 }
 
-const STORAGE_KEY = "corevia_company_activity_logs_v2";
-
-export function getLocalActivityLogs(): ActivityLogEntry[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch (e) {
-    console.error("Failed to read local activity logs", e);
-    return [];
-  }
-}
-
-export function saveLocalActivityLogs(logs: ActivityLogEntry[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
-  } catch (e) {
-    console.error("Failed to save local activity logs", e);
-  }
-}
-
 export interface LogActivityParams {
   companyId: string;
   userName: string;
@@ -49,18 +29,16 @@ export interface LogActivityParams {
 }
 
 /**
- * Log a new activity onto local cache and Supabase corevia_activity_center.
+ * Log a new activity onto Supabase corevia_activity_center.
  */
 export async function logActivity(params: LogActivityParams): Promise<void> {
   const now = new Date();
-  
-  // Format Date (YYYY-MM-DD)
+
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
   const dateStr = `${yyyy}-${mm}-${dd}`;
 
-  // Format Time (HH:MM)
   const hh = String(now.getHours()).padStart(2, "0");
   const min = String(now.getMinutes()).padStart(2, "0");
   const timeStr = `${hh}:${min}`;
@@ -80,18 +58,6 @@ export async function logActivity(params: LogActivityParams): Promise<void> {
     previousValue: params.previousValue,
     newValue: params.newValue
   };
-
-  // 1. Save locally
-  const currentLogs = getLocalActivityLogs();
-  currentLogs.unshift(entry); // prepend latest
-  // cap logs at 3000 to avoid clogging local storage
-  if (currentLogs.length > 3000) {
-    currentLogs.pop();
-  }
-  saveLocalActivityLogs(currentLogs);
-
-  // 2. Save to Supabase (if available)
-  if (!supabase) return;
 
   try {
     const { error } = await supabase
@@ -119,15 +85,9 @@ export async function logActivity(params: LogActivityParams): Promise<void> {
 }
 
 /**
- * Fetch all activity logs of a specific company.
+ * Fetch all activity logs of a specific company from Supabase.
  */
 export async function getActivityLogs(companyId: string): Promise<ActivityLogEntry[]> {
-  const localList = getLocalActivityLogs().filter(log => log.companyId === companyId);
-
-  if (!supabase) {
-    return localList;
-  }
-
   try {
     const { data, error } = await supabase
       .from("corevia_activity_center")
@@ -136,40 +96,35 @@ export async function getActivityLogs(companyId: string): Promise<ActivityLogEnt
       .order("timestamp", { ascending: false });
 
     if (error) {
-      if (error.code === "PGRST116" || error.code === "42P01") {
-        return localList;
-      }
-      throw error;
+      console.warn("Failed to fetch logs from Supabase:", error);
+      return [];
     }
 
-    if (data) {
-      const mapped: ActivityLogEntry[] = data.map((item: any) => ({
-        id: item.id,
-        companyId: item.company_id,
-        timestamp: item.timestamp,
-        date: item.timestamp ? item.timestamp.split("T")[0] : "",
-        time: item.timestamp ? item.timestamp.split("T")[1]?.substring(0, 5) || "" : "",
-        userName: item.user_name,
-        userId: item.user_id,
-        jobTitle: item.job_title || "",
-        actionType: item.action_type,
-        pageName: item.page_name || "",
-        affectedRecord: item.affected_record || "",
-        previousValue: item.previous_value || undefined,
-        newValue: item.new_value || undefined
-      }));
-
-      // Merge and save to cache
-      const otherCompaniesObj = getLocalActivityLogs().filter(log => log.companyId !== companyId);
-      saveLocalActivityLogs([...otherCompaniesObj, ...mapped]);
-
-      return mapped;
+    if (!data) {
+      return [];
     }
+
+    const mapped: ActivityLogEntry[] = data.map((item: any) => ({
+      id: item.id,
+      companyId: item.company_id,
+      timestamp: item.timestamp,
+      date: item.timestamp ? item.timestamp.split("T")[0] : "",
+      time: item.timestamp ? item.timestamp.split("T")[1]?.substring(0, 5) || "" : "",
+      userName: item.user_name,
+      userId: item.user_id,
+      jobTitle: item.job_title || "",
+      actionType: item.action_type,
+      pageName: item.page_name || "",
+      affectedRecord: item.affected_record || "",
+      previousValue: item.previous_value || undefined,
+      newValue: item.new_value || undefined
+    }));
+
+    return mapped;
   } catch (e) {
     console.warn("Failed to fetch logs from Supabase:", e);
+    return [];
   }
-
-  return localList;
 }
 
 /**
@@ -178,35 +133,31 @@ export async function getActivityLogs(companyId: string): Promise<ActivityLogEnt
 export function filterActivityLogs(
   logs: ActivityLogEntry[],
   filters: {
-    searchTerm: string; // matches username or phone number (wait, userName/jobTitle matcher)
+    searchTerm: string;
     actionType: string;
     page: string;
     timeRange: "all" | "today" | "week" | "month" | "custom";
-    startDate?: string; // YYYY-MM-DD
-    endDate?: string; // YYYY-MM-DD
+    startDate?: string;
+    endDate?: string;
   }
 ): ActivityLogEntry[] {
   const { searchTerm, actionType, page, timeRange, startDate, endDate } = filters;
   const now = new Date();
 
   return logs.filter(log => {
-    // 1. Search filter (username or job title or ID match)
     if (searchTerm) {
       const targetStr = `${log.userName} ${log.jobTitle} ${log.affectedRecord} ${log.actionType}`.toLowerCase();
       if (!targetStr.includes(searchTerm.toLowerCase())) return false;
     }
 
-    // 2. Action Type filter
     if (actionType && actionType !== "all") {
       if (log.actionType.toLowerCase() !== actionType.toLowerCase()) return false;
     }
 
-    // 3. Page Name filter
     if (page && page !== "all") {
       if (log.pageName.toLowerCase() !== page.toLowerCase()) return false;
     }
 
-    // 4. Time Range filters
     const logDate = new Date(log.timestamp);
     if (timeRange === "today") {
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());

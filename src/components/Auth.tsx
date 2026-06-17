@@ -12,7 +12,6 @@ import { LanguageType, ThemeType, UserSession, SaaSCompany } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
-import { getLocalEmployees, Employee } from "../employeeService";
 import { logActivity } from "../activityLogService";
 
 interface AuthProps {
@@ -171,16 +170,26 @@ export default function Auth({
     setIsSubmitting(true);
 
     try {
-      const res = await fetch("/api/auth/claim-invite", {
+      const resp = await fetch("/api/auth/claim-invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: activeInviteToken, password: passwordInput })
+        body: JSON.stringify({ token: activeInviteToken, password: passwordInput }),
       });
 
-      const resData = await res.json();
-      if (!res.ok) {
-        throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
-      }
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Claim failed");
+
+      const session: UserSession = {
+        username: data.user?.username || invitedEmployee?.username || invitedEmployee?.fullName || "Employee",
+        email: data.user?.email || invitedEmployee?.email || "",
+        isRegistered: true,
+        isApproved: true,
+        isSuspended: false,
+        userId: data.user?.id || "",
+        user_id: data.user?.id || "",
+        company_id: data.user?.company_id || "",
+        role: data.user?.role || "employee"
+      };
 
       onTriggerNotification(
         isRtl 
@@ -189,24 +198,10 @@ export default function Auth({
         "success"
       );
 
-      // Sign in to Supabase Auth so auth.uid() works for RLS
-      try {
-        if (supabase && passwordInput) {
-          const emailForAuth = resData.session?.email || `${resData.session?.username || "employee"}@corevia.dz`;
-          await supabase.auth.signInWithPassword({
-            email: emailForAuth,
-            password: passwordInput
-          });
-        }
-      } catch (supabaseAuthErr) {
-        console.warn("Supabase Auth sign-in after claim-invite failed:", supabaseAuthErr);
-      }
-
-      // Pass the session down up to the application state
-      onAuthSuccess(resData.session);
+      onAuthSuccess(session);
 
     } catch (err: any) {
-      console.error("claim-invite submit error:", err);
+      console.error("claim-invite error:", err);
       onTriggerNotification(
         isRtl 
           ? `❌ فشل تفعيل الحساب: ${err.message}` 
@@ -224,95 +219,69 @@ export default function Auth({
     setIsSubmitting(true);
 
     if (authMode === "login") {
-      const finalEmail = emailInput.trim();
+      const credential = emailInput.trim();
       const finalPassword = passwordInput;
 
-      if (!finalEmail || !finalPassword) {
+      if (!credential || !finalPassword) {
         onTriggerNotification(isRtl ? "يرجى ملء جميع الحقول المطلوبة" : "Please fill in all fields", "info");
         setIsSubmitting(false);
         return;
       }
 
-      if (finalEmail.toLowerCase().includes("suspend") && !finalEmail.toLowerCase().includes("coreviadz")) {
-        setAuthMode("suspended");
-        onTriggerNotification(isRtl ? "هذا الحساب معطل حالياً" : "This account is suspended", "info");
-        setIsSubmitting(false);
-        return;
-      }
-
       try {
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ credential: finalEmail, password: finalPassword })
-        });
-
-        const resData = await response.json();
-
-        if (!response.ok) {
-          throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
+        const isEmail = credential.includes("@");
+        let body: any = { password: finalPassword };
+        if (isEmail) {
+          body.email = credential;
+        } else if (/^\+?\d{7,15}$/.test(credential.replace(/[\s\-\(\)]/g, ""))) {
+          body.phone = credential;
+        } else {
+          body.username = credential;
         }
 
-        const authenticatedSession: UserSession = resData.session;
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
 
-        // Cache session metadata to local storage
-        try {
-          const currentLocal = getLocalEmployees();
-          const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
-          const empObj: Employee = {
-            id: authenticatedSession.userId,
-            companyId: authenticatedSession.company_id || "cop_default",
-            fullName: authenticatedSession.username,
-            email: authenticatedSession.email,
-            phone: "",
-            jobTitle: authenticatedSession.jobTitle || "Employee",
-            allowedPages: authenticatedSession.allowedPages || [],
-            status: "Active",
-            createdAt: new Date().toISOString()
-          };
-          if (idx !== -1) {
-            currentLocal[idx] = empObj;
-          } else {
-            currentLocal.push(empObj);
-          }
-          localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
-        } catch (storageErr) {}
+        const loginData = await resp.json();
+        if (!resp.ok) throw new Error(loginData.error || "Login failed");
 
-        // Log activity
+        const authenticatedSession: UserSession = {
+          username: loginData.user?.username || loginData.user?.email?.split("@")[0] || credential,
+          email: loginData.user?.email || "",
+          isRegistered: true,
+          isApproved: true,
+          isSuspended: false,
+          userId: loginData.user?.id || "",
+          user_id: loginData.user?.id || "",
+          company_id: loginData.user?.company_id || "",
+          role: loginData.user?.role || "employee"
+        };
+
         try {
           await logActivity({
-            companyId: authenticatedSession.company_id || "cop_default",
+            companyId: authenticatedSession.company_id,
             userName: authenticatedSession.username,
-            userId: authenticatedSession.userId || "usr_unknown",
-            jobTitle: authenticatedSession.jobTitle || "Admin",
+            userId: authenticatedSession.user_id,
+            jobTitle: "Employee",
             actionType: "Login",
             pageName: "Authentication",
             affectedRecord: `User: ${authenticatedSession.username}`
           });
         } catch (logErr) {}
 
-        // Sign in to Supabase Auth for RLS (so auth.uid() returns the user's UUID)
-        try {
-          if (supabase) {
-            await supabase.auth.signInWithPassword({
-              email: finalEmail,
-              password: finalPassword
-            });
-          }
-        } catch (supabaseAuthErr) {
-          console.warn("Supabase Auth sign-in failed (RLS won't work for direct queries):", supabaseAuthErr);
-        }
-
         onAuthSuccess(authenticatedSession);
         onTriggerNotification(
           isRtl 
-            ? `تم تسجيل الدخول بنجاح! ${authenticatedSession.isReadOnly ? "(للقراءة فقط)" : ""}` 
-            : `Logged in successfully! ${authenticatedSession.isReadOnly ? "(Read Only)" : ""}`, 
+            ? `تم تسجيل الدخول بنجاح!` 
+            : `Logged in successfully!`, 
           "success"
         );
 
       } catch (err: any) {
-        console.error("Auth login api error:", err);
+        console.error("Auth login error:", err);
         onTriggerNotification(
           isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
           "info"
@@ -352,86 +321,41 @@ export default function Auth({
         const { error: compErr } = await supabase.from("corevia_companies").upsert({
           id: companyId,
           name: companyNameInput.trim(),
-          business_type: "تجارة إلكترونية",
           owner_name: nameInput.trim(),
           phone: phoneInput.trim(),
           email: emailInput.trim().toLowerCase(),
-          seatsLimit: 5,
-          accountStatus: "Pending Verification",
-          subscriptionPlan: "Trial",
-          created_at: new Date().toISOString() // Seed current time for 10-min OTP comparison & 7 days trial countdown
+          status: 'active',
+          seats_limit: 5
         });
         if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
-        // 2. Save company to compatibility companies table
-        const { error: comErr2 } = await supabase.from("companies").upsert({
-          id: companyId,
-          owner_id: userId,
-          company_name: companyNameInput.trim(),
-          email: emailInput.trim().toLowerCase(),
-          phone: phoneInput.trim(),
-          address: countryInput
-        });
-         if (comErr2) console.warn("Supabase compatibility companies upsert error during registration:", comErr2);
-
-        // 3. Save owner to corevia_saas_users table
-        const { error: saasUserErr } = await supabase.from("corevia_saas_users").upsert({
-          user_id: userId,
-          company_id: companyId,
-          email: emailInput.trim().toLowerCase(),
-          username: nameInput.trim(),
-          has_completed_onboarding: false,
-          role: "admin"
-        });
-        if (saasUserErr) console.warn("Supabase corevia_saas_users upsert error during registration:", saasUserErr);
-
-        // 4. Update corevia_saas_companies_v1 in localStorage to cache state immediately
-        const newCompanyObj: SaaSCompany = {
-          id: companyId,
-          companyName: companyNameInput.trim(),
-          ownerName: nameInput.trim(),
-          email: emailInput.trim().toLowerCase(),
-          phone: phoneInput.trim(),
-          country: countryInput,
-          registrationDate: new Date().toISOString().split("T")[0],
-          lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
-          emailVerified: false,
-          subscriptionPlan: "Basic",
-          seatsLimit: 5,
-          seatsUsed: 1,
-          accountStatus: "Pending Verification",
-          expirationDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Trial end Date (7 days)
-          activeDevices: [],
-          otpCode
-        };
-
-        const stored = localStorage.getItem("corevia_saas_companies_v1");
-        let list: SaaSCompany[] = [];
-        try { if (stored) list = JSON.parse(stored); } catch (e) {}
-        const existingIdx = list.findIndex(c => c.id === companyId || c.email.toLowerCase() === emailInput.trim().toLowerCase());
-        if (existingIdx !== -1) {
-          list[existingIdx] = { ...list[existingIdx], ...newCompanyObj };
-        } else {
-          list.push(newCompanyObj);
-        }
-        localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-
-        // Create log notification inside Supabase activity log for Super Admin
-        await supabase.from("corevia_activity_logs").insert({
-          id: `log-${Date.now()}`,
-          company_id: companyId,
-          actor_name: nameInput.trim(),
-          actor_role: "SaaS Tenant Owner",
-          operation: "تسجيل شركة جديدة",
-          item_type: "saas_creation",
-          new_value: {
-            companyName: companyNameInput.trim(),
-            ownerName: nameInput.trim(),
+        // 2. Save owner to corevia_saas_users and corevia_company_users
+        try {
+          await supabase.from("corevia_saas_users").upsert({
+            user_id: userId,
+            company_id: companyId,
             email: emailInput.trim().toLowerCase(),
-            plan: "Trial"
-          },
-          ip_address: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-        }).then(() => console.log("New registration logged to Supabase logs"));
+            username: nameInput.trim(),
+            phone: phoneInput.trim(),
+            has_completed_onboarding: false,
+            role: "admin"
+          });
+        } catch (e) { console.warn("Supabase corevia_saas_users upsert error:", e); }
+
+        try {
+          await supabase.from("corevia_company_users").upsert({
+            id: `cu_${Date.now()}`,
+            company_id: companyId,
+            auth_user_id: userId,
+            email: emailInput.trim().toLowerCase(),
+            username: nameInput.trim(),
+            phone: phoneInput.trim(),
+            role: "admin",
+            allowed_pages: [],
+            invitation_used: true,
+            status: "active",
+          });
+        } catch (e) { console.warn("Supabase corevia_company_users upsert error:", e); }
 
         const sessionRecord: UserSession = {
           username: nameInput.trim(),
