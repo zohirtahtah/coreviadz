@@ -152,6 +152,7 @@ const PAGE_PERMISSION_MAP = {
   "inventory": "inventory.view",
   "products": null,
   "suppliers": "suppliers.view",
+  "warehouses": "warehouses.view",
   "workers": "employees.view",
   "expenses": "expenses.view",
   "profit": "reports.view",
