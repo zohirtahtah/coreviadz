@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee, createEmployeeWithAuth, generateInvitationToken } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee, createEmployeeWithAuth, generateInvitationToken, updateUserPages } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -508,6 +508,10 @@ export default function UsersPermissionsView({
         );
         setIsLoading(false);
         return;
+      }
+      const pagesSaved = await updateUserPages(employeeId, selectedPages);
+      if (!pagesSaved) {
+        console.warn("Failed to save allowed_pages for employee", employeeId);
       }
     }
 

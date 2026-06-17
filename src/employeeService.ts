@@ -68,6 +68,7 @@ export async function createCompanyUser(params: {
   username: string;
   fullName: string;
   role?: string;
+  allowedPages?: string[];
 }): Promise<{ companyUser?: EnterpriseCompanyUser; error?: string }> {
   const { token } = generateInvitationToken();
   try {
@@ -80,7 +81,8 @@ export async function createCompanyUser(params: {
         username: params.username,
         workerId: params.workerId,
         invitationToken: token,
-        role: params.role || "employee"
+        role: params.role || "employee",
+        allowedPages: params.allowedPages || []
       })
     });
     const data = await res.json();
@@ -94,7 +96,7 @@ export async function createCompanyUser(params: {
       username: params.username,
       phone: "",
       role: (params.role as any) || "employee",
-      allowed_pages: [],
+      allowed_pages: params.allowedPages || [],
       invitation_token: token,
       invitation_expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       invitation_used: false,

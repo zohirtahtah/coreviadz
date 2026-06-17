@@ -316,7 +316,7 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
 });
 
 app.post("/api/auth/invite-employee", requireAuth, requirePermission("employees.invite"), async (req, res) => {
-  const { email, fullName, username, workerId, role, invitationToken } = req.body;
+  const { email, fullName, username, workerId, role, invitationToken, allowedPages } = req.body;
   const companyId = getTenantId(req);
   if (!email) return res.status(400).json({ error: "Email required" });
   if (!workerId) return res.status(400).json({ error: "workerId required" });
@@ -374,7 +374,7 @@ app.post("/api/auth/invite-employee", requireAuth, requirePermission("employees.
       email: email.toLowerCase(),
       username: username || "",
       role: role || "employee",
-      allowed_pages: [],
+      allowed_pages: allowedPages || [],
       invitation_token: invitationToken,
       invitation_expires_at: expiresAt,
       invitation_used: false,
