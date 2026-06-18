@@ -889,6 +889,37 @@ app.post("/api/journal-entries", requireAuth, requirePermission("accounting.jour
   }
 });
 
+app.get("/api/company/profile", requireAuth, async (req, res) => {
+  const companyId = getTenantId(req);
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("corevia_companies")
+      .select("*")
+      .eq("id", companyId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Company not found" });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/company/profile", requireAuth, async (req, res) => {
+  const companyId = getTenantId(req);
+  const { name, owner_name, phone, email, country } = req.body;
+  try {
+    const { error } = await supabaseAdmin
+      .from("corevia_companies")
+      .update({ name, owner_name, phone, email, country })
+      .eq("id", companyId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/reports/sales", requireAuth, async (req, res) => {
   const companyId = getTenantId(req);
   const { from, to, group_by } = req.query;

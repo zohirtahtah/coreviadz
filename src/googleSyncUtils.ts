@@ -421,7 +421,6 @@ function syncUpdateOrderInCoreviaDb(orderId: string, updatedOrder: Order | null,
 // -------------------------------------------------------------
 
 export function loadSimulationSheetData(): string[][] {
-  initializeSimulationDatabase();
   return safeParseJSON(localStorage.getItem(SYNC_KEYS.SIMULATION_SHEET_DATA), []);
 }
 

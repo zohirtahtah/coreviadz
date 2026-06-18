@@ -54,8 +54,16 @@ export function clearPreferences(): void {
 // while components migrate to the new API service.
 // ============================================================
 
-export function getBusinessProfile(): any { return null; }
-export function saveBusinessProfile(p: any): void {}
+export function getBusinessProfile(): any {
+  try {
+    const raw = localStorage.getItem("corevia_profile_v1");
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+export function saveBusinessProfile(p: any): void {
+  try { localStorage.setItem("corevia_profile_v1", JSON.stringify(p)); } catch {}
+}
 export function getUserSession(): any { return null; }
 export function saveUserSession(s: any): void {}
 export function getOrders(): any[] { return []; }
@@ -88,3 +96,19 @@ export function restoreWorkerSoft(data: any): void {}
 export function restoreProductSoft(data: any): void {}
 export function getStockMovements(): any[] { return []; }
 export function saveStockMovements(m: any[]): void {}
+export function logStockMovement(m: any): void {}
+export function mutateInventoryForNewOrder(...args: any[]): void {}
+export function revertInventoryForOrder(...args: any[]): void {}
+export function addOrderToReturnInventory(...args: any[]): void {}
+export function removeOrderFromReturnInventory(...args: any[]): void {}
+export function getAppSettings(): any { return {}; }
+export function mutateInventoryForPurchase(...args: any[]): void {}
+export function revertInventoryForPurchase(...args: any[]): void {}
+export function getSalarySheets(): any[] { return []; }
+export function saveSalarySheets(s: any[]): void {}
+export function getFixedExpenses(): any[] { return []; }
+export function saveFixedExpenses(e: any[]): void {}
+export function getVarExpenses(): any[] { return []; }
+export function saveVarExpenses(e: any[]): void {}
+export function getAdExpenses(): any[] { return []; }
+export function saveAdExpenses(e: any[]): void {}

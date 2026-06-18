@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { LanguageType, ThemeType, UserSession } from "./types";
+import { LanguageType, ThemeType, UserSession, BusinessProfile } from "./types";
 import Auth from "./components/Auth";
 import Onboarding from "./components/Onboarding";
 import Sidebar from "./components/Sidebar";
@@ -262,6 +262,34 @@ export default function App() {
         .finally(() => {
           setIsSyncingOnAuth(false);
         });
+
+      // Load company profile from Supabase if localStorage is empty
+      if (!profObj || !profObj.businessName) {
+        fetch("/api/company/profile")
+          .then(r => r.ok ? r.json() : null)
+          .then((comp: any) => {
+            if (comp && comp.name) {
+              const cloudProfile: BusinessProfile = {
+                businessName: comp.name,
+                businessType: "",
+                experienceYears: "",
+                estimatedOrders: "",
+                estimatedWorkers: "",
+                currency: "DZD",
+                defaultLanguage: "ar",
+                preferredTheme: "dark",
+                country: comp.country || "Algeria",
+                ownerName: comp.owner_name || "",
+                phone: comp.phone || "",
+                email: comp.email || "",
+              };
+              setProfile(cloudProfile);
+              localStorage.setItem("corevia_profile_v1", JSON.stringify(cloudProfile));
+              if (comp.country) setLangState(comp.country === "France" ? "fr" : "ar");
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, [session]);
 
@@ -327,24 +355,7 @@ export default function App() {
     const interval = setInterval(async () => {
       try {
         const companyId = session.company_id;
-        const success = await pullMultiTenantData(companyId);
-        if (success) {
-          // Quietly update memory states inside App.tsx so changes are instantly reflected on all pages
-          setOrders(getOrders());
-          setProducts(getProducts());
-          setBasicInventory(getBasicInventory());
-          setSubInventory(getSubInventory());
-          setReturnInventory(getReturnInventory());
-          setSuppliers(getSuppliers());
-          setInvoices(getSupplierInvoices());
-          setWorkers(getWorkers());
-          setTrashItems(getTrashItems());
-
-          const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
-          let parsedExpenses = [];
-          try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
-          setExpenses(parsedExpenses);
-        }
+        await pullMultiTenantData(companyId);
       } catch (err) {
         console.warn("[Realtime Polling Sync] Background ERP sync failed:", err);
       }
