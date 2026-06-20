@@ -618,7 +618,7 @@ export function logStockMovement(
 export function getSuppliers(): Supplier[] {
   const data = safeParseLocalStorage<Supplier[]>(KEYS.SUPPLIERS, []);
   if (!data || data.length === 0) {
-    return demoSuppliers;
+    return [];
   }
   return data;
 }
@@ -630,7 +630,7 @@ export function saveSuppliers(arr: Supplier[]): void {
 export function getSupplierInvoices(): SupplierInvoice[] {
   const data = safeParseLocalStorage<SupplierInvoice[]>(KEYS.INVOICES, []);
   if (!data || data.length === 0) {
-    return demoInvoices;
+    return [];
   }
   return data;
 }

@@ -473,7 +473,7 @@ export async function pushSingleDatasetToCloud(
         .from(tableName)
         .delete()
         .eq("company_id", companyId)
-        .not("id", "in", `(${activeIds.map(id => `"${id}"`).join(",")})`);
+        .not("id", "in", `(${activeIds.join(",")})`);
 
       if (pruneError) {
         console.warn(`[AutoSync] Orphan pruning warning for table "${tableName}":`, pruneError);

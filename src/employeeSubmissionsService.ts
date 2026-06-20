@@ -39,40 +39,10 @@ export function saveLocalSubmissions(submissions: EmployeeSubmission[]): void {
 export async function getSubmissions(companyId: string): Promise<EmployeeSubmission[]> {
   let localList = getLocalSubmissions().filter(s => s.companyId === companyId);
 
-  // Auto seed helpers for local listing fallback
-  const getSeedItems = () => [
-    {
-      id: `seed-sub-exp-${companyId}`,
-      companyId: companyId,
-      employeeId: "emp-seed-1",
-      employeeName: "توفيق العلمي",
-      type: "expense" as const,
-      amount: 4500,
-      description: "مصاريف وقود مركبة التوصيل ونقل البضائع للزبائن",
-      date: new Date().toISOString().substring(0, 10),
-      status: "pending" as const,
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: `seed-sub-over-${companyId}`,
-      companyId: companyId,
-      employeeId: "emp-seed-1",
-      employeeName: "توفيق العلمي",
-      type: "overtime" as const,
-      amount: 3,
-      description: "ساعات عمل إضافية لإنهاء وفرز طلبيات الولايات المتأخرة وشحنها",
-      date: new Date().toISOString().substring(0, 10),
-      status: "pending" as const,
-      createdAt: new Date().toISOString()
-    }
-  ];
+  // Empty array - NO DEMO/MOCK SEED REQUIRED FOR ENTERPRISE INTEGRATION
+  const getSeedItems = () => [];
 
   if (!supabase) {
-    if (localList.length === 0) {
-      localList = getSeedItems();
-      const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
-      saveLocalSubmissions([...otherCompaniesObj, ...localList]);
-    }
     return localList;
   }
 
@@ -84,11 +54,6 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
 
     if (error) {
       if (error.code === "PGRST116" || error.code === "42P01") {
-        if (localList.length === 0) {
-          localList = getSeedItems();
-          const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
-          saveLocalSubmissions([...otherCompaniesObj, ...localList]);
-        }
         return localList;
       }
       throw error;
@@ -121,30 +86,6 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
         }
       });
 
-      if (mergedList.length === 0) {
-        const seedItems = getSeedItems();
-        mergedList.push(...seedItems);
-        
-        try {
-          await supabase.from("corevia_employee_submissions").upsert(
-            seedItems.map(s => ({
-              id: s.id,
-              company_id: s.companyId,
-              employee_id: s.employeeId,
-              employee_name: s.employeeName,
-              type: s.type,
-              amount: s.amount,
-              description: s.description,
-              date: s.date,
-              status: s.status,
-              created_at: s.createdAt
-            }))
-          );
-        } catch (dbErr) {
-          console.warn("Could not upsert seeded submissions to Supabase:", dbErr);
-        }
-      }
-
       saveLocalSubmissions([...otherCompaniesObj, ...mergedList]);
       return mergedList;
     }
@@ -152,11 +93,7 @@ export async function getSubmissions(companyId: string): Promise<EmployeeSubmiss
     console.warn("Failed to fetch employee submissions from Supabase, returning local store:", err);
   }
 
-  if (localList.length === 0) {
-    localList = getSeedItems();
-    const otherCompaniesObj = getLocalSubmissions().filter(s => s.companyId !== companyId);
-    saveLocalSubmissions([...otherCompaniesObj, ...localList]);
-  }
+  return localList;
 
   return localList;
 }
