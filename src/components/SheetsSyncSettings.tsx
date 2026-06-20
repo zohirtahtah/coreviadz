@@ -96,10 +96,10 @@ export default function SheetsSyncSettings({
       try {
         setSheetRows(JSON.parse(savedRows));
       } catch (e) {
-        setSheetRows([]);
+        initDefaultRows(prods, wrks, appSettings.wilayasList || []);
       }
     } else {
-      setSheetRows([]);
+      initDefaultRows(prods, wrks, appSettings.wilayasList || []);
     }
   }, []);
 
@@ -109,6 +109,93 @@ export default function SheetsSyncSettings({
       localStorage.setItem("corevia_order_entry_sheet_rows", JSON.stringify(sheetRows));
     }
   }, [sheetRows]);
+
+  // Construct some initial mockup default rows
+  const initDefaultRows = (prods: Product[], wrks: Worker[], wilayasList: string[]) => {
+    const defaultProduct = prods[0]?.name || "Classic Hoodie Premium";
+    const defaultColor = prods[0]?.colors?.[0]?.color || "Black (أسود)";
+    const defaultSize = prods[0]?.sizes?.[0] || "M";
+    const defaultAgent = wrks[0]?.name || "بلال حامدي";
+    const defaultWilaya = wilayasList[0] || "16. Alger (الجزائر العاصمة)";
+
+    // Fetch initial stock
+    const stock = getStockLevel(defaultProduct, defaultColor, defaultSize);
+    // Fetch initial price
+    const prodPrice = getProductPrice(defaultProduct, "Retail");
+
+    const initials: SheetRow[] = [
+      {
+        rowId: `row-1`,
+        orderId: "",
+        customerName: isRtl ? "عبد الهادي مرزوق" : "Abdelhadi Merzouq",
+        phone: "0770123456",
+        wilaya: defaultWilaya,
+        commune: isRtl ? "بلوزداد" : "Belouizdad",
+        product: defaultProduct,
+        color: defaultColor,
+        size: defaultSize,
+        agent: defaultAgent,
+        deliveryCompany: "Yalidine",
+        deliveryType: "Home Delivery",
+        priceType: "Retail",
+        quantity: 1,
+        availableStock: stock,
+        price: prodPrice,
+        syncStatus: "PENDING",
+        errorMessage: "",
+        createdAt: "",
+        lastSyncAt: "",
+        notes: isRtl ? "يرجى الاتصال قبل التوصيل" : "Call before delivery"
+      },
+      {
+        rowId: `row-2`,
+        orderId: "",
+        customerName: "",
+        phone: "",
+        wilaya: defaultWilaya,
+        commune: "",
+        product: defaultProduct,
+        color: defaultColor,
+        size: defaultSize,
+        agent: defaultAgent,
+        deliveryCompany: "Yalidine",
+        deliveryType: "Home Delivery",
+        priceType: "Retail",
+        quantity: 1,
+        availableStock: stock,
+        price: prodPrice,
+        syncStatus: "PENDING",
+        errorMessage: "",
+        createdAt: "",
+        lastSyncAt: "",
+        notes: ""
+      },
+      {
+        rowId: `row-3`,
+        orderId: "",
+        customerName: "",
+        phone: "",
+        wilaya: defaultWilaya,
+        commune: "",
+        product: defaultProduct,
+        color: defaultColor,
+        size: defaultSize,
+        agent: defaultAgent,
+        deliveryCompany: "ZR Express",
+        deliveryType: "Desk Delivery",
+        priceType: "Retail",
+        quantity: 1,
+        availableStock: stock,
+        price: prodPrice,
+        syncStatus: "PENDING",
+        errorMessage: "",
+        createdAt: "",
+        lastSyncAt: "",
+        notes: ""
+      }
+    ];
+    setSheetRows(initials);
+  };
 
   // Helper to fetch live Corevia stock for a product, color & size
   const getStockLevel = (prodName: string, color: string, size: string): number => {
@@ -198,7 +285,7 @@ export default function SheetsSyncSettings({
     disconnectSyncAccount();
     setSettings(getSyncSettings());
     localStorage.removeItem("corevia_order_entry_sheet_rows");
-    setSheetRows([]);
+    initDefaultRows(getProducts(), getWorkers(), getAppSettings().wilayasList || []);
     
     onTriggerNotification(
       isRtl ? "تم إلغاء ربط الحساب وإعادة تهيئة إدخال المزامنة." : "Disconnected Google account connection successfully."

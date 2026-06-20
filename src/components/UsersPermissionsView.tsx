@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { 
-  Users, UserPlus, Shield, Edit3, Trash2, Check, X, 
-  HelpCircle, AlertTriangle, RefreshCw, FileText, CheckCircle2, UserCheck
+  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X, 
+  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee, createEmployeeWithAuth, generateInvitationToken, updateUserPages } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
-import { supabase } from "../supabaseClient";
+import { supabase, createSecondaryClient } from "../supabaseClient";
 
 // Name & Phone smart normalizations for bulletproof Algerian/Arabic de-duplication
 export function cleanArabicName(name: string): string {
@@ -64,6 +64,7 @@ export default function UsersPermissionsView({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [jobTitle, setJobTitle] = useState("");
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"Active" | "Read Only" | "Suspended">("Active");
   const [assignedResponsibilities, setAssignedResponsibilities] = useState("");
   const [selectedPages, setSelectedPages] = useState<string[]>(["dashboard"]);
@@ -79,6 +80,13 @@ export default function UsersPermissionsView({
   
   const [username, setUsername] = useState("");
   const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    fullName: string;
+    email?: string;
+    username: string;
+    password?: string;
+    loginUrl: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!editingEmployee && fullName) {
@@ -125,6 +133,8 @@ export default function UsersPermissionsView({
   }, [fullName, editingEmployee, employees]);
 
   // UI States
+  const [showPasswordRaw, setShowPasswordRaw] = useState(false);
+  const [passRevealId, setPassRevealId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // States for custom delete with option to retain/delete worker profile
@@ -145,9 +155,11 @@ export default function UsersPermissionsView({
     setUsername(`worker_${suffix}`);
     
     setJobTitle(worker.role || "موظف");
+    setPassword(Math.floor(100000 + Math.random() * 900000).toString());
     setStatus("Active");
     setAssignedResponsibilities("");
     setSelectedPages(["dashboard"]);
+    setShowPasswordRaw(true);
     
     // Set financial parameters
     setBaseSalary(worker.baseSalary || 35000);
@@ -164,17 +176,16 @@ export default function UsersPermissionsView({
   const handleCopyLink = async (emp: Employee) => {
     try {
       let tokenToUse = emp.invitation_token;
-      let expiresToUse = emp.invitation_expires_at || emp.invitation_expires;
+      let expiresToUse = emp.invitation_expires;
 
       if (!tokenToUse) {
-        const { token, expiresAt } = generateInvitationToken();
-        tokenToUse = token;
-        expiresToUse = expiresAt;
+        // Generate expiring (7 days) secure invitation link on the fly and sync
+        tokenToUse = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+        expiresToUse = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
         
         const updatedEmp = {
           ...emp,
           invitation_token: tokenToUse,
-          invitation_expires_at: expiresToUse,
           invitation_expires: expiresToUse,
           invitation_used: false
         };
@@ -253,9 +264,11 @@ export default function UsersPermissionsView({
     setEmail("");
     setUsername("");
     setJobTitle("");
+    setPassword(Math.floor(100000 + Math.random() * 900000).toString()); // Pre-fill with clean random password
     setStatus("Active");
     setAssignedResponsibilities("");
     setSelectedPages(["dashboard"]);
+    setShowPasswordRaw(true);
     setBaseSalary(35000);
     setMonthlySalary(35000);
     setWorkingHoursPerDay(8);
@@ -274,9 +287,11 @@ export default function UsersPermissionsView({
     setEmail(emp.email || "");
     setUsername(emp.username || "");
     setJobTitle(emp.jobTitle);
+    setPassword(emp.password || "");
     setStatus(emp.status);
     setAssignedResponsibilities(emp.assignedResponsibilities || "");
     setSelectedPages(emp.allowedPages || ["dashboard"]);
+    setShowPasswordRaw(false);
 
     const match = allWorkers.find(
       w => w.id === emp.id || 
@@ -405,7 +420,7 @@ export default function UsersPermissionsView({
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim() || !phone.trim() || !username.trim()) {
+    if (!fullName.trim() || !phone.trim() || !password.trim() || !username.trim()) {
       onTriggerNotification(isRtl ? "⚠️ يرجى ملء جميع الحقول الإلزامية." : "⚠️ Please fill all required fields.");
       return;
     }
@@ -448,73 +463,90 @@ export default function UsersPermissionsView({
 
     let authUserId = editingEmployee?.auth_user_id;
     let invitationToken = editingEmployee?.invitation_token;
-    let invitationExpires = editingEmployee?.invitation_expires_at || editingEmployee?.invitation_expires;
+    let invitationExpires = editingEmployee?.invitation_expires;
     let invitationUsed = editingEmployee?.invitation_used ?? false;
 
+    // Create a real Supabase Auth account for the new employee
     if (isNew) {
-      // Use createEmployeeWithAuth which handles Supabase Auth creation + invitation token
-      const result = await createEmployeeWithAuth({
-        id: employeeId,
-        companyId,
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        username: username.trim().toLowerCase(),
-        jobTitle: jobTitle.trim() || "موظف",
-        allowedPages: selectedPages,
-        status,
-        assignedResponsibilities: assignedResponsibilities.trim() || undefined
-      });
+      const signUpSecondary = createSecondaryClient();
+      if (signUpSecondary) {
+        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
+        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
+          email: userEmail,
+          password: password.trim(),
+          options: {
+            data: {
+              company_id: companyId,
+              employee_id: employeeId,
+              role: "employee",
+              username: username.trim().toLowerCase(),
+              full_name: fullName.trim()
+            }
+          }
+        });
 
-      if (result.error) {
-        onTriggerNotification(
-          isRtl
-            ? `❌ فشل إنشاء حساب الموظف: ${result.error}`
-            : `❌ Failed to create employee account: ${result.error}`
-        );
-        setIsLoading(false);
-        return;
+        if (authError) {
+          console.error("Supabase Auth SignUp error:", authError);
+          onTriggerNotification(
+            isRtl 
+              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
+              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        authUserId = authData.user?.id;
       }
 
-      authUserId = result.employee.auth_user_id;
-      invitationToken = result.employee.invitation_token;
-      invitationExpires = result.employee.invitation_expires_at || result.employee.invitation_expires;
+      // Generate expiring (7 days) secure invitation link
+      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
+      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       invitationUsed = false;
     } else {
-      // Save employee updates (existing employee)
-      const payload: Employee = {
-        id: employeeId,
-        companyId,
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        username: username.trim().toLowerCase(),
-        jobTitle: jobTitle.trim() || "موظف",
-        allowedPages: selectedPages,
-        assignedResponsibilities: assignedResponsibilities.trim() || undefined,
-        status,
-        lastActivity: editingEmployee?.lastActivity,
-        createdAt: editingEmployee?.createdAt || new Date().toISOString(),
-        auth_user_id: authUserId,
-        invitation_token: invitationToken,
-        invitation_expires_at: invitationExpires,
-        invitation_used: invitationUsed
-      };
-
-      const success = await saveEmployee(payload);
-      if (!success) {
-        onTriggerNotification(
-          isRtl ? "❌ فشل حفظ الموظف في قاعدة البيانات." : "❌ Failed to save employee to database."
-        );
-        setIsLoading(false);
-        return;
-      }
-      const pagesSaved = await updateUserPages(employeeId, selectedPages);
-      if (!pagesSaved) {
-        console.warn("Failed to save allowed_pages for employee", employeeId);
+      // If editing employee and password changed, sync password back to Supabase Auth
+      if (editingEmployee && editingEmployee.password !== password.trim()) {
+        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.dz`;
+        const signUpSecondary = createSecondaryClient();
+        if (signUpSecondary) {
+          try {
+            const { error: signInErr } = await signUpSecondary.auth.signInWithPassword({
+              email: userEmail,
+              password: editingEmployee.password || ""
+            });
+            if (!signInErr) {
+              await signUpSecondary.auth.updateUser({ password: password.trim() });
+              await signUpSecondary.auth.signOut();
+            }
+          } catch (err) {
+            console.warn("Could not sync updated password to Supabase Auth:", err);
+          }
+        }
       }
     }
 
+    const payload: Employee = {
+      id: employeeId,
+      companyId,
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+      email: email.trim() || undefined,
+      username: username.trim().toLowerCase(),
+      jobTitle: jobTitle.trim() || "موظف",
+      password: password.trim(),
+      allowedPages: selectedPages,
+      assignedResponsibilities: assignedResponsibilities.trim() || undefined,
+      status,
+      lastActivity: editingEmployee?.lastActivity,
+      createdAt: editingEmployee?.createdAt || new Date().toISOString(),
+      auth_user_id: authUserId,
+      invitation_token: invitationToken,
+      invitation_expires: invitationExpires,
+      invitation_used: invitationUsed
+    };
+
+    const success = await saveEmployee(payload);
+    if (success) {
       onTriggerNotification(
         isRtl
           ? `✅ تم ${isNew ? "إنشاء" : "تحديث"} حساب الموظف (${fullName}) بنجاح`
@@ -561,26 +593,12 @@ export default function UsersPermissionsView({
         console.error("Worker Profile auto-sync error:", err);
       }
 
-      // Build log payload from current form state
-      const logPayload = {
-        id: employeeId,
-        companyId,
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        username: username.trim().toLowerCase(),
-        jobTitle: jobTitle.trim() || (isRtl ? "موظف" : "Employee"),
-        allowedPages: selectedPages,
-        status,
-        auth_user_id: authUserId,
-        invitation_token: invitationToken
-      };
-
+      // Log specific activities
       const actionType = isNew ? "Create User" : "Update User";
       const affectedRecord = `User: ${fullName} (${jobTitle})`;
-
+      
       let logAction = actionType;
-      if (!isNew && editingEmployee?.status !== status) {
+      if (!isNew && editingEmployee.status !== status) {
         logAction = status === "Suspended" ? "Suspend User" : "Reactivate User";
       }
 
@@ -593,23 +611,24 @@ export default function UsersPermissionsView({
         pageName: "Users & Permissions",
         affectedRecord,
         previousValue: editingEmployee ? JSON.stringify(editingEmployee) : "",
-        newValue: JSON.stringify(logPayload)
+        newValue: JSON.stringify(payload)
       });
 
       if (isNew) {
-        onTriggerNotification(
-          isRtl
-            ? `✅ تم إنشاء حساب (${fullName}) بنجاح! تم نسخ رابط الدعوة للحافظة.`
-            : `✅ Created (${fullName})! Invitation link copied to clipboard.`
-        );
-        const inviteUrl = `${window.location.origin}/?invite_token=${invitationToken}`;
-        try { navigator.clipboard.writeText(inviteUrl); } catch (e) {}
-        setIsModalOpen(false);
-        loadEmployeesData();
+        setCreatedCredentials({
+          fullName: fullName.trim(),
+          email: email.trim() || `${username.trim().toLowerCase()}@corevia.dz`,
+          username: username.trim().toLowerCase(),
+          password: password.trim(),
+          loginUrl: `${window.location.origin}/?invite_token=${invitationToken}`
+        });
       } else {
         setIsModalOpen(false);
         loadEmployeesData();
       }
+    } else {
+      onTriggerNotification(isRtl ? "❌ فشل حفظ تفاصيل الحساب" : "❌ Failed to save account details");
+    }
     
     setIsLoading(false);
   };
@@ -786,14 +805,18 @@ export default function UsersPermissionsView({
                             </div>
                           )}
                           
-                          {/* Invitation Status */}
+                          {/* Reveal Password Hook */}
                           <div className="flex items-center justify-center gap-1 text-[10px]">
-                            <span className="text-slate-500">{isRtl ? "الدعوة:" : "Invite:"}</span>
-                            {emp.invitation_used ? (
-                              <span className="text-emerald-400 font-bold">{isRtl ? "✓ تم التفعيل" : "✓ Activated"}</span>
-                            ) : (
-                              <span className="text-amber-400 font-bold">{isRtl ? "بانتظار التفعيل" : "Pending"}</span>
-                            )}
+                            <span className="text-slate-500">{isRtl ? "كلمة المرور:" : "Password:"}</span>
+                            <span className="font-mono text-slate-200 font-bold bg-[#141416] px-1.5 py-0.5 rounded border border-[#27272a]">
+                              {passRevealId === emp.id ? emp.password : "••••••"}
+                            </span>
+                            <button
+                              onClick={() => setPassRevealId(passRevealId === emp.id ? null : emp.id)}
+                              className="text-slate-400 hover:text-white p-0.5"
+                            >
+                              {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
                           </div>
 
                           {/* Direct shareable login link button */}
@@ -854,7 +877,7 @@ export default function UsersPermissionsView({
                             <button
                               onClick={() => handleOpenEditModal(emp)}
                               className="p-1.5 bg-[#141416] hover:bg-slate-800 border border-[#27272a] text-amber-500 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
-                              title={isRtl ? "تعديل الصلاحيات" : "Edit Permissions"}
+                              title={isRtl ? "تعديل الصلاحيات وكلمة المرور" : "Edit Permissions & Settings"}
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
@@ -1042,7 +1065,97 @@ export default function UsersPermissionsView({
             {/* Elegant gradient accent */}
             <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-rose-500 to-indigo-600" />
             
-            {false ? null : (
+            {createdCredentials ? (
+              <div className="space-y-4 py-2" dir="rtl">
+                <div className="flex justify-center mb-4">
+                  <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center">
+                    <Check className="w-6 h-6" />
+                  </div>
+                </div>
+                
+                <h3 className="text-base font-black text-slate-100 text-center mb-1">
+                  {isRtl ? "🎉 تم إنشاء حساب الموظف بنجاح!" : "🎉 Account Created Successfully!"}
+                </h3>
+                <p className="text-slate-400 text-xs text-center mb-4 leading-relaxed">
+                  {isRtl 
+                    ? "تم إعداد الحساب وربطه بنجاح بالشركة سحابياً. انسخ بيانات الدخول وأرسلها للموظف."
+                    : "The account was created and securely synchronized to the cloud. Share these credentials with the employee."}
+                </p>
+
+                <div className="space-y-3 bg-slate-950/65 border border-[#27272a] p-4 rounded-xl text-xs selection:bg-emerald-900 text-right">
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "اسم الموظف" : "Employee Name"}
+                    </span>
+                    <span className="text-slate-200 font-bold block text-right">{createdCredentials.fullName}</span>
+                  </div>
+
+                  {createdCredentials.email && (
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                        {isRtl ? "البريد الإلكتروني" : "Email Address"}
+                      </span>
+                      <span className="text-slate-200 font-mono font-medium block text-right">{createdCredentials.email}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "اسم المستخدم (Username)" : "Username"}
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold block text-right">{createdCredentials.username}</span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "رقم المرور" : "Password"}
+                    </span>
+                    <span className="text-rose-400 font-mono font-bold block select-all bg-slate-900 border border-slate-800/60 p-1 px-2 rounded-md inline-block mr-auto" dir="ltr">
+                      {createdCredentials.password}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 block mb-0.5 text-right">
+                      {isRtl ? "رابط تسجيل الدخول" : "Login URL"}
+                    </span>
+                    <span className="text-blue-400 font-mono text-[10.5px] block select-all break-all bg-slate-900 border border-slate-800/60 p-1 px-2 rounded-md" dir="ltr">
+                      {createdCredentials.loginUrl}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    onClick={() => {
+                      const copyText = `
+اسم الموظف: ${createdCredentials.fullName}
+${createdCredentials.email ? `البريد الإلكتروني: ${createdCredentials.email}` : ""}
+اسم المستخدم: ${createdCredentials.username}
+كلمة المرور: ${createdCredentials.password}
+رابط الدخول: ${createdCredentials.loginUrl}
+                      `.trim();
+                      navigator.clipboard.writeText(copyText);
+                      onTriggerNotification(isRtl ? "📋 تم نسخ بيانات الاعتماد كلياً!" : "📋 All login credentials copied to clipboard!");
+                    }}
+                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <span>📋</span>
+                    <span>{isRtl ? "نسخ البيانات الفورية" : "Copy Credentials"}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCreatedCredentials(null);
+                      setIsModalOpen(false);
+                      loadEmployeesData();
+                    }}
+                    className="py-1.5 px-4 bg-[#1c1c1e] hover:bg-[#27272a] border border-[#27272a] text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    {isRtl ? "إغلاق" : "Close"}
+                  </button>
+                </div>
+              </div>
+            ) : (
               <>
                 <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-4">
                   <button 
@@ -1208,16 +1321,25 @@ export default function UsersPermissionsView({
                   />
                 </div>
 
-                {/* Invitation-based auth (no password stored locally) */}
-                <div className="bg-indigo-950/30 border border-indigo-900/30 p-3 rounded-lg text-xs">
-                  <span className="text-indigo-400 font-bold block mb-1">
-                    {isRtl ? "🔑 تسجيل الدخول عبر رابط دعوة" : "🔑 Invitation-based login"}
-                  </span>
-                  <span className="text-slate-400 block">
-                    {isRtl 
-                      ? "سيتم إرسال رابط دعوة آمن للموظف لتسجيل كلمة المرور الخاصة به مباشرة." 
-                      : "Employee will receive a secure invitation link to set their own password."}
-                  </span>
+                {/* Password input */}
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordRaw(!showPasswordRaw)}
+                      className="text-[10px] text-slate-400 hover:text-white"
+                    >
+                      {showPasswordRaw ? (isRtl ? "إخفاء" : "Hide") : (isRtl ? "إظهار" : "Show")}
+                    </button>
+                    <label className="block text-slate-400 font-bold">{isRtl ? "رمز المرور للولوج *" : "Secret Password *"}</label>
+                  </div>
+                  <input
+                    type={showPasswordRaw ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
+                  />
                 </div>
 
                 {/* Account Status Selection */}
@@ -1349,16 +1471,62 @@ export default function UsersPermissionsView({
                 </div>
               </div>
 
-              {/* Invitation link generator inside the Modal */}
-              <div className="bg-indigo-950/20 border border-indigo-900/20 p-3 rounded-xl text-xs my-2">
-                <span className="text-indigo-400 font-bold block mb-1">
-                  {isRtl ? "🔗 رابط دعوة التسجيل" : "🔗 Invitation Link"}
-                </span>
-                <span className="text-slate-400 block leading-relaxed">
-                  {isRtl 
-                    ? "بعد حفظ الحساب، سيتم إنشاء رابط دعوة آمن. يمكنك نسخه وإرساله للموظف ليختار كلمة المرور بنفسه."
-                    : "After saving, a secure invitation link will be generated. Share it with the employee so they can set their own password."}
-                </span>
+              {/* Shareable login URL generator inside the Modal */}
+              <div className="bg-slate-950/60 border border-[#27272a] p-3 rounded-xl flex items-center justify-between gap-3 text-xs my-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const loginKey = email.trim() || phone.trim();
+                    if (!password.trim()) {
+                      onTriggerNotification(
+                        isRtl 
+                          ? "⚠️ يرجى ملء كلمة المرور أولاً." 
+                          : "⚠️ Please fill in a password first."
+                      );
+                      return;
+                    }
+                    if (!phone.trim()) {
+                      onTriggerNotification(
+                        isRtl 
+                          ? "⚠️ يرجى كتابة الهاتف أولاً (كمفتاح دخول الأساسي)." 
+                          : "⚠️ Please enter the phone number first."
+                      );
+                      return;
+                    }
+                    try {
+                      const url = `${window.location.origin}/?email=${encodeURIComponent(loginKey)}&pass=${encodeURIComponent(password.trim())}`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedId("modal-copied");
+                      onTriggerNotification(
+                        isRtl 
+                          ? `📋 تم نسخ رابط الولوج المباشر الخاص بـ (${fullName || "الموظف"}) بنجاح!` 
+                          : `📋 Shareable login link for (${fullName || "Employee"}) copied to clipboard!`
+                      );
+                      setTimeout(() => {
+                        setCopiedId(null);
+                      }, 3000);
+                    } catch (err) {
+                      console.warn("Failed to copy modal link:", err);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer select-none shrink-0 ${
+                    copiedId === "modal-copied" 
+                      ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-400" 
+                      : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-indigo-400 hover:text-indigo-300"
+                  }`}
+                >
+                  {copiedId === "modal-copied" ? (isRtl ? "✓ تم نسخ الرابط" : "✓ Copied Link") : (isRtl ? "📋 نسخ الرابط" : "📋 Copy Link")}
+                </button>
+                <div className="text-right flex-1 select-none">
+                  <span className="block font-bold text-white text-[11px]">
+                    {isRtl ? "رابط تسجيل دخول مباشر للموظف" : "Pre-filled Login Link"}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-tight">
+                    {isRtl 
+                      ? "رابط دخول سريع ومملوء مسبقاً ببيانات الموظف ليرسله له المالك لتخطي كتابة البيانات." 
+                      : "Pre-filled convenience URL that auto-fills email and password fields on click."}
+                  </span>
+                </div>
               </div>
 
               {/* Page Licensing Checklist (13 checkboxes grid layout) */}

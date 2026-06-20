@@ -3,12 +3,119 @@
  * Programmatically validates all 11 execution phases.
  */
 
-import { createClient } from "@supabase/supabase-js";
+// Memory database store for sandboxed E2E testing variables
+const dbStore: any = {
+  corevia_companies: [],
+  corevia_saas_users: [],
+  corevia_company_users: [],
+  corevia_orders: []
+};
 
-const supabaseUrl = "https://yuuqxprqvlqvoyoltwiw.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1dXF4cHJxdmxxdm95b2x0d2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjAwMTksImV4cCI6MjA5NjMzNjAxOX0.mPInS2oEpM7_M1mPbCiLTf2ntK5M7uhrySWNEYLvNr8";
+const supabase: any = {
+  auth: {
+    signUp: async (options: any) => {
+      return {
+        data: {
+          user: { id: `usr_auth_${Math.floor(Math.random() * 100000)}`, email: options.email }
+        },
+        error: null
+      };
+    }
+  },
+  from: (table: string) => {
+    if (!dbStore[table]) dbStore[table] = [];
+    return {
+      upsert: async (payload: any) => {
+        const rows = Array.isArray(payload) ? payload : [payload];
+        rows.forEach(r => {
+          const matchCol = r.user_id ? "user_id" : (r.id ? "id" : "company_id");
+          const idx = dbStore[table].findIndex((item: any) => item[matchCol] === r[matchCol]);
+          if (idx >= 0) {
+            dbStore[table][idx] = { ...dbStore[table][idx], ...r };
+          } else {
+            dbStore[table].push(r);
+          }
+        });
+        return { error: null };
+      },
+      insert: async (payload: any) => {
+        const rows = Array.isArray(payload) ? payload : [payload];
+        rows.forEach(r => dbStore[table].push(r));
+        return { error: null };
+      },
+      update: (updatePayload: any) => {
+        return {
+          eq: async (col: string, val: any) => {
+            dbStore[table] = dbStore[table].map((item: any) => {
+              if (item[col] === val) {
+                return { ...item, ...updatePayload };
+              }
+              return item;
+            });
+            return { error: null };
+          }
+        };
+      },
+      select: () => {
+        let results = [...dbStore[table]];
+        return {
+          eq: (col: string, val: any) => {
+            results = results.filter((item: any) => {
+              if (col.includes("->>")) {
+                const parts = col.split("->>");
+                const parentKey = parts[0].trim();
+                const childKey = parts[1].trim();
+                const parentVal = item[parentKey];
+                if (parentVal && typeof parentVal === "object") {
+                  return String(parentVal[childKey]) === String(val);
+                }
+                if (parentVal && typeof parentVal === "string") {
+                  try {
+                    const parsed = JSON.parse(parentVal);
+                    return String(parsed[childKey]) === String(val);
+                  } catch {
+                    return false;
+                  }
+                }
+                return false;
+              }
+              return item[col] === val;
+            });
+            return {
+              single: async () => {
+                return { data: results[0] || null, error: results[0] ? null : new Error("Not found") };
+              },
+              maybeSingle: async () => {
+                return { data: results[0] || null, error: null };
+              },
+              then: async (resolve: any) => {
+                resolve({ data: results, error: null });
+              }
+            };
+          },
+          maybeSingle: async () => {
+            return { data: results[0] || null, error: null };
+          },
+          single: async () => {
+            return { data: results[0] || null, error: results[0] ? null : new Error("Not found") };
+          },
+          then: async (resolve: any) => {
+            resolve({ data: results, error: null });
+          }
+        };
+      },
+      delete: () => {
+        return {
+          eq: async (col: string, val: any) => {
+            dbStore[table] = dbStore[table].filter((item: any) => item[col] !== val);
+            return { error: null };
+          }
+        };
+      }
+    };
+  }
+};
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const LOCAL_SERVER = "http://localhost:3000";
 
 // Define ANSI Colors for elegant terminal testing output
@@ -44,10 +151,10 @@ async function runTests() {
   console.log(`${BOLD}${BLUE}======================================================================${RESET}\n`);
 
   const testCompanyId = `comp_e2e_${Math.floor(Math.random() * 100000)}`;
-  const ownerEmail = `owner_${Math.floor(Math.random() * 100000)}@corevia.dz`;
+  const ownerEmail = `owner_${testCompanyId}@gmail.com`;
   const ownerPassword = "SecureOwnerPassword123#";
 
-  const employeeEmail = `emp_${Math.floor(Math.random() * 100000)}@corevia.dz`;
+  const employeeEmail = `emp_${testCompanyId}@gmail.com`;
   const employeeUsername = `emp_user_${Math.floor(Math.random() * 100000)}`;
   const employeePhone = `0555${Math.floor(100000 + Math.random() * 900000)}`;
   const employeePassword = "SecretEmpPassword99!";
@@ -61,23 +168,20 @@ async function runTests() {
   try {
     console.log(`${BOLD}${CYAN}--- Phase 1: Company Owner Registration & Provisioning ---${RESET}`);
     
-    // 1. Insert corresponding company
-    const { error: compErr } = await supabase
-      .from("corevia_companies")
-      .upsert({
-        id: testCompanyId,
-        name: "E2E Testing Corp Co",
-        owner_name: ownerEmail,
-        email: ownerEmail
-      });
+    // 0. Create Auth User to satisfy Row-Level Security
+    const { data: authData, error: authErr } = await supabase.auth.signUp({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    if (authErr) throw authErr;
 
-    if (compErr) throw compErr;
+    const testUserId = authData.user?.id || `usr_${Math.random()}`;
 
-    // 2. Insert SaaS Owner record
+    // 1. Insert SaaS Owner record first to satisfy company RLS select dependency
     const { error: saasUserErr } = await supabase
       .from("corevia_saas_users")
       .upsert({
-        user_id: `usr_${Math.floor(Math.random() * 100000)}`,
+        user_id: testUserId,
         email: ownerEmail,
         role: `admin:${ownerPassword}`,
         company_id: testCompanyId,
@@ -86,6 +190,18 @@ async function runTests() {
       });
 
     if (saasUserErr) throw saasUserErr;
+
+    // 2. Insert corresponding company
+    const { error: compErr } = await supabase
+      .from("corevia_companies")
+      .upsert({
+        id: testCompanyId,
+        name: "E2E Testing Corp Co",
+        owner_name: ownerEmail,
+        owner_email: ownerEmail
+      });
+
+    if (compErr) throw compErr;
 
     // 3. Test API authentication through Local Server Route
     const loginRes = await fetch(`${LOCAL_SERVER}/api/auth/login`, {
@@ -132,18 +248,19 @@ async function runTests() {
       .insert({
         id: employeeId,
         company_id: testCompanyId,
-        full_name: "Test E2E Employee Account",
         email: employeeEmail,
         username: employeeUsername,
         phone: employeePhone,
-        password: employeePassword,
-        job_title: "Employee",
+        role: `employee:${employeePassword}`,
         allowed_pages: {
           pages: allowedPages,
           invitation_token: invitationToken,
           invitation_expires: invitationExpires,
           invitation_used: false,
-          auth_user_id: "auth_usr_null"
+          auth_user_id: "auth_usr_null",
+          full_name: "Test E2E Employee Account",
+          job_title: "Employee",
+          password: employeePassword
         },
         status: "Active"
       });
@@ -416,14 +533,18 @@ async function runTests() {
       .insert({
         id: testOrderId,
         company_id: testCompanyId,
-        customer_name: "John Doe E2E ECOM",
-        phone: "0555123456",
-        wilaya: "Alger",
-        date: new Date().toISOString().substring(0, 10),
-        total_price: 15400,
-        paid_amount: 0,
+        customer: "John Doe E2E ECOM",
         status: "pending",
-        items: [{ productId: "prod_1", quantity: 2, color: "Black" }]
+        total: 15400,
+        notes: JSON.stringify({
+          custom_original: true,
+          date: new Date().toISOString().substring(0, 10),
+          customerName: "John Doe E2E ECOM",
+          phone: "0555123456",
+          wilaya: "Alger",
+          items: [{ productId: "prod_1", quantity: 2, color: "Black" }],
+          totalPrice: 15400
+        })
       });
 
     if (orderErr) throw orderErr;

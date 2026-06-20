@@ -191,32 +191,34 @@ export default function SettingsView({
 
       // 3. Orders Sync
       if (orders.length > 0) {
-        const formattedOrders = orders.map(o => ({
-          id: o.id,
-          date: o.date,
-          customer_name: o.customerName,
-          phone: o.phone,
-          wilaya: o.wilaya,
-          commune: o.commune,
-          delivery_location: o.deliveryLocation,
-          delivery_company: o.deliveryCompany,
-          delivery_type: o.deliveryType,
-          delivery_price: o.deliveryPrice,
-          items: o.items,
-          total_price: o.totalPrice,
-          paid_amount: o.paidAmount,
-          discount: o.discount,
-          customer_pays_delivery: o.customerPaysDelivery,
-          is_exchange: o.isExchange,
-          exchange_order_ref: o.exchangeOrderRef || null,
-          agent_name: o.agentName,
-          source: o.source,
-          status: o.status,
-          return_cost: o.returnCost || null,
-          return_date: o.returnDate || null,
-          notes: o.notes || null,
-          deleted_at: o.deletedAt || null
-        }));
+        const formattedOrders = orders.map(o => {
+          const rawBackup = {
+            custom_original: true,
+            date: o.date,
+            customerName: o.customerName,
+            phone: o.phone,
+            wilaya: o.wilaya,
+            commune: o.commune,
+            deliveryLocation: o.deliveryLocation,
+            deliveryCompany: o.deliveryCompany,
+            deliveryType: o.deliveryType,
+            deliveryPrice: o.deliveryPrice,
+            items: o.items,
+            totalPrice: o.totalPrice,
+            paidAmount: o.paidAmount,
+            discount: o.discount,
+            notes: o.notes
+          };
+
+          return {
+            id: o.id,
+            company_id: companyId || "cop_default",
+            customer: o.customerName,
+            status: o.status,
+            total: o.totalPrice,
+            notes: JSON.stringify(rawBackup)
+          };
+        });
         const { error: oError } = await supabase.from("corevia_orders").upsert(formattedOrders);
         if (oError) throw oError;
       }
