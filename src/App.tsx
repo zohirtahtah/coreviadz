@@ -103,15 +103,12 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
         id: companyId,
         name: newCompany.companyName,
         owner_name: newCompany.ownerName,
-        email: newCompany.email,
         owner_email: newCompany.email,
         phone: newCompany.phone,
         country: newCompany.country,
-        seatsLimit: newCompany.seatsLimit,
-        accountStatus: newCompany.accountStatus,
-        subscriptionPlan: newCompany.subscriptionPlan,
-        otpCode: otp,
-        expirationDate: newCompany.expirationDate
+        seats_limit: newCompany.seatsLimit,
+        status: newCompany.accountStatus,
+        subscription_end_date: newCompany.expirationDate
       }).then(() => {}, err => console.warn("registerSaaSCompany: corevia_companies upsert error", err));
     }
     
@@ -240,14 +237,14 @@ export default function App() {
             country: data.country || "Algeria",
             registrationDate: data.created_at ? data.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
             lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
-            emailVerified: data.accountStatus !== "Pending Verification",
-            subscriptionPlan: data.subscriptionPlan || data.subscription_plan || "Basic",
-            seatsLimit: data.seatsLimit || data.seats_limit || 5,
+            emailVerified: data.status !== "Pending Verification",
+            subscriptionPlan: "Basic",
+            seatsLimit: data.seats_limit || 5,
             seatsUsed: 1,
-            accountStatus: data.accountStatus || data.account_status || "Active",
-            expirationDate: data.expirationDate || data.expiration_date || "",
+            accountStatus: data.status || "Active",
+            expirationDate: data.subscription_end_date || "",
             activeDevices: [],
-            otpCode: data.otpCode || data.otp_code || "123456"
+            otpCode: "123456"
           };
           setSaasAccount(company);
         } else {
@@ -1948,7 +1945,7 @@ export default function App() {
         // Also update Supabase corevia_companies directly (Single Source of Truth)
         if (supabase && saasAccount) {
           supabase.from("corevia_companies").update({
-            accountStatus: "Active"
+            status: "Active"
           }).eq("id", saasAccount.id).then(() => {
             // Refresh saasAccount state from DB
             if (session?.company_id) {
