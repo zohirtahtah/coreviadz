@@ -2,11 +2,12 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = "https://yuuqxprqvlqvoyoltwiw.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1dXF4cHJxdmxxdm95b2x0d2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjAwMTksImV4cCI6MjA5NjMzNjAxOX0.mPInS2oEpM7_M1mPbCiLTf2ntK5M7uhrySWNEYLvNr8";
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 async function probeColumn(tableName: string, colName: string) {
-  const payload: any = { id: "test_" + Date.now() };
-  payload[colName] = "test-value";
+  const payload: any = { id: "test_comp_" + Date.now(), name: "Test Corp" };
+  payload[colName] = colName.includes("limit") || colName.includes("Limit") ? 5 : "test";
   
   const { error } = await supabase.from(tableName).insert(payload);
   
@@ -14,36 +15,34 @@ async function probeColumn(tableName: string, colName: string) {
     if (error.message.includes("Could not find the")) {
       return { exists: false, error: error.message };
     } else {
-      // Returned an RLS violation or constraint error, meaning the column EXISTS!
       return { exists: true, error: error.message };
     }
   }
-  return { exists: true, error: "Inserted successfully!" };
+  return { exists: true, error: "Success" };
 }
 
 async function main() {
-  console.log("--- PROBING corevia_workers ---");
-  const workerCols = [
-    "fullname",
-    "full_name",
-    "worker_name",
-    "employee_name",
-    "username",
-    "worker_code",
-    "employee_code",
-    "work_hours",
-    "working_hours",
-    "hours_per_day",
-    "overtime_hourly_rate",
-    "ot_rate",
-    "payrolls_json",
-    "payroll_records",
-    "salary_sheets",
-    "salary",
-    "position"
+  console.log("--- PROBING corevia_companies columns ---");
+  const compCols = [
+    "id",
+    "name",
+    "business_type",
+    "owner_name",
+    "phone",
+    "email",
+    "seatsLimit",
+    "seatslimit",
+    "seats_limit",
+    "accountStatus",
+    "accountstatus",
+    "account_status",
+    "subscriptionPlan",
+    "subscriptionplan",
+    "subscription_plan",
+    "created_at"
   ];
-  for (const col of workerCols) {
-    const res = await probeColumn("corevia_workers", col);
+  for (const col of compCols) {
+    const res = await probeColumn("corevia_companies", col);
     console.log(`Column '${col}': ${res.exists ? "✅ EXISTS" : "❌ ABSENT"} (${res.error})`);
   }
 }

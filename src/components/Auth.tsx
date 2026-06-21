@@ -14,6 +14,7 @@ import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
 import { getLocalEmployees, Employee } from "../employeeService";
 import { logActivity } from "../activityLogService";
+import { resilientUpsert } from "../supabaseSync";
 
 interface AuthProps {
   lang: LanguageType;
@@ -523,29 +524,31 @@ export default function Auth({
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
         // 1. Save company to corevia_companies (SOLE Authoritative Source)
-        const { error: compErr } = await supabase.from("corevia_companies").upsert({
+        const { error: compErr } = await resilientUpsert("corevia_companies", [{
           id: companyId,
           name: companyNameInput.trim(),
-          business_type: "تجارة إلكترونية",
           owner_name: nameInput.trim(),
           phone: phoneInput.trim(),
+          owner_email: emailInput.trim().toLowerCase(), // compatibility
           email: emailInput.trim().toLowerCase(),
           seatsLimit: 5,
+          seats_limit: 5, // compatibility
           accountStatus: "Pending Verification",
+          status: "Pending Verification", // compatibility
           subscriptionPlan: "Trial",
           created_at: new Date().toISOString() // Seed current time for 10-min OTP comparison & 7 days trial countdown
-        });
+        }]);
         if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
         // 2. Save owner to corevia_saas_users table
-        const { error: saasUserErr } = await supabase.from("corevia_saas_users").upsert({
+        const { error: saasUserErr } = await resilientUpsert("corevia_saas_users", [{
           user_id: userId,
           company_id: companyId,
           email: emailInput.trim().toLowerCase(),
           username: nameInput.trim(),
           has_completed_onboarding: false,
           role: "admin"
-        });
+        }]);
         if (saasUserErr) console.warn("Supabase corevia_saas_users upsert error during registration:", saasUserErr);
 
         // 4. Update corevia_saas_companies_v1 in localStorage to cache state immediately

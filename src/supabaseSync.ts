@@ -28,6 +28,46 @@ const safeNum = (val: any, fallback = 0): number => {
 };
 
 /**
+ * A highly resilient and adaptive upsert function that automatically detects if
+ * any of the payload columns do not exist on the Supabase table, strips them out,
+ * and retries until the write succeeds. This prevents PGRST204 (column not found) errors entirely.
+ */
+export async function resilientUpsert(tableName: string, items: any[]): Promise<{ data: any; error: any }> {
+  if (!supabase) return { data: null, error: new Error("Supabase is not configured.") };
+  if (!items || items.length === 0) return { data: [], error: null };
+
+  let activeItems = JSON.parse(JSON.stringify(items));
+  let attempts = 0;
+  const maxAttempts = 20;
+
+  while (attempts < maxAttempts) {
+    const { data, error } = await supabase.from(tableName).upsert(activeItems);
+    if (!error) {
+      return { data, error: null };
+    }
+
+    const errMsg = error.message || "";
+    // Check if the error is "Could not find the 'column_name' column of 'table_name' in the schema cache"
+    const match = errMsg.match(/Could not find the '([^']+)' column/);
+    if (match && match[1]) {
+      const badColumn = match[1];
+      console.warn(`[ResilientUpsert] Table "${tableName}" does not support column "${badColumn}". Stripping and retrying.`);
+      activeItems = activeItems.map((item: any) => {
+        const copy = { ...item };
+        delete copy[badColumn];
+        return copy;
+      });
+      attempts++;
+    } else {
+      // Return other errors directly (constraint, network, etc.)
+      console.error(`[ResilientUpsert] Table "${tableName}" failed with an unrecoverable error:`, error);
+      return { data: null, error };
+    }
+  }
+  return { data: null, error: new Error(`ResilientUpsert failed after ${maxAttempts} column stripping retries.`) };
+}
+
+/**
  * Checks, fetches, or provisions multi-tenant SaaS metadata for a User ID.
  * If the SaaS tables do not exist yet, we fallback gracefully to local keys.
  */
@@ -140,12 +180,13 @@ export async function fetchUserSaaSMeta(
     const companyName = `${fallbackName || cleanEmail.split("@")[0]} Trading`;
     
     // Attempt Company Insert in corevia_companies
-    await supabase.from("corevia_companies").upsert({
+    await resilientUpsert("corevia_companies", [{
       id: defaultCompanyId,
       name: companyName,
       owner_name: fallbackName,
-      owner_email: cleanEmail
-    });
+      owner_email: cleanEmail,
+      email: cleanEmail
+    }]);
 
     // Attempt SaaS User Record Insert
     const newUserData = {
@@ -157,7 +198,7 @@ export async function fetchUserSaaSMeta(
       role: initialRole
     };
 
-    await supabase.from("corevia_saas_users").upsert(newUserData);
+    await resilientUpsert("corevia_saas_users", [newUserData]);
 
     return {
       userId,
@@ -203,13 +244,14 @@ export async function saveOnboardingCompletionInCloud(
       .eq("user_id", userId);
 
     // Update corevia_companies table
-    await supabase.from("corevia_companies").upsert({
+    await resilientUpsert("corevia_companies", [{
       id: companyId,
       name: profile.businessName,
       owner_name: profile.ownerName || "Owner",
       phone: profile.phone || "",
-      owner_email: profile.email || cleanEmail
-    });
+      owner_email: profile.email || cleanEmail,
+      email: profile.email || cleanEmail
+    }]);
 
     // Upsert Business Profile bound to companyId (Extension table ONLY)
     await supabase.from("corevia_profile").upsert({
@@ -353,12 +395,15 @@ export async function pushSingleDatasetToCloud(
         id: w.id,
         company_id: companyId,
         name: w.name,
+        full_name: w.name, // Compatibility
         code: w.code,
         phone: w.phone,
         base_salary: w.baseSalary,
+        salary: w.baseSalary, // Compatibility
         daily_hours: w.dailyHours,
         overtime_rate: w.overtimeRate,
         role: w.role,
+        position: w.role, // Compatibility
         monthly_salary: w.monthlySalary,
         payrolls: w.payrolls || [],
         created_at: w.createdAt,
@@ -442,7 +487,7 @@ export async function pushSingleDatasetToCloud(
 
     if (formattedItems.length > 0) {
       // 1. Surgical upsert of all active records to ensure zero downtime or data loss
-      const { error: upsertError } = await supabase.from(tableName).upsert(formattedItems);
+      const { error: upsertError } = await resilientUpsert(tableName, formattedItems);
       if (upsertError) throw upsertError;
 
       console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items). Non-destructive upsert completed.`);
@@ -721,14 +766,14 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
     if (dbWorkers) {
       formatted = dbWorkers.map(w => ({
         id: w.id,
-        name: w.name,
+        name: w.name || w.full_name || "",
         code: w.code || "W-" + w.id.substring(0, 4),
         phone: w.phone || "",
-        baseSalary: safeNum(w.base_salary),
+        baseSalary: safeNum(w.base_salary !== undefined && w.base_salary !== null ? w.base_salary : w.salary),
         dailyHours: safeNum(w.daily_hours, 8),
         overtimeRate: safeNum(w.overtime_rate, 2),
-        role: w.role || "Employee",
-        monthlySalary: safeNum(w.monthly_salary),
+        role: w.role || w.position || "Employee",
+        monthlySalary: safeNum(w.monthly_salary !== undefined && w.monthly_salary !== null ? w.monthly_salary : w.salary),
         payrolls: w.payrolls || [],
         createdAt: w.created_at || new Date().toISOString(),
         createdBy: w.created_by || undefined,

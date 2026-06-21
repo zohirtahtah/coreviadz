@@ -9,7 +9,9 @@ async function main() {
   
   const res = await fetch(url, {
     headers: {
-      "Accept": "application/openapi+json"
+      "Accept": "application/openapi+json",
+      "apikey": supabaseAnonKey,
+      "Authorization": `Bearer ${supabaseAnonKey}`
     }
   });
   
