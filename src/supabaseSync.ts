@@ -147,17 +147,6 @@ export async function fetchUserSaaSMeta(
       owner_email: cleanEmail
     });
 
-    // Attempt Company Insert in companies table
-    await supabase.from("companies").upsert({
-      id: defaultCompanyId,
-      owner_id: userId,
-      company_name: companyName,
-      main_store_name: "",
-      email: cleanEmail,
-      phone: "",
-      address: ""
-    });
-
     // Attempt SaaS User Record Insert
     const newUserData = {
       user_id: userId,
@@ -213,17 +202,6 @@ export async function saveOnboardingCompletionInCloud(
       .update({ has_completed_onboarding: true })
       .eq("user_id", userId);
 
-    // Update companies table
-    await supabase.from("companies").upsert({
-      id: companyId,
-      owner_id: userId,
-      company_name: profile.businessName,
-      main_store_name: "",
-      email: profile.email || cleanEmail,
-      phone: profile.phone || "",
-      address: profile.address || ""
-    });
-
     // Update corevia_companies table
     await supabase.from("corevia_companies").upsert({
       id: companyId,
@@ -233,21 +211,23 @@ export async function saveOnboardingCompletionInCloud(
       owner_email: profile.email || cleanEmail
     });
 
-    // Upsert Business Profile bound to companyId
+    // Upsert Business Profile bound to companyId (Extension table ONLY)
     await supabase.from("corevia_profile").upsert({
       id: companyId,
       company_id: companyId,
-      business_name: profile.businessName,
+      business_name: "", // Empty to ensure zero duplication while preventing database NOT NULL constraints on older schemas
       business_type: profile.businessType,
       currency: profile.currency,
       country: profile.country,
-      owner_name: profile.ownerName || "Owner",
-      phone: profile.phone || "",
-      email: profile.email || cleanEmail,
       address: profile.address || "",
       website: profile.website || "",
       commercial_registry: profile.commercialRegistry || "",
-      tax_number: profile.taxNumber || ""
+      tax_number: profile.taxNumber || "",
+      logo_url: profile.logoUrl || "",
+      passcode: profile.passcode || "",
+      rc1: profile.rc1 || "",
+      rc2: profile.rc2 || "",
+      nif: profile.nif || ""
     });
     console.log("Onboarding profile successfully persistent in standard database.");
   } catch (err) {
@@ -465,25 +445,9 @@ export async function pushSingleDatasetToCloud(
       const { error: upsertError } = await supabase.from(tableName).upsert(formattedItems);
       if (upsertError) throw upsertError;
 
-      // 2. Targeted pruning of orphans (records deleted locally but still lingering on remote db)
-      const activeIds = formattedItems.map(item => item.id);
-      const { error: pruneError } = await supabase
-        .from(tableName)
-        .delete()
-        .eq("company_id", companyId)
-        .not("id", "in", `(${activeIds.join(",")})`);
-
-      if (pruneError) {
-        console.warn(`[AutoSync] Orphan pruning warning for table "${tableName}":`, pruneError);
-      }
-      console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items).`);
+      console.log(`Automatic background cloud sync success for table "${tableName}" (${formattedItems.length} items). Non-destructive upsert completed.`);
     } else {
-      // If there are exactly zero items locally, safely purge all records under this company ID
-      const { error: deleteError } = await supabase.from(tableName).delete().eq("company_id", companyId);
-      if (deleteError) {
-        console.warn(`[AutoSync] Could not purge empty table "${tableName}":`, deleteError);
-      }
-      console.log(`Automatic background cloud sync success for table "${tableName}" (purged, 0 items left).`);
+      console.log(`[AutoSync] Background cloud sync for table "${tableName}" received empty set. Safety bypass triggered to preserve existing records in remote database.`);
     }
   } catch (err) {
     console.error(`[AutoSync] Background cloud sync for "${type}" was skipped or failed:`, err);
@@ -499,31 +463,43 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
   if (!supabase) return false;
 
   try {
-    // 1. Fetch Profile
+    // 1. Fetch Primary Company Information from corevia_companies (SOLITARY Authoritative Source)
+    const { data: companyData } = await supabase
+      .from("corevia_companies")
+      .select("*")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    // 2. Fetch Optional Extension metadata from corevia_profile (Extension table ONLY)
     const { data: profileData } = await supabase
       .from("corevia_profile")
       .select("*")
       .eq("id", companyId)
       .maybeSingle();
 
-    if (profileData) {
+    if (companyData || profileData) {
       const activeProf: BusinessProfile = {
-        businessName: profileData.business_name || "",
-        businessType: profileData.business_type || "",
+        businessName: companyData?.name || profileData?.business_name || "Enterprise Workspace",
+        businessType: profileData?.business_type || "تجارة إلكترونية",
         experienceYears: "سنة واحدة", // default fallback
         estimatedOrders: "0",
         estimatedWorkers: "0",
-        currency: (profileData.currency === "DZD" || profileData.currency === "USD" || profileData.currency === "EUR") ? profileData.currency : "DZD",
+        currency: (profileData?.currency === "DZD" || profileData?.currency === "USD" || profileData?.currency === "EUR") ? profileData.currency : "DZD",
         defaultLanguage: "ar",
         preferredTheme: "dark",
-        country: profileData.country || "Algeria",
-        ownerName: profileData.owner_name || "",
-        phone: profileData.phone || "",
-        email: profileData.email || "",
-        address: profileData.address || "",
-        website: profileData.website || "",
-        commercialRegistry: profileData.commercial_registry || "",
-        taxNumber: profileData.tax_number || ""
+        country: profileData?.country || "Algeria",
+        ownerName: companyData?.owner_name || profileData?.owner_name || "System Owner",
+        phone: companyData?.phone || profileData?.phone || "",
+        email: companyData?.email || companyData?.owner_email || profileData?.email || "",
+        address: profileData?.address || "",
+        website: profileData?.website || "",
+        commercialRegistry: profileData?.commercial_registry || "",
+        taxNumber: profileData?.tax_number || "",
+        passcode: profileData?.passcode || "",
+        rc1: profileData?.rc1 || "",
+        rc2: profileData?.rc2 || "",
+        nif: profileData?.nif || "",
+        logoUrl: profileData?.logo_url || profileData?.logoUrl || ""
       };
       saveBusinessProfile(activeProf);
     }
@@ -1022,16 +998,10 @@ export async function cleanSlateResetSandbox(
   if (!supabase) return;
 
   try {
-    // 2. Clear cloud DB tables under this tenant company ID
-    await supabase.from("corevia_orders").delete().eq("company_id", companyId);
-    await supabase.from("corevia_products").delete().eq("company_id", companyId);
-    await supabase.from("corevia_suppliers").delete().eq("company_id", companyId);
-    await supabase.from("corevia_expenses").delete().eq("company_id", companyId);
-    await supabase.from("corevia_workers").delete().eq("company_id", companyId);
-    await supabase.from("corevia_salary_sheets").delete().eq("company_id", companyId);
-    await supabase.from("corevia_profile").delete().eq("id", companyId);
-
-    // 3. Mark onboarding false inside saas users table
+    // Bypass remote deletions to prevent data loss in production datastores
+    console.log("Sandbox database reset requested. Safety bypass active: preserving Cloud DB records, only cleared local device caches.");
+    
+    // 3. Mark onboarding false inside saas users table (this is the only safe status change)
     await supabase
       .from("corevia_saas_users")
       .update({ has_completed_onboarding: false })

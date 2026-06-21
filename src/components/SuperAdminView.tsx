@@ -189,34 +189,27 @@ export default function SuperAdminView({
 
       if (reErr) throw reErr;
 
-      // Fetch companies from 'companies'
-      const { data: regularCompanies } = await supabase
-        .from("companies")
-        .select("*");
-
-      // Fetch companies from 'corevia_companies'
+      // Fetch companies from 'corevia_companies' (SOLE Authoritative Source of truth for companies)
       const { data: realCompanies } = await supabase
         .from("corevia_companies")
         .select("*");
 
-      // Fetch profile data from 'corevia_profile'
+      // Fetch profile data from 'corevia_profile' (Secondary Extension Table)
       const { data: profiles } = await supabase
         .from("corevia_profile")
         .select("*");
 
       const saasCompanies: SaaSCompany[] = (realCompanies || []).map(rc => {
-        // Find users belonging to this company
-        const companyUsers = (users || []).filter(u => u.company_id === rc.id);
+        const companyId = rc.id;
+        const prof = (profiles || []).find(p => p.id === companyId || p.company_id === companyId);
+        const companyUsers = (users || []).filter(u => u.company_id === companyId);
         const u = companyUsers[0]; // primary owner/representative user, if any
         
-        const comp = (regularCompanies || []).find(c => c.id === rc.id);
-        const prof = (profiles || []).find(p => p.id === rc.id || p.company_id === rc.id);
-
-        const companyName = rc.name || prof?.business_name || comp?.company_name || comp?.name || `Enterprise Workspace`;
-        const ownerName = rc.owner_name || u?.username || prof?.owner_name || comp?.owner_name || u?.email?.split("@")[0] || "System Owner";
+        const companyName = rc.name || prof?.business_name || `Enterprise Workspace (${companyId.substring(0, 5)})`;
+        const ownerName = rc.owner_name || u?.username || prof?.owner_name || u?.email?.split("@")[0] || "System Owner";
         const email = rc.owner_email || rc.email || u?.email || "no-owner@corevia.com";
-        const phone = rc.phone || prof?.phone || comp?.phone || "";
-        const registrationDate = rc.created_at ? rc.created_at.split("T")[0] : (comp?.created_at ? comp.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+        const phone = rc.phone || prof?.phone || "";
+        const registrationDate = rc.created_at ? rc.created_at.split("T")[0] : new Date().toISOString().split("T")[0];
 
         const seatsLimitVal = rc.seatsLimit !== undefined ? rc.seatsLimit : (rc.seatslimit !== undefined ? rc.seatslimit : (rc.seats_limit !== undefined ? rc.seats_limit : 5));
         const accountStatusVal = rc.accountStatus !== undefined ? rc.accountStatus : (rc.accountstatus !== undefined ? rc.accountstatus : (rc.account_status !== undefined ? rc.account_status : "Active"));
@@ -229,14 +222,14 @@ export default function SuperAdminView({
         }
 
         return {
-          id: rc.id,
+          id: companyId,
           companyName,
           ownerName,
           email,
           phone,
           country: rc.country || prof?.country || "Algeria",
           registrationDate,
-          lastLogin: comp?.updated_at ? comp.updated_at.replace("T", " ").substring(0, 16) : (rc.updated_at ? rc.updated_at.replace("T", " ").substring(0, 16) : "Never Logged"),
+          lastLogin: rc.updated_at ? rc.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
           emailVerified: accountStatusVal !== "Pending Verification",
           subscriptionPlan: subscriptionPlanVal,
           seatsLimit: seatsLimitVal,
@@ -610,16 +603,6 @@ export default function SuperAdminView({
         accountStatus: newCompany.accountStatus,
         subscriptionPlan: newCompany.subscriptionPlan
       }).then(() => console.log("Created company in corevia_companies via Super Admin"));
-
-      // Write into companies
-      supabase.from("companies").upsert({
-        id: coId,
-        company_name: newCompany.companyName,
-        owner_id: "saas-provisioned",
-        email: newCompany.email,
-        phone: newCompany.phone,
-        address: ""
-      }).then(() => console.log("Created company in companies via Super Admin"));
 
       // Create saas user profile shell
       supabase.from("corevia_saas_users").upsert({

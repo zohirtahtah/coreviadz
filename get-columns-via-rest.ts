@@ -30,6 +30,7 @@ async function inspect(tableName: string) {
 
 async function main() {
   await inspect("corevia_companies");
+  await inspect("corevia_profile");
   await inspect("corevia_company_users");
   await inspect("corevia_orders");
 }

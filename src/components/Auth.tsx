@@ -522,7 +522,7 @@ export default function Auth({
         const companyId = `cop_${userId.substring(0, 15)}`;
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // 1. Save company to corevia_companies
+        // 1. Save company to corevia_companies (SOLE Authoritative Source)
         const { error: compErr } = await supabase.from("corevia_companies").upsert({
           id: companyId,
           name: companyNameInput.trim(),
@@ -537,18 +537,7 @@ export default function Auth({
         });
         if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
-        // 2. Save company to compatibility companies table
-        const { error: comErr2 } = await supabase.from("companies").upsert({
-          id: companyId,
-          owner_id: userId,
-          company_name: companyNameInput.trim(),
-          email: emailInput.trim().toLowerCase(),
-          phone: phoneInput.trim(),
-          address: countryInput
-        });
-         if (comErr2) console.warn("Supabase compatibility companies upsert error during registration:", comErr2);
-
-        // 3. Save owner to corevia_saas_users table
+        // 2. Save owner to corevia_saas_users table
         const { error: saasUserErr } = await supabase.from("corevia_saas_users").upsert({
           user_id: userId,
           company_id: companyId,
