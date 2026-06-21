@@ -12,7 +12,7 @@ import { LanguageType, ThemeType, UserSession, SaaSCompany } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
-import { getLocalEmployees, Employee } from "../employeeService";
+import { getLocalEmployees, Employee, generateEmployeeLoginEmail } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { resilientUpsert } from "../supabaseSync";
 
@@ -439,9 +439,10 @@ export default function Auth({
               return;
             }
 
+            const companySlug = (matchedEmployee as any).companyName || matchedEmployee.companyId || "";
             const employeeSession: UserSession = {
               username: matchedEmployee.fullName,
-              email: matchedEmployee.email || `${matchedEmployee.username}@corevia.dz`,
+              email: matchedEmployee.email || generateEmployeeLoginEmail(matchedEmployee.fullName, companySlug),
               isRegistered: true,
               isApproved: true,
               isSuspended: false,
@@ -1030,7 +1031,7 @@ export default function Auth({
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="owner@corevia.dz"
+                    placeholder="name+company@corevia.local"
                     className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
                       isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
                     }`}

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee, generateEmployeeLoginEmail } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { getWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
@@ -528,12 +528,14 @@ export default function UsersPermissionsView({
       }
     }
 
+    const finalEmail = email.trim() || generateEmployeeLoginEmail(fullName.trim(), companyName);
+
     const payload: Employee = {
       id: employeeId,
       companyId,
       fullName: fullName.trim(),
       phone: phone.trim(),
-      email: email.trim() || undefined,
+      email: finalEmail,
       username: username.trim().toLowerCase(),
       jobTitle: jobTitle.trim() || "موظف",
       password: password.trim(),

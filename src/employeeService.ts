@@ -1,5 +1,53 @@
 import { supabase } from "./supabaseClient";
 
+/**
+ * Generate employee login email using the required format:
+ * employeeName + "+" + companySlug + "@corevia.local"
+ * 
+ * Rules: lowercase, remove spaces, remove accents/special characters.
+ * Example: "Omar" + "rcoreviadz" => "omar+rcoreviadz@corevia.local"
+ */
+export function generateEmployeeLoginEmail(employeeName: string, companySlug: string): string {
+  const normalize = (s: string) =>
+    s.toLowerCase().trim()
+      .replace(/[أإآا]/g, "a")
+      .replace(/[ب]/g, "b")
+      .replace(/[ت]/g, "t")
+      .replace(/[ث]/g, "th")
+      .replace(/[ج]/g, "j")
+      .replace(/[ح]/g, "h")
+      .replace(/[خ]/g, "kh")
+      .replace(/[د]/g, "d")
+      .replace(/[ذ]/g, "th")
+      .replace(/[ر]/g, "r")
+      .replace(/[ز]/g, "z")
+      .replace(/[س]/g, "s")
+      .replace(/[ش]/g, "sh")
+      .replace(/[ص]/g, "s")
+      .replace(/[ض]/g, "d")
+      .replace(/[ط]/g, "t")
+      .replace(/[ظ]/g, "z")
+      .replace(/[ع]/g, "a")
+      .replace(/[غ]/g, "gh")
+      .replace(/[ف]/g, "f")
+      .replace(/[ق]/g, "q")
+      .replace(/[ك]/g, "k")
+      .replace(/[ل]/g, "l")
+      .replace(/[م]/g, "m")
+      .replace(/[ن]/g, "n")
+      .replace(/[ه]/g, "h")
+      .replace(/[و]/g, "w")
+      .replace(/[يى]/g, "y")
+      .replace(/[ئء]/g, "e")
+      .replace(/[ؤ]/g, "o")
+      .replace(/[ة]/g, "t")
+      .replace(/\s+/g, "")
+      .replace(/[^a-z0-9]/g, "");
+  const normalizedName = normalize(employeeName) || "employee";
+  const normalizedCompany = normalize(companySlug) || "company";
+  return `${normalizedName}+${normalizedCompany}@corevia.local`;
+}
+
 export interface Employee {
   id: string;
   companyId: string;

@@ -11,6 +11,27 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 
+/**
+ * Generate employee login email (server-side).
+ * Format: employeeName+companySlug@corevia.local
+ */
+function generateEmployeeLoginEmail(employeeName: string, companySlug: string): string {
+  const normalize = (s: string) =>
+    s.toLowerCase().trim()
+      .replace(/[أإآا]/g, "a").replace(/[ب]/g, "b").replace(/[ت]/g, "t")
+      .replace(/[ث]/g, "th").replace(/[ج]/g, "j").replace(/[ح]/g, "h")
+      .replace(/[خ]/g, "kh").replace(/[د]/g, "d").replace(/[ذ]/g, "th")
+      .replace(/[ر]/g, "r").replace(/[ز]/g, "z").replace(/[س]/g, "s")
+      .replace(/[ش]/g, "sh").replace(/[ص]/g, "s").replace(/[ض]/g, "d")
+      .replace(/[ط]/g, "t").replace(/[ظ]/g, "z").replace(/[ع]/g, "a")
+      .replace(/[غ]/g, "gh").replace(/[ف]/g, "f").replace(/[ق]/g, "q")
+      .replace(/[ك]/g, "k").replace(/[ل]/g, "l").replace(/[م]/g, "m")
+      .replace(/[ن]/g, "n").replace(/[ه]/g, "h").replace(/[و]/g, "w")
+      .replace(/[يى]/g, "y").replace(/[ئء]/g, "e").replace(/[ؤ]/g, "o")
+      .replace(/[ة]/g, "t").replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+  return `${normalize(employeeName) || "employee"}+${normalize(companySlug) || "company"}@corevia.local`;
+}
+
 const app = express();
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "corevia_exclusive_ultimate_super_secret_jwt_key_v2_2026";
@@ -184,7 +205,8 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    let targetEmail = userMatched.email || `${(userMatched.username || userMatched.id || "employee").toLowerCase()}@corevia.dz`;
+    const companySlug1 = userMatched.company_id || "company";
+    let targetEmail = userMatched.email || generateEmployeeLoginEmail(userMatched.username || userMatched.id || "employee", companySlug1);
     let resolvedRole = userMatched.role || userMatched.userType;
     let storedSaasPassword = "";
     if (resolvedRole && resolvedRole.includes(":")) {
@@ -413,7 +435,7 @@ app.get("/api/auth/verify-invite", async (req, res) => {
     return res.status(200).json({
       success: true,
       fullName: extraFullName || record.username || "Employee",
-      email: record.email || `${(record.username || record.id || "employee").toLowerCase()}@corevia.dz`,
+      email: record.email || generateEmployeeLoginEmail(record.username || record.id || "employee", record.company_id || "company"),
       username: record.username,
       jobTitle: extraJobTitle || "Employee"
     });
@@ -585,7 +607,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
     // Best-effort secondary auth user password update!
     if (authId && password) {
       try {
-        const userEmail = record.email || `${record.username.toLowerCase()}@corevia.dz`;
+        const userEmail = record.email || generateEmployeeLoginEmail(record.username || record.id || "employee", record.company_id || "company");
         // Perform a sign-in with previous password to allow password change, or update directly if admin key present
         const testAuthClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
         const { data: signInData, error: signInErr } = await testAuthClient.auth.signInWithPassword({
@@ -602,7 +624,7 @@ app.post("/api/auth/claim-invite", async (req, res) => {
 
     // 5. Generate secure JWT session cookie for instant session enrollment
     const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration
-    const targetEmail = record.email || `${(record.username || record.id || "employee").toLowerCase()}@corevia.dz`;
+    const targetEmail = record.email || generateEmployeeLoginEmail(record.username || record.id || "employee", record.company_id || "company");
     
     const jwtToken = jwt.sign(
       { 
@@ -739,7 +761,7 @@ app.get("/api/auth/session", async (req, res) => {
       authenticated: true,
       session: {
         username: resolvedUsername,
-        email: saasUsers ? saasUsers.email : (employees ? employees.email || `${employees.username}@corevia.dz` : "resolved@corevia.dz"),
+        email: saasUsers ? saasUsers.email : (employees ? employees.email || generateEmployeeLoginEmail(employees.username || "employee", employees.company_id || "company") : "resolved@corevia.dz"),
         isRegistered: true,
         isApproved: true,
         isSuspended: employees ? employees.status === "Suspended" : false,
