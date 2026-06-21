@@ -618,6 +618,9 @@ export default function SuperAdminView({
     setCompanies(prev => [newCompany, ...prev]);
     setShowAddCompanyModal(false);
 
+    // Refresh from Supabase to ensure consistency
+    loadSaaSRealData();
+
     onTriggerNotification(
       isRtl ? "تم تسجيل الحساب الجديد وبانتظار تفعيل كود OTP" : "SaaS client registered, pending verification",
       "success"

@@ -71,10 +71,11 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
 
   const exists = list.some(c => c.email.toLowerCase() === email.toLowerCase().trim());
   if (!exists) {
+    const companyId = `cop-${Date.now()}`;
     // Generate a fresh 6-digit verification code OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const newCompany: SaaSCompany = {
-      id: `cop-${Date.now()}`,
+      id: companyId,
       companyName: `${fullName || email.split("@")[0]} Trading`,
       ownerName: fullName || email.split("@")[0],
       email: email.toLowerCase().trim(),
@@ -95,6 +96,24 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
     };
     list.push(newCompany);
     localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+
+    // Also persist company to Supabase corevia_companies (Single Source of Truth)
+    if (supabase) {
+      supabase.from("corevia_companies").upsert({
+        id: companyId,
+        name: newCompany.companyName,
+        owner_name: newCompany.ownerName,
+        email: newCompany.email,
+        owner_email: newCompany.email,
+        phone: newCompany.phone,
+        country: newCompany.country,
+        seatsLimit: newCompany.seatsLimit,
+        accountStatus: newCompany.accountStatus,
+        subscriptionPlan: newCompany.subscriptionPlan,
+        otpCode: otp,
+        expirationDate: newCompany.expirationDate
+      }).then(() => {}, err => console.warn("registerSaaSCompany: corevia_companies upsert error", err));
+    }
     
     // Seed system registration log
     const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
@@ -193,64 +212,50 @@ export default function App() {
   // ==========================================
   // MULTI-TENANT SaaS COMPLETED INTEGRATION
   // ==========================================
-  const getSaaSAccountForSession = () => {
-    if (!session || !session.email) return null;
-    const stored = localStorage.getItem("corevia_saas_companies_v1");
-    if (!stored) return null;
-    try {
-      const parsed: SaaSCompany[] = JSON.parse(stored);
-      const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
-      if (found) {
-        if (!found.otpCode || found.otpCode.trim() === "") {
-          found.otpCode = "123456";
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-        }
+  const [saasAccount, setSaasAccount] = useState<SaaSCompany | null>(null);
 
-        // Auto-heal of account status to Active if user-onboarding is completed
-        const hasOnboarded = getBusinessProfile()?.businessName;
-        if (found.accountStatus === "Pending Verification" && hasOnboarded) {
-          found.accountStatus = "Active";
-          found.emailVerified = true;
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-          if (supabase) {
-            supabase
-              .from("corevia_companies")
-              .update({ accountStatus: "Active" })
-              .eq("id", found.id)
-              .then(() => console.log("[Auto-Heal] Activated company on login."));
-          }
-        }
-
-        // Automated Check for Expired Subscriptions
-        if (found.expirationDate && found.accountStatus === "Active") {
-          const expTime = new Date(found.expirationDate).getTime();
-          if (expTime < Date.now()) {
-            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
-            found.accountStatus = "Suspended";
-            localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-            
-            // Sync status to Supabase in background
-            if (supabase) {
-              supabase
-                .from("corevia_companies")
-                .update({ accountStatus: "Suspended" })
-                .eq("id", found.id)
-                .then(() => {
-                  console.log("[Auto-Billing] Safely updated company status on Supabase.");
-                });
-            }
-          }
-        }
-
-        return found;
-      }
-      return null;
-    } catch (e) {
-      return null;
+  // Load company data from Supabase corevia_companies (SINGLE SOURCE OF TRUTH)
+  useEffect(() => {
+    if (!session?.company_id || !supabase) {
+      setSaasAccount(null);
+      return;
     }
-  };
+    supabase
+      .from("corevia_companies")
+      .select("*")
+      .eq("id", session.company_id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          console.warn("Failed to load company from Supabase:", error);
+          return;
+        }
+        if (data) {
+          const company: SaaSCompany = {
+            id: data.id,
+            companyName: data.name || "Company",
+            ownerName: data.owner_name || session?.username || "Owner",
+            email: data.owner_email || data.email || session?.email || "",
+            phone: data.phone || "",
+            country: data.country || "Algeria",
+            registrationDate: data.created_at ? data.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
+            lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
+            emailVerified: data.accountStatus !== "Pending Verification",
+            subscriptionPlan: data.subscriptionPlan || data.subscription_plan || "Basic",
+            seatsLimit: data.seatsLimit || data.seats_limit || 5,
+            seatsUsed: 1,
+            accountStatus: data.accountStatus || data.account_status || "Active",
+            expirationDate: data.expirationDate || data.expiration_date || "",
+            activeDevices: [],
+            otpCode: data.otpCode || data.otp_code || "123456"
+          };
+          setSaasAccount(company);
+        } else {
+          setSaasAccount(null);
+        }
+      });
+  }, [session?.company_id, session?.email, session?.username]);
 
-  const saasAccount = getSaaSAccountForSession();
   const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
   const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
   const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
@@ -1939,6 +1944,21 @@ export default function App() {
               localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
             }
           } catch (e) {}
+        }
+        // Also update Supabase corevia_companies directly (Single Source of Truth)
+        if (supabase && saasAccount) {
+          supabase.from("corevia_companies").update({
+            accountStatus: "Active"
+          }).eq("id", saasAccount.id).then(() => {
+            // Refresh saasAccount state from DB
+            if (session?.company_id) {
+              supabase.from("corevia_companies").select("*").eq("id", session.company_id).maybeSingle().then(({ data }) => {
+                if (data) {
+                  setSaasAccount(prev => prev ? { ...prev, accountStatus: "Active", emailVerified: true } : prev);
+                }
+              });
+            }
+          }).then(() => {}, err => console.warn("OTP: Failed to update corevia_companies", err));
         }
         triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
         setTypedOtpCode("");

@@ -68,6 +68,32 @@ export default function SettingsView({
   const [bNIF, setBNIF] = useState(profile.nif || "");
   const [bLogoUrl, setBLogoUrl] = useState<string | undefined>(profile.logoUrl);
 
+  // Load company data DIRECTLY from Supabase corevia_companies (Single Source of Truth)
+  React.useEffect(() => {
+    if (!session?.company_id || !supabase) return;
+    const companyId = session.company_id;
+    supabase.from("corevia_companies").select("*").eq("id", companyId).maybeSingle().then(({ data, error }) => {
+      if (data && !error) {
+        setBName(data.name || profile.businessName || "");
+        setBEmail(data.owner_email || data.email || profile.email || "");
+        setBPhone(data.phone || profile.phone || "");
+      }
+    });
+    supabase.from("corevia_profile").select("*").eq("company_id", companyId).maybeSingle().then(({ data, error }) => {
+      if (data && !error) {
+        setBName(data.business_name || bName);
+        setBCurrency(data.currency || "DZD");
+        setBCountry((data.country as any) || "Algeria");
+        setBAddress(data.address || "");
+        setBRegistry(data.commercial_registry || "");
+        setBRC1(data.rc1 || "");
+        setBRC2(data.rc2 || "");
+        setBNIF(data.nif || "");
+        setBLogoUrl(data.logo_url || undefined);
+      }
+    });
+  }, [session?.company_id]);
+
   // Synchronize local states when parent profile changes
   React.useEffect(() => {
     setBName(profile.businessName || "");
@@ -773,6 +799,35 @@ $$;`;
     };
 
     onSaveProfile(modified);
+
+    // Also persist directly to Supabase corevia_companies (Single Source of Truth)
+    if (supabase && session?.company_id) {
+      supabase.from("corevia_companies").upsert({
+        id: session.company_id,
+        name: bName,
+        owner_email: bEmail,
+        phone: bPhone,
+        country: bCountry
+      }).then(() => {}, err => console.warn("Settings: corevia_companies upsert error", err));
+
+      supabase.from("corevia_profile").upsert({
+        id: session.company_id,
+        company_id: session.company_id,
+        business_name: bName,
+        currency: bCurrency,
+        country: bCountry,
+        address: bAddress,
+        phone: bPhone,
+        email: bEmail,
+        commercial_registry: bRegistry,
+        rc1: bRC1,
+        rc2: bRC2,
+        nif: bNIF,
+        logo_url: bLogoUrl || null,
+        passcode: passcode
+      }).then(() => {}, err => console.warn("Settings: corevia_profile upsert error", err));
+    }
+
     onTriggerNotification(
       lang === "ar"
         ? "تم حفظ وتحديث الإعدادات المؤسسية بنجاح."
