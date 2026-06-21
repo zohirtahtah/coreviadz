@@ -7,7 +7,7 @@ import { LanguageType } from "../types";
 import { translations } from "../translations";
 import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
-import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
+import { getWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
 import { supabase, createSecondaryClient } from "../supabaseClient";
 
@@ -134,7 +134,7 @@ export default function UsersPermissionsView({
       }
 
       setUsername(uniqueSlug);
-      setEmail(`${employeeSlug}${companySlug}@corevia.dz`);
+      setEmail(`${employeeSlug}+${companySlug}@corevia.local`);
     }
   }, [fullName, editingEmployee, employees, companyName]);
 
@@ -382,11 +382,6 @@ export default function UsersPermissionsView({
           onDeleteEntireWorkerProfile(linkedWorkerFound.code);
         } else {
           deleteEntireWorkerProfileSoft(linkedWorkerFound.code);
-          if (companyId) {
-            pushSingleDatasetToCloud(companyId, "workers", getWorkers()).catch(err => {
-              console.error("[AutoSync] Error syncing workers database delete:", err);
-            });
-          }
         }
         onTriggerNotification(
           isRtl
@@ -476,7 +471,9 @@ export default function UsersPermissionsView({
     if (isNew) {
       const signUpSecondary = createSecondaryClient();
       if (signUpSecondary) {
-        const userEmail = email.trim() || `${(fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}${companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}@corevia.dz`;
+        const companySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+        const employeeSlug = (fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+        const userEmail = email.trim() || `${employeeSlug}+${companySlug}@corevia.local`;
         const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
           email: userEmail,
           password: password.trim(),
@@ -512,7 +509,7 @@ export default function UsersPermissionsView({
     } else {
       // If editing employee and password changed, sync password back to Supabase Auth
       if (editingEmployee && editingEmployee.password !== password.trim()) {
-        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.dz`;
+        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.local`;
         const signUpSecondary = createSecondaryClient();
         if (signUpSecondary) {
           try {
@@ -559,45 +556,9 @@ export default function UsersPermissionsView({
           : `✅ Successfully ${isNew ? "created" : "updated"} employee account (${fullName})`
       );
 
-      // Automatically create/update Worker Profile
-      try {
-        const currentWorkers = getWorkers();
-        let workerIndex = currentWorkers.findIndex(
-          w => w.id === employeeId || 
-               (w.phone && phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(phone)) ||
-               (w.name && fullName && cleanArabicName(w.name) === cleanArabicName(fullName))
-        );
-
-        const updatedWorker = {
-          id: workerIndex !== -1 ? currentWorkers[workerIndex].id : employeeId,
-          name: fullName.trim(),
-          code: workerIndex !== -1 ? currentWorkers[workerIndex].code : `W-${Date.now().toString().slice(-4)}`,
-          phone: phone.trim(),
-          baseSalary: baseSalary,
-          monthlySalary: monthlySalary,
-          dailyHours: workingHoursPerDay,
-          workingDaysPerMonth: workingDaysPerMonth,
-          overtimeRate: overtimeHourRate,
-          absenceDeductionRate: absenceDeductionRate,
-          notes: notes.trim(),
-          role: jobTitle.trim() || "موظف",
-          payrolls: workerIndex !== -1 ? currentWorkers[workerIndex].payrolls || [] : [],
-          createdAt: workerIndex !== -1 ? currentWorkers[workerIndex].createdAt || new Date().toISOString() : new Date().toISOString()
-        };
-
-        if (workerIndex !== -1) {
-          currentWorkers[workerIndex] = updatedWorker;
-        } else {
-          currentWorkers.push(updatedWorker);
-        }
-
-        saveWorkers(currentWorkers);
-        if (companyId) {
-          await pushSingleDatasetToCloud(companyId, "workers", currentWorkers);
-        }
-      } catch (err) {
-        console.error("Worker Profile auto-sync error:", err);
-      }
+      // Workers and Login Accounts are completely separate entities.
+      // NEVER auto-create/update worker profiles when creating employee accounts.
+      // Workers are managed exclusively from the Workers page.
 
       // Log specific activities
       const actionType = isNew ? "Create User" : "Update User";
@@ -621,9 +582,11 @@ export default function UsersPermissionsView({
       });
 
       if (isNew) {
+        const credCompanySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+        const credEmployeeSlug = fullName.trim().toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
         setCreatedCredentials({
           fullName: fullName.trim(),
-          email: email.trim() || `${username.trim().toLowerCase()}@corevia.dz`,
+          email: email.trim() || `${credEmployeeSlug}+${credCompanySlug}@corevia.local`,
           username: username.trim().toLowerCase(),
           password: password.trim(),
           loginUrl: `${window.location.origin}/?invite_token=${invitationToken}`
@@ -1205,11 +1168,14 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                           setAbsenceDeductionRate(chosen.absenceDeductionRate || 1.0);
                           setNotes(chosen.notes || "");
                           
-                          const slug = chosen.name.toLowerCase().trim()
-                            .replace(/\s+/g, ".")
-                            .replace(/[^a-z0-9.]/g, "");
-                          setUsername(slug);
-                          setEmail(`${slug}@corevia.dz`);
+                          const workerSlug = chosen.name.toLowerCase().trim()
+                            .replace(/\s+/g, "")
+                            .replace(/[^a-z0-9]/g, "");
+                          const compSlug = companyName.toLowerCase().trim()
+                            .replace(/\s+/g, "")
+                            .replace(/[^a-z0-9]/g, "");
+                          setUsername(workerSlug);
+                          setEmail(`${workerSlug}+${compSlug}@corevia.local`);
                         }
                       } else {
                         setFullName("");
@@ -1307,7 +1273,8 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       const val = e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
                       setUsername(val);
                       if (!editingEmployee && val) {
-                        setEmail(`${val}@corevia.dz`);
+                        const compSlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+                        setEmail(`${val}+${compSlug}@corevia.local`);
                       }
                     }}
                     placeholder="mohamed.orders"
@@ -1322,7 +1289,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@corevia.dz"
+                    placeholder="name+company@corevia.local"
                     className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
                   />
                 </div>

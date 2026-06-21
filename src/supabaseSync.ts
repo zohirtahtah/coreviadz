@@ -756,12 +756,6 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
-    // Fetch Invited/Registered Employees for worker linking
-    const { data: dbCompanyUsers } = await supabase
-      .from("corevia_company_users")
-      .select("*")
-      .eq("company_id", companyId);
-
     let formatted: any[] = [];
     if (dbWorkers) {
       formatted = dbWorkers.map(w => ({
@@ -785,74 +779,9 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       }));
     }
 
-    if (dbCompanyUsers && dbCompanyUsers.length > 0) {
-      const extraWorkersToPersist: any[] = [];
-      dbCompanyUsers.forEach(emp => {
-        let employeeName = emp.username || emp.id || "Employee";
-        let jobTitle = "Employee";
-        let phone = emp.phone || "";
-        
-        // Parse nested fields from JSONB allowed_pages if available
-        if (emp.allowed_pages) {
-          try {
-            const parsed = typeof emp.allowed_pages === "string" ? JSON.parse(emp.allowed_pages) : emp.allowed_pages;
-            if (parsed && typeof parsed === "object") {
-              if (parsed.full_name) employeeName = parsed.full_name;
-              if (parsed.job_title) jobTitle = parsed.job_title;
-            }
-          } catch (e) {}
-        }
-
-        // Check if there is already a matching worker in formatted list
-        const exists = formatted.some(w => 
-          w.id === emp.id || 
-          (emp.phone && w.phone && emp.phone.trim() === w.phone.trim()) ||
-          (employeeName && w.name && employeeName.toLowerCase().trim() === w.name.toLowerCase().trim())
-        );
-
-        if (!exists) {
-          // Provision in corevia_workers automatically
-          const newWorkerId = emp.id || `worker_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
-          const freshWorker = {
-            id: newWorkerId,
-            name: employeeName,
-            code: "W-" + newWorkerId.substring(0, 4),
-            phone: phone,
-            baseSalary: 45000, // standard default fallback salary
-            dailyHours: 8,
-            overtimeRate: 2,
-            role: jobTitle,
-            monthlySalary: 45000,
-            payrolls: [],
-            createdAt: emp.created_at || new Date().toISOString()
-          };
-          formatted.push(freshWorker);
-          extraWorkersToPersist.push({
-            id: newWorkerId,
-            company_id: companyId,
-            name: employeeName,
-            code: "W-" + newWorkerId.substring(0, 4),
-            phone: phone,
-            base_salary: 45000,
-            daily_hours: 8,
-            overtime_rate: 2,
-            role: jobTitle,
-            monthly_salary: 45000,
-            payrolls: [],
-            created_at: emp.created_at || new Date().toISOString()
-          });
-        }
-      });
-
-      // Insert missing workers in background asynchronously to prevent any main thread blocking
-      if (extraWorkersToPersist.length > 0) {
-        supabase.from("corevia_workers").upsert(extraWorkersToPersist)
-          .then(({ error }) => {
-            if (error) console.error("Auto-provisioning workers from employees failed:", error);
-            else console.log(`Auto-provisioned ${extraWorkersToPersist.length} worker profiles dynamically.`);
-          });
-      }
-    }
+    // Workers and Employees are completely separate entities.
+    // NEVER auto-create workers from employee records or vice versa.
+    // ONLY load workers from corevia_workers, nothing else.
 
     saveWorkers(formatted);
 

@@ -589,39 +589,10 @@ export default function App() {
     }
   }, [session, activeTab]);
 
-  // 3. Periodic cloud sync to keep both Admin & Employees 100% interconnected in real-time
-  useEffect(() => {
-    if (!session?.company_id || !supabase) return;
-
-    // Run custom pull background sync every 5 seconds which handles orders, products, workers, suppliers, expenses, salary sheets.
-    const interval = setInterval(async () => {
-      try {
-        const companyId = session.company_id;
-        const success = await pullMultiTenantData(companyId);
-        if (success) {
-          // Quietly update memory states inside App.tsx so changes are instantly reflected on all pages
-          setOrders(getOrders());
-          setProducts(getProducts());
-          setBasicInventory(getBasicInventory());
-          setSubInventory(getSubInventory());
-          setReturnInventory(getReturnInventory());
-          setSuppliers(getSuppliers());
-          setInvoices(getSupplierInvoices());
-          setWorkers(getWorkers());
-          setTrashItems(getTrashItems());
-
-          const storedExp = localStorage.getItem("corevia_unified_expenses_v1");
-          let parsedExpenses = [];
-          try { if (storedExp) parsedExpenses = JSON.parse(storedExp); } catch(e){}
-          setExpenses(parsedExpenses);
-        }
-      } catch (err) {
-        console.warn("[Realtime Polling Sync] Background ERP sync failed:", err);
-      }
-    }, 5000); // 5 seconds polling matches communication chat polling speed seamlessly!
-
-    return () => clearInterval(interval);
-  }, [session]);
+  // Background synchronization must NEVER execute delete/truncate/replace/clear or orphan cleanup.
+  // Synchronization must only perform insert, update, upsert.
+  // Workers and Login Accounts are completely separate entities and must NEVER be auto-synchronized.
+  // No periodic polling is needed - all mutations push changes individually.
 
   // Sync theme to root classList representation for elegant styling overlays
   useEffect(() => {
