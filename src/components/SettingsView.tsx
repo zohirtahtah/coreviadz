@@ -35,6 +35,7 @@ interface SettingsViewProps {
   onSaveCustomColors: (arr: string[]) => void;
   onTriggerNotification: (msg: string) => void;
   onTriggerRefreshOrders?: () => void;
+  onReloadAllStates?: () => void;
   session?: any;
   seatsLimit?: number;
 }
@@ -47,6 +48,7 @@ export default function SettingsView({
   onSaveCustomColors,
   onTriggerNotification,
   onTriggerRefreshOrders,
+  onReloadAllStates,
   session,
   seatsLimit
 }: SettingsViewProps) {
@@ -65,6 +67,22 @@ export default function SettingsView({
   const [bRC2, setBRC2] = useState(profile.rc2 || "");
   const [bNIF, setBNIF] = useState(profile.nif || "");
   const [bLogoUrl, setBLogoUrl] = useState<string | undefined>(profile.logoUrl);
+
+  // Synchronize local states when parent profile changes
+  React.useEffect(() => {
+    setBName(profile.businessName || "");
+    setBEmail(profile.email || "");
+    setBPhone(profile.phone || "");
+    setBCurrency(profile.currency || "DZD");
+    setBCountry(profile.country || "Algeria");
+    setBRegistry(profile.commercialRegistry || "");
+    setBAddress(profile.address || "");
+    setBRC1(profile.rc1 || "");
+    setBRC2(profile.rc2 || "");
+    setBNIF(profile.nif || "");
+    setBLogoUrl(profile.logoUrl);
+    setPasscode(profile.passcode || "1234");
+  }, [profile]);
   
   // Security
   const [passcode, setPasscode] = useState(profile.passcode || "1234");
@@ -129,9 +147,13 @@ export default function SettingsView({
 
   // Push Local Data to Supabase
   const handlePushToSupabase = async () => {
-    if (!supabase) return;
+    if (!supabase) {
+      setDbTestResult("MISSING_KEYS");
+      return;
+    }
     setIsSyncingToSupabase(true);
     setDbTestResult(null);
+
     try {
       const companyId = session?.company_id || "cop_default";
       const email = session?.email || "unknown@corevia.com";
@@ -141,199 +163,10 @@ export default function SettingsView({
 
       onTriggerNotification(lang === "ar" ? "✅ تمت مزامنة جميع البيانات ورفعها بنجاح إلى قاعدة Supabase!" : "✅ Successfully backed up & synchronized all datasets with Supabase Cloud Postgres.");
       setDbTestResult("CONNECTED_AND_SYNCED");
-      setIsSyncingToSupabase(false);
-      return;
-
-      const orders = getOrders();
-      const products = getProducts();
-      const suppliers = getSuppliers();
-      const fixedExpenses = getFixedExpenses();
-      const variableExpenses = getVarExpenses();
-      const adExpenses = getAdExpenses();
-      const workers = getWorkers();
-      const salarySheets = getSalarySheets();
-
-      onTriggerNotification(lang === "ar" ? "جاري تجهيز وبث البيانات لسحابة Supabase..." : "Preparing and syncing data to Supabase...");
-
-      // 1. Profile Sync
-      await supabase.from("corevia_profile").upsert({
-        id: "primary-profile",
-        business_name: bName,
-        business_type: profile.businessType || "متجر",
-        currency: bCurrency,
-        country: bCountry,
-        owner_name: profile.ownerName || "Owner",
-        phone: bPhone,
-        email: bEmail,
-        address: bAddress,
-        commercial_registry: bRegistry,
-        tax_number: profile.taxNumber || ""
-      });
-
-      // 2. Products Sync
-      if (products.length > 0) {
-        const formattedProducts = products.map(p => ({
-          id: p.id,
-          name: p.name,
-          wholesale_cost_price: p.wholesaleCostPrice,
-          wholesale_percentage: p.wholesalePercentage,
-          wholesale_price: p.wholesalePrice,
-          retail_cost_price: p.retailCostPrice,
-          retail_percentage: p.retailPercentage,
-          retail_price: p.retailPrice,
-          colors: p.colors,
-          sizes: p.sizes,
-          created_at: p.createdAt
-        }));
-        const { error: pError } = await supabase.from("corevia_products").upsert(formattedProducts);
-        if (pError) throw pError;
-      }
-
-      // 3. Orders Sync
-      if (orders.length > 0) {
-        const formattedOrders = orders.map(o => {
-          const rawBackup = {
-            custom_original: true,
-            date: o.date,
-            customerName: o.customerName,
-            phone: o.phone,
-            wilaya: o.wilaya,
-            commune: o.commune,
-            deliveryLocation: o.deliveryLocation,
-            deliveryCompany: o.deliveryCompany,
-            deliveryType: o.deliveryType,
-            deliveryPrice: o.deliveryPrice,
-            items: o.items,
-            totalPrice: o.totalPrice,
-            paidAmount: o.paidAmount,
-            discount: o.discount,
-            notes: o.notes
-          };
-
-          return {
-            id: o.id,
-            company_id: companyId || "cop_default",
-            customer: o.customerName,
-            status: o.status,
-            total: o.totalPrice,
-            notes: JSON.stringify(rawBackup)
-          };
-        });
-        const { error: oError } = await supabase.from("corevia_orders").upsert(formattedOrders);
-        if (oError) throw oError;
-      }
-
-      // 4. Suppliers Sync
-      if (suppliers.length > 0) {
-        const formattedSuppliers = suppliers.map(s => ({
-          id: s.id,
-          name: s.name,
-          phone: s.phone,
-          address: s.address,
-          email: s.email,
-          created_at: s.createdAt
-        }));
-        const { error: sError } = await supabase.from("corevia_suppliers").upsert(formattedSuppliers);
-        if (sError) throw sError;
-      }
-
-      // 5. Expenses Sync (Fixed, Variable, Ad)
-      const allExpenses = [
-        ...fixedExpenses.map(e => ({ 
-          id: e.id, 
-          type: "fixed", 
-          name: e.name, 
-          amount: e.amount, 
-          date: e.date,
-          month_year: null,
-          platform: null,
-          amount_usd: null,
-          exchange_rate: null,
-          amount_currency: null,
-          start_date: null,
-          end_date: null
-        })),
-        ...variableExpenses.map(e => ({ 
-          id: e.id, 
-          type: "variable", 
-          name: e.name, 
-          amount: e.amount, 
-          date: e.date,
-          month_year: e.monthYear,
-          platform: null,
-          amount_usd: null,
-          exchange_rate: null,
-          amount_currency: null,
-          start_date: null,
-          end_date: null
-        })),
-        ...adExpenses.map(e => ({ 
-          id: e.id, 
-          type: "ads", 
-          name: null, 
-          amount: null, 
-          date: null,
-          month_year: e.monthYear,
-          platform: e.platform,
-          amount_usd: e.amountUSD,
-          exchange_rate: e.exchangeRate,
-          amount_currency: e.amountCurrency,
-          start_date: e.startDate,
-          end_date: e.endDate
-        }))
-      ];
-      if (allExpenses.length > 0) {
-        const { error: eError } = await supabase.from("corevia_expenses").upsert(allExpenses);
-        if (eError) throw eError;
-      }
-
-      // 6. Workers Sync
-      if (workers.length > 0) {
-        const formattedWorkers = workers.map(w => ({
-          id: w.id,
-          name: w.name,
-          code: w.code,
-          phone: w.phone,
-          base_salary: w.baseSalary,
-          daily_hours: w.dailyHours,
-          overtime_rate: w.overtimeRate,
-          role: w.role,
-          monthly_salary: w.monthlySalary,
-          payrolls: w.payrolls,
-          created_at: w.createdAt
-        }));
-        const { error: wError } = await supabase.from("corevia_workers").upsert(formattedWorkers);
-        if (wError) throw wError;
-      }
-
-      // 7. Work Salary Sheets Sync
-      if (salarySheets.length > 0) {
-        const formattedSheets = salarySheets.map(sh => ({
-          id: sh.id,
-          worker_id: sh.workerId,
-          worker_name: sh.workerName,
-          month_year: sh.monthYear,
-          date_from: sh.dateFrom,
-          date_to: sh.dateTo,
-          overtime_hours: sh.overtimeHours,
-          absence_days: sh.absenceDays,
-          missing_hours: sh.missingHours,
-          paid_vacation_days: sh.paidVacationDays,
-          expenses: sh.expenses,
-          pay_status: sh.payStatus,
-          calculated_salary: sh.calculatedSalary,
-          updated_at: sh.updatedAt
-        }));
-        const { error: shError } = await supabase.from("corevia_salary_sheets").upsert(formattedSheets);
-        if (shError) throw shError;
-      }
-
-      onTriggerNotification(lang === "ar" ? "✅ تمت مزامنة جميع البيانات ورفعها بنجاح إلى قاعدة Supabase!" : "✅ Successfully backed up & synchronized all datasets with Supabase Cloud Postgres.");
-      setDbTestResult("CONNECTED_AND_SYNCED");
     } catch (err: any) {
-      console.error(err);
-      setDbTestResult(`ERROR: ${err.message || "Unknown schema sync error"}`);
-      onTriggerNotification(lang === "ar" ? `❌ خطأ في الرفع: يرجى التأكد من تشغيل كود إنشاء الجداول أولاً` : `❌ Sync failed: Ensure you have executed the tables database script first.`);
+      console.error("Supabase backup error:", err);
+      setDbTestResult(`ERROR_PUSH: ${err.message || "Failed to sync tables"}`);
+      onTriggerNotification(lang === "ar" ? "❌ فشل رفع الملفات والمزامنة السحابية." : "❌ Cloud sync failed. Ensure your SQL tables are created.");
     } finally {
       setIsSyncingToSupabase(false);
     }
@@ -341,7 +174,10 @@ export default function SettingsView({
 
   // Pull Cloud Data from Supabase
   const handlePullFromSupabase = async () => {
-    if (!supabase) return;
+    if (!supabase) {
+      setDbTestResult("MISSING_KEYS");
+      return;
+    }
     const confirmAction = window.confirm(
       lang === "ar"
         ? "⚠️ تحذير: تنزيل البيانات من Supabase سيستبدل جميع البيانات المحلية المحفوظة في هذا المتصفح تماماً. هل أنت متأكد من الاستمرار؟"
@@ -360,187 +196,11 @@ export default function SettingsView({
       if (success) {
         onTriggerNotification(lang === "ar" ? "✅ تم جلب وتنزيل قاعدة بيانات السحابة بالكامل بنجاح للمتصفح!" : "✅ Data synchronized successfully. Pulled all tables clean from Supabase cloud.");
         setDbTestResult("CONNECTED_AND_PULLED");
-        if (onTriggerRefreshOrders) {
-          onTriggerRefreshOrders();
+        if (onReloadAllStates) {
+          onReloadAllStates();
         }
       } else {
         throw new Error("Failed to pull database data");
-      }
-      setIsPullingFromSupabase(false);
-      return;
-
-      // 1. Fetch Profile
-      const { data: profileData } = await supabase.from("corevia_profile").select("*").eq("id", "primary-profile").single();
-      if (profileData) {
-        saveBusinessProfile({
-          ...profile,
-          businessName: profileData.business_name || profile.businessName,
-          currency: (profileData.currency === "DZD" || profileData.currency === "USD" || profileData.currency === "EUR") ? profileData.currency : profile.currency,
-          country: profileData.country || profile.country,
-          phone: profileData.phone || profile.phone,
-          email: profileData.email || profile.email,
-          address: profileData.address || profile.address,
-          commercialRegistry: profileData.commercial_registry || profile.commercialRegistry,
-          taxNumber: profileData.tax_number || profile.taxNumber
-        });
-      }
-
-      // 2. Fetch Products
-      const { data: dbProducts } = await supabase.from("corevia_products").select("*");
-      if (dbProducts) {
-        const formattedProducts = dbProducts.map(p => ({
-          id: p.id,
-          name: p.name,
-          wholesaleCostPrice: Number(p.wholesale_cost_price),
-          wholesalePercentage: Number(p.wholesale_percentage),
-          wholesalePrice: Number(p.wholesale_price),
-          retailCostPrice: Number(p.retail_cost_price),
-          retailPercentage: Number(p.retail_percentage),
-          retailPrice: Number(p.retail_price),
-          colors: p.colors || [],
-          sizes: p.sizes || [],
-          createdAt: p.created_at || new Date().toISOString()
-        }));
-        saveProducts(formattedProducts);
-      }
-
-      // 3. Fetch Orders
-      const { data: dbOrders } = await supabase.from("corevia_orders").select("*");
-      if (dbOrders) {
-        const formattedOrders = dbOrders.map(o => ({
-          id: o.id,
-          date: o.date,
-          customerName: o.customer_name,
-          phone: o.phone,
-          wilaya: o.wilaya,
-          commune: o.commune,
-          deliveryLocation: o.delivery_location || "Home",
-          deliveryCompany: o.delivery_company || "Yalidine Express",
-          deliveryType: o.delivery_type || "Home",
-          deliveryPrice: Number(o.delivery_price),
-          items: o.items || [],
-          totalPrice: Number(o.total_price),
-          paidAmount: Number(o.paid_amount),
-          discount: Number(o.discount),
-          customerPaysDelivery: Boolean(o.customer_pays_delivery),
-          isExchange: Boolean(o.is_exchange),
-          exchangeOrderRef: o.exchange_order_ref || undefined,
-          agentName: o.agent_name || "Owner",
-          source: (o.source === "1" || o.source === "2" || o.source === "3") ? o.source : "1",
-          status: (o.status === "pending" || o.status === "shipping" || o.status === "delivered" || o.status === "returned") ? o.status : "pending",
-          returnCost: o.return_cost ? Number(o.return_cost) : undefined,
-          returnDate: o.return_date || undefined,
-          notes: o.notes || undefined,
-          deletedAt: o.deleted_at || undefined
-        }));
-        saveOrders(formattedOrders);
-      }
-
-      // 4. Fetch Suppliers
-      const { data: dbSuppliers } = await supabase.from("corevia_suppliers").select("*");
-      if (dbSuppliers) {
-        const formattedSuppliers = dbSuppliers.map(s => ({
-          id: s.id,
-          name: s.name,
-          phone: s.phone || "",
-          address: s.address || "",
-          email: s.email || "",
-          createdAt: s.created_at || new Date().toISOString()
-        }));
-        saveSuppliers(formattedSuppliers);
-      }
-
-      // 5. Fetch Expenses
-      const { data: dbExpenses } = await supabase.from("corevia_expenses").select("*");
-      if (dbExpenses) {
-        const fixed = dbExpenses
-          .filter(e => e.type === "fixed")
-          .map(e => ({ 
-            id: e.id, 
-            name: e.name || "Expense", 
-            amount: Number(e.amount || 0), 
-            date: e.date || new Date().toISOString().split("T")[0] 
-          }));
-        const variable = dbExpenses
-          .filter(e => e.type === "variable")
-          .map(e => ({ 
-            id: e.id, 
-            name: e.name || "Expense", 
-            amount: Number(e.amount || 0), 
-            date: e.date || new Date().toISOString().split("T")[0], 
-            monthYear: e.month_year || new Date().toISOString().substring(0, 7) 
-          }));
-        const ad = dbExpenses
-          .filter(e => e.type === "ads")
-          .map(e => ({ 
-            id: e.id, 
-            platform: (e.platform === "Facebook" || e.platform === "Google" || e.platform === "TikTok" || e.platform === "Snapchat" || e.platform === "Other") ? e.platform : "Facebook", 
-            amountUSD: Number(e.amount_usd || 0),
-            exchangeRate: Number(e.exchange_rate || 200),
-            amountCurrency: Number(e.amount_currency || 0),
-            startDate: e.start_date || new Date().toISOString().split("T")[0],
-            endDate: e.end_date || new Date().toISOString().split("T")[0],
-            monthYear: e.month_year || new Date().toISOString().substring(0, 7) 
-          }));
-        
-        saveFixedExpenses(fixed);
-        saveVarExpenses(variable);
-        saveAdExpenses(ad);
-      }
-
-      // 6. Fetch Workers
-      const { data: dbWorkers } = await supabase.from("corevia_workers").select("*");
-      if (dbWorkers) {
-        const formattedWorkers = dbWorkers.map(w => ({
-          id: w.id,
-          name: w.name,
-          code: w.code || "W-" + w.id.substring(0, 4),
-          phone: w.phone || "",
-          baseSalary: Number(w.base_salary || 0),
-          dailyHours: Number(w.daily_hours || 8),
-          overtimeRate: Number(w.overtime_rate || 2),
-          role: w.role || "Employee",
-          monthlySalary: Number(w.monthly_salary || 0),
-          payrolls: w.payrolls || [],
-          createdAt: w.created_at || new Date().toISOString()
-        }));
-        saveWorkers(formattedWorkers);
-      }
-
-      // 7. Fetch Salary Sheets
-      const { data: dbSheets } = await supabase.from("corevia_salary_sheets").select("*");
-      if (dbSheets) {
-        const formattedSheets = dbSheets.map(sh => ({
-          id: sh.id,
-          workerId: sh.worker_id,
-          workerName: sh.worker_name || "",
-          monthYear: sh.month_year,
-          dateFrom: sh.date_from || "",
-          dateTo: sh.date_to || "",
-          overtimeHours: Number(sh.overtime_hours || 0),
-          absenceDays: Number(sh.absence_days || 0),
-          missingHours: Number(sh.missing_hours || 0),
-          paidVacationDays: Number(sh.paid_vacation_days || 0),
-          expenses: sh.expenses || [],
-          payStatus: (sh.pay_status === "paid" || sh.pay_status === "unpaid") ? sh.pay_status : "unpaid",
-          calculatedSalary: sh.calculated_salary || {
-            baseSalary: 0,
-            dailyRate: 0,
-            hourlyRate: 0,
-            overtimePay: 0,
-            absenceDeduction: 0,
-            expensesDeduction: 0,
-            netSalary: 0
-          },
-          updatedAt: sh.updated_at || new Date().toISOString()
-        }));
-        saveSalarySheets(formattedSheets);
-      }
-
-      onTriggerNotification(lang === "ar" ? "✅ تم جلب وتنزيل قاعدة بيانات السحابة بالكامل بنجاح للمتصفح!" : "✅ Data synchronized successfully. Pulled all tables clean from Supabase cloud.");
-      setDbTestResult("CONNECTED_AND_PULLED");
-      if (onTriggerRefreshOrders) {
-        onTriggerRefreshOrders();
       }
     } catch (err: any) {
       console.error(err);

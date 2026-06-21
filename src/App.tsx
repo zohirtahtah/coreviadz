@@ -139,6 +139,7 @@ export default function App() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
   const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
   // Double-verify Super Admin privileges server-side to secure the admin layout
   useEffect(() => {
@@ -378,6 +379,7 @@ export default function App() {
       // Save user session locally which patches the activeLocalStorage Multi-Tenant key immediately
       saveUserSession(activeSession);
       setSession(activeSession);
+      setHasCompletedOnboarding(userMeta.hasCompletedOnboarding);
 
       if (userMeta.hasCompletedOnboarding) {
         // Download all cloud records instantly
@@ -424,20 +426,44 @@ export default function App() {
         }
         throw new Error("No server session available");
       })
-      .then(data => {
+      .then(async (data) => {
         if (data.authenticated && data.session) {
           console.log("🟩 Server session validated and restored successfully:", data.session);
           setSession(data.session);
           saveUserSession(data.session);
+          try {
+            const meta = await fetchUserSaaSMeta(
+              data.session.user_id || data.session.userId || "",
+              data.session.email,
+              data.session.username
+            );
+            setHasCompletedOnboarding(meta.hasCompletedOnboarding);
+          } catch (mErr) {
+            console.error("Could not fetch user meta on restore:", mErr);
+            setHasCompletedOnboarding(false);
+          }
         } else {
           throw new Error("Unauthenticated server session");
         }
       })
-      .catch(err => {
+      .catch(async (err) => {
         console.warn("Server session validation offline - restoring from cache:", err);
         const cachedSess = getUserSession();
         if (cachedSess && cachedSess.isRegistered) {
           setSession(cachedSess);
+          try {
+            const meta = await fetchUserSaaSMeta(
+              cachedSess.user_id || cachedSess.userId || "",
+              cachedSess.email,
+              cachedSess.username
+            );
+            setHasCompletedOnboarding(meta.hasCompletedOnboarding);
+          } catch (mErr) {
+            console.error("Could not fetch user meta on cache restore:", mErr);
+            setHasCompletedOnboarding(false);
+          }
+        } else {
+          setHasCompletedOnboarding(false);
         }
       });
   }, []);
@@ -775,6 +801,7 @@ export default function App() {
     
     // Sync states
     setProfile(newProfile);
+    setHasCompletedOnboarding(true);
     setLang(newProfile.defaultLanguage);
     setTheme(newProfile.preferredTheme);
     setOrders(getOrders());
@@ -845,6 +872,7 @@ export default function App() {
     localStorage.removeItem("corevia_user_session_v1"); // KEYS.SESSION
     setSession(null);
     setProfile(null);
+    setHasCompletedOnboarding(null);
     setActiveTab("dashboard");
     triggerToast(lang === "ar" ? "تم تسجيل الخروج بنجاح." : "Logged out successfully.", "success");
   };
@@ -1669,8 +1697,18 @@ export default function App() {
     );
   }
 
+  // While determining the onboarding status from the database, show a clean loading stage
+  if (session && hasCompletedOnboarding === null && session.role !== "employee" && session.role !== "super_admin") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4" id="session-loader">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 text-slate-400 text-sm font-medium">جاري تحميل مساحة العمل...</p>
+      </div>
+    );
+  }
+
   // If onboarding is not completed, we display Onboarding screen with the global topbar controls (employees & super admin bypass this setup completely)
-  if ((!profile || !profile.businessName) && session?.role !== "employee" && session?.role !== "super_admin") {
+  if (hasCompletedOnboarding === false && session?.role !== "employee" && session?.role !== "super_admin") {
     const isRtl = lang === "ar";
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center p-4 bg-slate-950 dark:bg-slate-950 font-sans leading-relaxed text-right transition-colors" id="onboarding_wrapper_layout">
@@ -2209,6 +2247,7 @@ export default function App() {
             onSaveCustomColors={saveCustomColorsAndPersist}
             onTriggerNotification={triggerToast}
             onTriggerRefreshOrders={() => setOrders(getOrders())}
+            onReloadAllStates={loadStateFromLocal}
             session={session}
             seatsLimit={seatsLimit}
           />

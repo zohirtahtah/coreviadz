@@ -179,15 +179,7 @@ export default function SuperAdminView({
   const [newPlan, setNewPlan] = useState<"Free" | "Basic" | "Pro" | "Enterprise">("Basic");
 
   const loadSaaSRealData = async () => {
-    if (!supabase) {
-      const saved = localStorage.getItem("corevia_saas_companies_v1");
-      if (saved) {
-        try {
-          setCompanies(JSON.parse(saved));
-        } catch (e) {}
-      }
-      return;
-    }
+    if (!supabase) return;
 
     setIsLoadingSaaS(true);
     try {
@@ -212,51 +204,47 @@ export default function SuperAdminView({
         .from("corevia_profile")
         .select("*");
 
-      const saasCompanies: SaaSCompany[] = (users || []).map(u => {
-        const comp = (regularCompanies || []).find(c => c.id === u.company_id);
-        const prof = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id);
-        const realC = (realCompanies || []).find(rc => rc.id === u.company_id);
+      const saasCompanies: SaaSCompany[] = (realCompanies || []).map(rc => {
+        // Find users belonging to this company
+        const companyUsers = (users || []).filter(u => u.company_id === rc.id);
+        const u = companyUsers[0]; // primary owner/representative user, if any
+        
+        const comp = (regularCompanies || []).find(c => c.id === rc.id);
+        const prof = (profiles || []).find(p => p.id === rc.id || p.company_id === rc.id);
 
-        const companyName = prof?.business_name || comp?.company_name || realC?.name || comp?.name || `${u.username || u.email.split("@")[0]} Trading`;
-        const ownerName = u.username || prof?.owner_name || realC?.owner_name || comp?.owner_name || u.email.split("@")[0];
-        const email = u.email;
-        const phone = prof?.phone || realC?.phone || comp?.phone || "";
-        const address = prof?.address || comp?.address || "";
-        const registrationDate = u.created_at ? u.created_at.split("T")[0] : (comp?.created_at ? comp.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+        const companyName = rc.name || prof?.business_name || comp?.company_name || comp?.name || `Enterprise Workspace`;
+        const ownerName = rc.owner_name || u?.username || prof?.owner_name || comp?.owner_name || u?.email?.split("@")[0] || "System Owner";
+        const email = rc.owner_email || rc.email || u?.email || "no-owner@corevia.com";
+        const phone = rc.phone || prof?.phone || comp?.phone || "";
+        const registrationDate = rc.created_at ? rc.created_at.split("T")[0] : (comp?.created_at ? comp.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
 
-        const seatsLimitVal = realC?.seatsLimit !== undefined ? realC.seatsLimit : (realC?.seatslimit !== undefined ? realC.seatslimit : 5);
-        const accountStatusVal = realC?.accountStatus !== undefined ? realC.accountStatus : (realC?.accountstatus !== undefined ? realC.accountstatus : (u.has_completed_onboarding ? "Active" : "Pending Verification"));
-        const subscriptionPlanVal = realC?.subscriptionPlan !== undefined ? realC.subscriptionPlan : (realC?.subscriptionplan !== undefined ? realC.subscriptionplan : "Basic");
+        const seatsLimitVal = rc.seatsLimit !== undefined ? rc.seatsLimit : (rc.seatslimit !== undefined ? rc.seatslimit : (rc.seats_limit !== undefined ? rc.seats_limit : 5));
+        const accountStatusVal = rc.accountStatus !== undefined ? rc.accountStatus : (rc.accountstatus !== undefined ? rc.accountstatus : (rc.account_status !== undefined ? rc.account_status : "Active"));
+        const subscriptionPlanVal = rc.subscriptionPlan !== undefined ? rc.subscriptionPlan : (rc.subscriptionplan !== undefined ? rc.subscriptionplan : (rc.subscription_plan !== undefined ? rc.subscription_plan : "Basic"));
 
-        // Dynamically parse or fallback expirationDate
-        let expirationDateVal = realC?.expirationDate || realC?.expiration_date || "";
+        let expirationDateVal = rc.expirationDate || rc.expiration_date || rc.expirationdate || "";
         if (!expirationDateVal) {
-          if (subscriptionPlanVal === "Trial") {
-            const regTime = new Date(registrationDate).getTime();
-            expirationDateVal = new Date(regTime + 7 * 24 * 60 * 60 * 1050).toISOString().split("T")[0];
-          } else {
-            const regTime = new Date(registrationDate).getTime();
-            expirationDateVal = new Date(regTime + 30 * 24 * 60 * 60 * 1050).toISOString().split("T")[0];
-          }
+          const regTime = new Date(registrationDate).getTime();
+          expirationDateVal = new Date(regTime + 30 * 24 * 60 * 60 * 1050).toISOString().split("T")[0];
         }
 
         return {
-          id: u.company_id || `cop_${u.user_id.substring(0, 15)}`,
+          id: rc.id,
           companyName,
           ownerName,
           email,
           phone,
-          country: realC?.country || prof?.country || "Algeria",
+          country: rc.country || prof?.country || "Algeria",
           registrationDate,
-          lastLogin: comp?.updated_at ? comp.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
+          lastLogin: comp?.updated_at ? comp.updated_at.replace("T", " ").substring(0, 16) : (rc.updated_at ? rc.updated_at.replace("T", " ").substring(0, 16) : "Never Logged"),
           emailVerified: accountStatusVal !== "Pending Verification",
           subscriptionPlan: subscriptionPlanVal,
           seatsLimit: seatsLimitVal,
-          seatsUsed: 1,
+          seatsUsed: companyUsers.length > 0 ? companyUsers.length : 1, // accurate counts of active users
           accountStatus: accountStatusVal,
           expirationDate: expirationDateVal,
           activeDevices: [],
-          otpCode: realC?.otpCode || realC?.otp_code || "123456"
+          otpCode: rc.otpCode || rc.otp_code || "123456"
         };
       });
 

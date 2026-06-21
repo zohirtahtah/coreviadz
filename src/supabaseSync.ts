@@ -181,7 +181,7 @@ export async function fetchUserSaaSMeta(
   } catch (err) {
     console.warn("SaaS multi-tenant metadata query skipped or table-not-found, using graceful fallback:", err);
     // Graceful fallback when tables are not yet setup
-    const isCompletedLocal = localStorage.getItem(`onboarding_complete_${cleanEmail}`) === "true";
+    const isCompletedLocal = false; // Issue 1: Force database check or onboarding setup for security
     return {
       userId,
       companyId: defaultCompanyId,
@@ -203,8 +203,6 @@ export async function saveOnboardingCompletionInCloud(
   profile: BusinessProfile
 ): Promise<void> {
   const cleanEmail = email.toLowerCase().trim();
-  localStorage.setItem(`onboarding_complete_${cleanEmail}`, "true");
-  localStorage.setItem("corevia_completed_onboarding", "true");
 
   if (!supabase) return;
 
@@ -488,7 +486,8 @@ export async function pushSingleDatasetToCloud(
       console.log(`Automatic background cloud sync success for table "${tableName}" (purged, 0 items left).`);
     }
   } catch (err) {
-    console.warn(`[AutoSync] Background cloud sync for "${type}" was skipped or failed:`, err);
+    console.error(`[AutoSync] Background cloud sync for "${type}" was skipped or failed:`, err);
+    throw err;
   }
 }
 
@@ -736,8 +735,15 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
+    // Fetch Invited/Registered Employees for worker linking
+    const { data: dbCompanyUsers } = await supabase
+      .from("corevia_company_users")
+      .select("*")
+      .eq("company_id", companyId);
+
+    let formatted: any[] = [];
     if (dbWorkers) {
-      const formatted = dbWorkers.map(w => ({
+      formatted = dbWorkers.map(w => ({
         id: w.id,
         name: w.name,
         code: w.code || "W-" + w.id.substring(0, 4),
@@ -756,8 +762,78 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: w.updated_date || undefined,
         updatedTime: w.updated_time || undefined
       }));
-      saveWorkers(formatted);
     }
+
+    if (dbCompanyUsers && dbCompanyUsers.length > 0) {
+      const extraWorkersToPersist: any[] = [];
+      dbCompanyUsers.forEach(emp => {
+        let employeeName = emp.username || emp.id || "Employee";
+        let jobTitle = "Employee";
+        let phone = emp.phone || "";
+        
+        // Parse nested fields from JSONB allowed_pages if available
+        if (emp.allowed_pages) {
+          try {
+            const parsed = typeof emp.allowed_pages === "string" ? JSON.parse(emp.allowed_pages) : emp.allowed_pages;
+            if (parsed && typeof parsed === "object") {
+              if (parsed.full_name) employeeName = parsed.full_name;
+              if (parsed.job_title) jobTitle = parsed.job_title;
+            }
+          } catch (e) {}
+        }
+
+        // Check if there is already a matching worker in formatted list
+        const exists = formatted.some(w => 
+          w.id === emp.id || 
+          (emp.phone && w.phone && emp.phone.trim() === w.phone.trim()) ||
+          (employeeName && w.name && employeeName.toLowerCase().trim() === w.name.toLowerCase().trim())
+        );
+
+        if (!exists) {
+          // Provision in corevia_workers automatically
+          const newWorkerId = emp.id || `worker_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
+          const freshWorker = {
+            id: newWorkerId,
+            name: employeeName,
+            code: "W-" + newWorkerId.substring(0, 4),
+            phone: phone,
+            baseSalary: 45000, // standard default fallback salary
+            dailyHours: 8,
+            overtimeRate: 2,
+            role: jobTitle,
+            monthlySalary: 45000,
+            payrolls: [],
+            createdAt: emp.created_at || new Date().toISOString()
+          };
+          formatted.push(freshWorker);
+          extraWorkersToPersist.push({
+            id: newWorkerId,
+            company_id: companyId,
+            name: employeeName,
+            code: "W-" + newWorkerId.substring(0, 4),
+            phone: phone,
+            base_salary: 45000,
+            daily_hours: 8,
+            overtime_rate: 2,
+            role: jobTitle,
+            monthly_salary: 45000,
+            payrolls: [],
+            created_at: emp.created_at || new Date().toISOString()
+          });
+        }
+      });
+
+      // Insert missing workers in background asynchronously to prevent any main thread blocking
+      if (extraWorkersToPersist.length > 0) {
+        supabase.from("corevia_workers").upsert(extraWorkersToPersist)
+          .then(({ error }) => {
+            if (error) console.error("Auto-provisioning workers from employees failed:", error);
+            else console.log(`Auto-provisioned ${extraWorkersToPersist.length} worker profiles dynamically.`);
+          });
+      }
+    }
+
+    saveWorkers(formatted);
 
     // 7. Fetch Salary Sheets
     const { data: dbSheets } = await supabase
@@ -919,12 +995,9 @@ export async function cleanSlateResetSandbox(
   const cleanEmail = email.toLowerCase().trim();
   
   // 1. Wipe local cache markers
-  localStorage.removeItem(`onboarding_complete_${cleanEmail}`);
-  localStorage.removeItem("corevia_completed_onboarding");
   localStorage.removeItem("corevia_profile_v1");
   localStorage.removeItem("corevia_session_v1");
   localStorage.removeItem("corevia_user_session_v1");
-  localStorage.setItem("corevia_completed_onboarding", "false");
   
   // Clear other active storage collections
   const suffix = "_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
