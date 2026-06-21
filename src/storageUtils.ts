@@ -126,9 +126,9 @@ const demoOwnerProfile: BusinessProfile = {
   country: "Algeria",
   ownerName: "Abderrahmane Benali",
   phone: "0770 12 34 56",
-  email: "contact@corevia.dz",
+  email: "contact@corevia.local",
   address: "Didouche Mourad, Alger",
-  website: "www.corevia.dz",
+  website: "www.corevia.local",
   commercialRegistry: "16/00-0982736B20",
   taxNumber: "192837465009121"
 };

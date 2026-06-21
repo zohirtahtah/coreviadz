@@ -755,13 +755,18 @@ app.get("/api/auth/session", async (req, res) => {
       .or(`auth_user_id.eq.${decoded.user_id},id.eq.${decoded.user_id}`)
       .maybeSingle();
 
+    if (!saasUsers && !employees) {
+      return res.status(400).json({ error: "Unable to generate employee login email." });
+    }
+
     const resolvedUsername = employees ? employees.username : (saasUsers ? saasUsers.username : "User");
+    const resolvedEmail = saasUsers ? saasUsers.email : (employees ? (employees.email || generateEmployeeLoginEmail(employees.username || "employee", employees.company_id || "company")) : "");
 
     return res.status(200).json({
       authenticated: true,
       session: {
         username: resolvedUsername,
-        email: saasUsers ? saasUsers.email : (employees ? employees.email || generateEmployeeLoginEmail(employees.username || "employee", employees.company_id || "company") : "resolved@corevia.dz"),
+        email: resolvedEmail,
         isRegistered: true,
         isApproved: true,
         isSuspended: employees ? employees.status === "Suspended" : false,

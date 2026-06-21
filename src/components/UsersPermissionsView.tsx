@@ -529,6 +529,13 @@ export default function UsersPermissionsView({
     }
 
     const finalEmail = email.trim() || generateEmployeeLoginEmail(fullName.trim(), companyName);
+    if (!finalEmail || !finalEmail.includes("@")) {
+      onTriggerNotification(
+        isRtl ? "❌ تعذر إنشاء البريد الإلكتروني للموظف. يرجى التحقق من البيانات." : "❌ Unable to generate employee login email."
+      );
+      setIsLoading(false);
+      return;
+    }
 
     const payload: Employee = {
       id: employeeId,

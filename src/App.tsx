@@ -1833,7 +1833,7 @@ export default function App() {
               {isRtl ? "خروج وحساب آخر" : "Switch Account"}
             </button>
             <a
-              href="mailto:support@corevia.dz"
+              href="mailto:support@corevia.local"
               className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
             >
               {isRtl ? "مراسلة الدعم" : "Contact Support"}
@@ -1868,7 +1868,7 @@ export default function App() {
               {isRtl ? "تسجيل الخروج" : "Switch Account"}
             </button>
             <a
-              href="mailto:billing@corevia.dz"
+              href="mailto:billing@corevia.local"
               className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
             >
               {isRtl ? "تفاصيل الفوترة" : "Billing Details"}
