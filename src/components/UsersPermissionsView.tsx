@@ -37,6 +37,7 @@ interface UsersPermissionsViewProps {
   seatsLimit?: number;
   onDeleteEntireWorkerProfile?: (code: string) => void;
   workers?: any[];
+  companyName?: string;
 }
 
 export default function UsersPermissionsView({
@@ -45,7 +46,8 @@ export default function UsersPermissionsView({
   onTriggerNotification,
   seatsLimit = 5,
   onDeleteEntireWorkerProfile,
-  workers = []
+  workers = [],
+  companyName = ""
 }: UsersPermissionsViewProps) {
   const isRtl = lang === "ar";
   const companyId = session?.company_id || "cop_default";
@@ -90,9 +92,9 @@ export default function UsersPermissionsView({
 
   useEffect(() => {
     if (!editingEmployee && fullName) {
-      const cleanArabicName = (name: string) => {
+      const toSlug = (name: string) => {
         return name.toLowerCase().trim()
-          .replace(/\s+/g, ".")
+          .replace(/\s+/g, "")
           .replace(/[أإآا]/g, "a")
           .replace(/[ب]/g, "b")
           .replace(/[ت]/g, "t")
@@ -112,13 +114,17 @@ export default function UsersPermissionsView({
           .replace(/[من]/g, "n")
           .replace(/[ه]/g, "h")
           .replace(/[وي]/g, "y")
-          .replace(/[^a-z0-9.]/g, "");
+          .replace(/[^a-z0-9]/g, "");
       };
 
-      let baseSlug = cleanArabicName(fullName);
-      if (!baseSlug || baseSlug === ".") {
-        baseSlug = "user";
-      }
+      let employeeSlug = toSlug(fullName);
+      if (!employeeSlug) employeeSlug = "user";
+
+      let companySlug = toSlug(companyName);
+      if (!companySlug) companySlug = "";
+
+      let baseSlug = employeeSlug + companySlug;
+      if (!baseSlug) baseSlug = "user";
 
       let counter = 1;
       let uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
@@ -128,9 +134,9 @@ export default function UsersPermissionsView({
       }
 
       setUsername(uniqueSlug);
-      setEmail(`${uniqueSlug}@corevia.dz`);
+      setEmail(`${employeeSlug}${companySlug}@corevia.dz`);
     }
-  }, [fullName, editingEmployee, employees]);
+  }, [fullName, editingEmployee, employees, companyName]);
 
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -470,7 +476,7 @@ export default function UsersPermissionsView({
     if (isNew) {
       const signUpSecondary = createSecondaryClient();
       if (signUpSecondary) {
-        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
+        const userEmail = email.trim() || `${(fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}${companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}@corevia.dz`;
         const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
           email: userEmail,
           password: password.trim(),

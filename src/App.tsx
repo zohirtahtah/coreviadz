@@ -2278,6 +2278,7 @@ export default function App() {
             seatsLimit={seatsLimit}
             onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
             workers={workers}
+            companyName={saasAccount?.companyName || ""}
           />
         )}
 

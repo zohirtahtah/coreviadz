@@ -1949,6 +1949,7 @@ $$;`}
             session={session}
             onTriggerNotification={onTriggerNotification}
             seatsLimit={seatsLimit}
+            companyName={bName || ""}
           />
         </div>
       )}
