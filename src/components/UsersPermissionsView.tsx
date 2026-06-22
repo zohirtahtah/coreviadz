@@ -332,6 +332,51 @@ export default function UsersPermissionsView({
     }
   };
 
+  const handleResendInvite = async (emp: Employee) => {
+    if (!emp.email) {
+      onTriggerNotification(isRtl ? "⚠️ لا يوجد بريد إلكتروني لإرسال الدعوة إليه." : "⚠️ No email address to send invitation to.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/auth/resend-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: emp.email, employeeId: emp.id })
+      });
+      const data = await res.json();
+      if (res.ok && data.success !== false) {
+        if (data.inviteQueued) {
+          onTriggerNotification(
+            isRtl
+              ? `⏳ لا يزال نظام البريد محدود الإرسال. سيتم إرسال دعوة (${emp.fullName}) لاحقاً.`
+              : `⏳ Email system still rate limited. Invitation for (${emp.fullName}) will be sent later.`
+          );
+        } else {
+          await saveEmployee({ ...emp, invitation_status: "sent", invitation_sent: true, last_invite_error: undefined, auth_user_id: data.auth_user_id || emp.auth_user_id });
+          loadEmployeesData();
+          onTriggerNotification(
+            isRtl
+              ? `✅ تم إرسال دعوة البريد الإلكتروني لـ (${emp.fullName}) بنجاح.`
+              : `✅ Invitation email re-sent to (${emp.fullName}) successfully.`
+          );
+        }
+      } else {
+        onTriggerNotification(
+          isRtl
+            ? `❌ فشل إرسال الدعوة: ${data.error || "خطأ غير معروف"}`
+            : `❌ Failed to resend invitation: ${data.error || "Unknown error"}`
+        );
+      }
+    } catch (err: any) {
+      onTriggerNotification(
+        isRtl
+          ? `❌ خطأ في الشبكة: ${err.message}`
+          : `❌ Network error: ${err.message}`
+      );
+    }
+  };
+
   const handleDeleteEmployeeItem = (emp: Employee) => {
     const match = allWorkers.find(
       w => w.id === emp.id || 
@@ -466,47 +511,73 @@ export default function UsersPermissionsView({
     let invitationToken = editingEmployee?.invitation_token;
     let invitationExpires = editingEmployee?.invitation_expires;
     let invitationUsed = editingEmployee?.invitation_used ?? false;
+    let invitationStatus: "sent" | "pending" | undefined;
+    let invitationSent: boolean | undefined;
+    let inviteError: string | undefined;
+    let inviteQueued = false;
 
-    // Create a real Supabase Auth account for the new employee
+    // Create a real Supabase Auth account for the new employee via server-side invite endpoint
     if (isNew) {
-      const signUpSecondary = createSecondaryClient();
-      if (signUpSecondary) {
-        const companySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-        const employeeSlug = (fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-        const userEmail = email.trim() || `${employeeSlug}+${companySlug}@corevia.local`;
-        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
-          email: userEmail,
-          password: password.trim(),
-          options: {
-            data: {
-              company_id: companyId,
-              employee_id: employeeId,
-              role: "employee",
-              username: username.trim().toLowerCase(),
-              full_name: fullName.trim()
-            }
-          }
+      const companySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+      const employeeSlug = (fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
+      const userEmail = email.trim() || `${employeeSlug}+${companySlug}@corevia.local`;
+
+      try {
+        const inviteRes = await fetch("/api/auth/invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            email: userEmail,
+            fullName: fullName.trim(),
+            username: username.trim().toLowerCase(),
+            employeeId: employeeId,
+            allowedPages: selectedPages
+          })
         });
 
-        if (authError) {
-          console.error("Supabase Auth SignUp error:", authError);
+        const inviteData = await inviteRes.json();
+
+        if (inviteRes.ok && inviteData.success !== false) {
+          authUserId = inviteData.auth_user_id || undefined;
+          inviteQueued = inviteData.inviteQueued || false;
+          inviteError = inviteData.last_invite_error;
+
+          if (inviteQueued) {
+            onTriggerNotification(
+              isRtl
+                ? `⏳ تم حفظ حساب الموظف (${fullName}) بنجاح. سيتم إرسال دعوة البريد الإلكتروني لاحقاً بسبب قيود الإرسال.`
+                : `⏳ Employee (${fullName}) saved. Email invitation queued due to rate limits — will be sent later.`
+            );
+          }
+          invitationStatus = inviteQueued ? "pending" : "sent";
+          invitationSent = !inviteQueued;
+        } else {
+          console.error("Invite API error:", inviteData);
           onTriggerNotification(
-            isRtl 
-              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
-              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
+            isRtl
+              ? `❌ فشل إنشاء حساب الموظف: ${inviteData.error || "خطأ غير معروف"}`
+              : `❌ Failed to create employee account: ${inviteData.error || "Unknown error"}`
           );
           setIsLoading(false);
           return;
         }
-
-        authUserId = authData.user?.id;
+      } catch (fetchErr: any) {
+        console.error("Invite API fetch error:", fetchErr);
+        onTriggerNotification(
+          isRtl
+            ? `❌ فشل الاتصال بالخادم لإنشاء حساب الموظف: ${fetchErr.message}`
+            : `❌ Network error contacting server for employee account: ${fetchErr.message}`
+        );
+        setIsLoading(false);
+        return;
       }
 
       // Generate expiring (7 days) secure invitation link
       invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
       invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       invitationUsed = false;
-    } else {
+
       // If editing employee and password changed, sync password back to Supabase Auth
       if (editingEmployee && editingEmployee.password !== password.trim()) {
         const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.local`;
@@ -554,7 +625,10 @@ export default function UsersPermissionsView({
       auth_user_id: authUserId,
       invitation_token: invitationToken,
       invitation_expires: invitationExpires,
-      invitation_used: invitationUsed
+      invitation_used: invitationUsed,
+      invitation_status: isNew ? invitationStatus : editingEmployee?.invitation_status,
+      invitation_sent: isNew ? invitationSent : editingEmployee?.invitation_sent,
+      last_invite_error: isNew ? inviteError : editingEmployee?.last_invite_error
     };
 
     const success = await saveEmployee(payload);
@@ -796,6 +870,32 @@ export default function UsersPermissionsView({
                               {passRevealId === emp.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                             </button>
                           </div>
+
+                          {/* Invitation Status Badge */}
+                          {emp.invitation_status === "pending" && (
+                            <div className="pt-1 flex items-center justify-center gap-1.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-950/60 border border-amber-500/30 text-amber-400 rounded-full text-[9px] font-bold">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                                <span>{isRtl ? "دعوة معلقة" : "Pending Invitation"}</span>
+                              </span>
+                              <button
+                                onClick={() => handleResendInvite(emp)}
+                                className="px-1.5 py-0.5 bg-[#1c1c1e] hover:bg-amber-950/40 border border-[#27272a] hover:border-amber-500/40 text-amber-400 hover:text-amber-300 rounded text-[9px] font-bold transition-all cursor-pointer"
+                                title={isRtl ? "إعادة إرسال الدعوة" : "Resend invitation email"}
+                              >
+                                <RefreshCw className="w-2.5 h-2.5 inline-block" />
+                                <span className="mr-0.5">{isRtl ? "إعادة إرسال" : "Resend"}</span>
+                              </button>
+                            </div>
+                          )}
+                          {emp.invitation_status === "sent" && (
+                            <div className="pt-1 flex items-center justify-center gap-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-950/40 border border-emerald-500/20 text-emerald-400/70 rounded-full text-[9px] font-bold">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                <span>{isRtl ? "تم إرسال الدعوة" : "Invitation Sent"}</span>
+                              </span>
+                            </div>
+                          )}
 
                           {/* Direct shareable login link button */}
                           <div className="pt-1 select-none">

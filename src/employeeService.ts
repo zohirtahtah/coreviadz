@@ -66,6 +66,9 @@ export interface Employee {
   invitation_token?: string;
   invitation_expires?: string;
   invitation_used?: boolean;
+  invitation_status?: "sent" | "pending" | "failed";
+  invitation_sent?: boolean;
+  last_invite_error?: string;
 }
 
 // Local Storage helper for holding offline/cached copies
@@ -121,6 +124,9 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         let expires: string | undefined = undefined;
         let used: boolean | undefined = undefined;
         let authId: string | undefined = undefined;
+        let invStatus: string | undefined = undefined;
+        let invSent: boolean | undefined = undefined;
+        let invError: string | undefined = undefined;
 
         let extraFullName = item.full_name;
         let extraJobTitle = item.job_title;
@@ -145,6 +151,9 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
               if (parsed.password) extraPassword = parsed.password;
               if (parsed.assigned_responsibilities) extraAssigned = parsed.assigned_responsibilities;
               if (parsed.last_activity) extraLastActive = parsed.last_activity;
+              invStatus = parsed.invitation_status || undefined;
+              invSent = typeof parsed.invitation_sent === "boolean" ? parsed.invitation_sent : undefined;
+              invError = parsed.last_invite_error || undefined;
             }
           } catch (e) {
             console.warn("Parse allowed_pages failed:", e);
@@ -168,7 +177,10 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
           auth_user_id: authId,
           invitation_token: token,
           invitation_expires: expires,
-          invitation_used: used
+          invitation_used: used,
+          invitation_status: invStatus as "sent" | "pending" | "failed" | undefined,
+          invitation_sent: invSent,
+          last_invite_error: invError
         };
       });
 
@@ -225,7 +237,10 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       job_title: employee.jobTitle,
       password: employee.password || "",
       assigned_responsibilities: employee.assignedResponsibilities || null,
-      last_activity: employee.lastActivity || null
+      last_activity: employee.lastActivity || null,
+      invitation_status: employee.invitation_status || null,
+      invitation_sent: typeof employee.invitation_sent === "boolean" ? employee.invitation_sent : null,
+      last_invite_error: employee.last_invite_error || null
     };
 
     const dbPayload: any = {
@@ -238,7 +253,10 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       allowed_pages: richAllowedPages,
       status: employee.status,
       invitation_token: employee.invitation_token || null,
-      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null
+      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
+      invitation_status: employee.invitation_status || null,
+      invitation_sent: typeof employee.invitation_sent === "boolean" ? employee.invitation_sent : null,
+      last_invite_error: employee.last_invite_error || null
     };
 
     const { error } = await supabase

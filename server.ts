@@ -45,6 +45,15 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://yuuqxprqvlqvoyoltw
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1dXF4cHJxdmxxdm95b2x0d2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjAwMTksImV4cCI6MjA5NjMzNjAxOX0.mPInS2oEpM7_M1mPbCiLTf2ntK5M7uhrySWNEYLvNr8";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Initialize Supabase Admin Client with Service Role Key (for privileged operations like inviteUserByEmail)
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAdmin = supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey)
+  : null;
+if (!supabaseAdmin) {
+  console.warn("⚠️ SUPABASE_SERVICE_ROLE_KEY not set — supabaseAdmin is null. Invite/resend-invite endpoints will return 500.");
+}
+
 // Initialize Raw Postgres Connection Pool (If DATABASE_URL environment variable is provided)
 let pgPool: pg.Pool | null = null;
 if (process.env.DATABASE_URL || process.env.POSTGRES_URL) {
@@ -693,6 +702,177 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
     return res.status(401).json({ error: "Unauthorized session credentials." });
   }
 };
+
+// -------------------------------------------------------------
+// INVITATION EMAIL MANAGEMENT ENDPOINTS (handles Supabase Auth rate limits)
+// -------------------------------------------------------------
+
+// POST /api/auth/invite -> Creates Supabase Auth user and sends invitation email (server-side, using service_role key)
+app.post("/api/auth/invite", requireAuth, async (req, res) => {
+  const { email, fullName, username, employeeId, allowedPages } = req.body;
+  const tenantId = req.user!.tenant_id;
+
+  if (!email || !fullName || !username || !employeeId) {
+    return res.status(400).json({ error: "Missing required fields: email, fullName, username, employeeId" });
+  }
+
+  try {
+    if (!supabaseAdmin) {
+      return res.status(200).json({
+        success: true,
+        auth_user_id: null,
+        inviteQueued: true,
+        invitation_status: "pending",
+        last_invite_error: "admin_client_not_configured",
+        message: "Supabase Admin client not configured (missing SERVICE_ROLE_KEY). Employee saved, invitation pending."
+      });
+    }
+
+    // 1. Try to create auth user via inviteUserByEmail
+    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: {
+        company_id: tenantId,
+        employee_id: employeeId,
+        role: "employee",
+        username: username.toLowerCase().trim(),
+        full_name: fullName.trim()
+      }
+    });
+
+    if (error) {
+      const msg = error.message?.toLowerCase() || "";
+
+      // Rate limit → return inviteQueued so employee is saved with pending status
+      if (msg.includes("rate limit") || msg.includes("rate_limit") || msg.includes("too many requests")) {
+        return res.status(200).json({
+          success: true,
+          auth_user_id: null,
+          inviteQueued: true,
+          invitation_status: "pending",
+          last_invite_error: "email_rate_limit",
+          message: "Email rate limit exceeded. Employee saved, invitation will be sent later."
+        });
+      }
+
+      // User already registered → try to look up auth_user_id via raw pgPool
+      if (msg.includes("already registered") || msg.includes("user already")) {
+        let authUserId: string | null = null;
+        try {
+          if (pgPool) {
+            const result = await pgPool.query('SELECT id FROM auth.users WHERE email = $1', [email.toLowerCase().trim()]);
+            if (result.rows.length > 0) {
+              authUserId = result.rows[0].id;
+            }
+          }
+        } catch (lookupErr) {
+          console.warn("Could not look up existing auth user:", lookupErr);
+        }
+        return res.status(200).json({
+          success: true,
+          auth_user_id: authUserId,
+          inviteQueued: false,
+          invitation_status: "sent",
+          message: "Auth user already exists."
+        });
+      }
+
+      throw error;
+    }
+
+    const authUserId = data.user?.id || null;
+    return res.status(200).json({
+      success: true,
+      auth_user_id: authUserId,
+      inviteQueued: false,
+      invitation_status: "sent"
+    });
+
+  } catch (err: any) {
+    console.error("[Invite API] Error:", err);
+    return res.status(500).json({
+      error: "Failed to create auth user: " + err.message
+    });
+  }
+});
+
+// POST /api/auth/resend-invite -> Retries sending invitation for pending employees
+app.post("/api/auth/resend-invite", requireAuth, async (req, res) => {
+  const { email, employeeId } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Email is required" });
+  }
+
+  try {
+    if (!supabaseAdmin) {
+      return res.status(200).json({
+        success: true,
+        auth_user_id: null,
+        inviteQueued: true,
+        invitation_status: "pending",
+        last_invite_error: "admin_client_not_configured",
+        message: "Supabase Admin client not configured (missing SERVICE_ROLE_KEY)."
+      });
+    }
+
+    // Try inviteUserByEmail — catches both "already registered" and rate limit
+    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: {
+        employee_id: employeeId
+      }
+    });
+
+    if (error) {
+      const msg = error.message?.toLowerCase() || "";
+      if (msg.includes("rate limit") || msg.includes("rate_limit") || msg.includes("too many requests")) {
+        return res.status(200).json({
+          success: true,
+          auth_user_id: null,
+          inviteQueued: true,
+          invitation_status: "pending",
+          last_invite_error: "email_rate_limit",
+          message: "Rate limited. Please try again later."
+        });
+      }
+
+      // Already registered → treat as success
+      if (msg.includes("already registered") || msg.includes("user already")) {
+        let authUserId: string | null = null;
+        try {
+          if (pgPool) {
+            const result = await pgPool.query('SELECT id FROM auth.users WHERE email = $1', [email.toLowerCase().trim()]);
+            if (result.rows.length > 0) {
+              authUserId = result.rows[0].id;
+            }
+          }
+        } catch (lookupErr) {
+          console.warn("Could not look up existing auth user:", lookupErr);
+        }
+        return res.status(200).json({
+          success: true,
+          auth_user_id: authUserId,
+          inviteQueued: false,
+          invitation_status: "sent"
+        });
+      }
+
+      throw error;
+    }
+
+    return res.status(200).json({
+      success: true,
+      auth_user_id: data.user?.id || null,
+      inviteQueued: false,
+      invitation_status: "sent"
+    });
+
+  } catch (err: any) {
+    console.error("[Resend Invite API] Error:", err);
+    return res.status(500).json({
+      error: "Failed to resend invitation: " + err.message
+    });
+  }
+});
 
 // GET /api/auth/verify-super-admin -> Server side gate for super admin validation
 app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {
