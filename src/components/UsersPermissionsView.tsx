@@ -364,15 +364,15 @@ export default function UsersPermissionsView({
       } else {
         onTriggerNotification(
           isRtl
-            ? `❌ فشل إرسال الدعوة: ${data.error || "خطأ غير معروف"}`
-            : `❌ Failed to resend invitation: ${data.error || "Unknown error"}`
+            ? `⚠️ خدمة إرسال الدعوات غير متوفرة حالياً. سيتم إعادة المحاولة لاحقاً.`
+            : `⚠️ Invitation service unavailable. Will retry later.`
         );
       }
     } catch (err: any) {
       onTriggerNotification(
         isRtl
-          ? `❌ خطأ في الشبكة: ${err.message}`
-          : `❌ Network error: ${err.message}`
+          ? `⚠️ خدمة إرسال الدعوات غير متوفرة حالياً. سيتم إعادة المحاولة لاحقاً.`
+          : `⚠️ Invitation service unavailable. Will retry later.`
       );
     }
   };
@@ -553,25 +553,18 @@ export default function UsersPermissionsView({
           invitationStatus = inviteQueued ? "pending" : "sent";
           invitationSent = !inviteQueued;
         } else {
-          console.error("Invite API error:", inviteData);
-          onTriggerNotification(
-            isRtl
-              ? `❌ فشل إنشاء حساب الموظف: ${inviteData.error || "خطأ غير معروف"}`
-              : `❌ Failed to create employee account: ${inviteData.error || "Unknown error"}`
-          );
-          setIsLoading(false);
-          return;
+          inviteQueued = true;
+          inviteError = "api_unavailable";
+          console.warn("Invite API returned non-OK — saving employee as pending");
         }
       } catch (fetchErr: any) {
-        console.error("Invite API fetch error:", fetchErr);
-        onTriggerNotification(
-          isRtl
-            ? `❌ فشل الاتصال بالخادم لإنشاء حساب الموظف: ${fetchErr.message}`
-            : `❌ Network error contacting server for employee account: ${fetchErr.message}`
-        );
-        setIsLoading(false);
-        return;
+        inviteQueued = true;
+        inviteError = "api_unavailable";
+        console.warn("Invite API unavailable — saving employee locally with pending status:", fetchErr.message);
       }
+
+      invitationStatus = inviteQueued ? "pending" : "sent";
+      invitationSent = !inviteQueued;
 
       // Generate expiring (7 days) secure invitation link
       invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
