@@ -12,6 +12,25 @@ import {
   BasicInventoryItem, SubInventoryItem, ReturnInventoryItem, StockMovement
 } from "./types";
 
+/**
+ * Merges cloud items with local-only items to prevent race conditions
+ * where recently-added local items get overwritten by stale cloud data.
+ * Uses a key function (defaults to "id" field) to identify duplicates.
+ */
+function mergeWithLocal<T>(
+  cloudItems: T[],
+  localItems: any[],
+  keyFn?: (item: any) => string
+): T[] {
+  const getKey = keyFn || ((item: any) => item.id);
+  const cloudKeys = new Set(cloudItems.map(getKey));
+  const localOnly = localItems.filter(item => !cloudKeys.has(getKey(item)));
+  if (localOnly.length > 0) {
+    console.log(`[pullMultiTenantData] Preserving ${localOnly.length} local items not yet in cloud`);
+  }
+  return [...cloudItems, ...localOnly];
+}
+
 export interface SaasUserMeta {
   userId: string;
   companyId: string;
@@ -575,7 +594,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: p.updated_date || undefined,
         updatedTime: p.updated_time || undefined
       }));
-      saveProducts(formatted);
+      saveProducts(mergeWithLocal(formatted, getProducts()));
     }
 
     // 3. Fetch Orders
@@ -656,7 +675,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           updatedTime: o.updated_time || undefined
         };
       });
-      saveOrders(formatted);
+      saveOrders(mergeWithLocal(formatted, getOrders()));
     }
 
     // 4. Fetch Suppliers
@@ -680,7 +699,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: s.updated_date || undefined,
         updatedTime: s.updated_time || undefined
       }));
-      saveSuppliers(formatted);
+      saveSuppliers(mergeWithLocal(formatted, getSuppliers()));
     }
 
     // 5. Fetch Expenses
@@ -783,7 +802,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
     // NEVER auto-create workers from employee records or vice versa.
     // ONLY load workers from corevia_workers, nothing else.
 
-    saveWorkers(formatted);
+    saveWorkers(mergeWithLocal(formatted, getWorkers()));
 
     // 7. Fetch Salary Sheets
     const { data: dbSheets } = await supabase
@@ -822,7 +841,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: sh.updated_date || undefined,
         updatedTime: sh.updated_time || undefined
       }));
-      saveSalarySheets(formatted);
+      saveSalarySheets(mergeWithLocal(formatted, getSalarySheets()));
     }
 
     // 8. Fetch Basic Inventory
@@ -835,7 +854,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           color: bi.color || "",
           quantity: safeNum(bi.quantity)
         }));
-        saveBasicInventory(formatted);
+        saveBasicInventory(mergeWithLocal(formatted, getBasicInventory(), item => `${item.productId}_${item.color}`));
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_basic remote database:", e);
@@ -852,7 +871,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           size: si.size || "",
           quantity: safeNum(si.quantity)
         }));
-        saveSubInventory(formatted);
+        saveSubInventory(mergeWithLocal(formatted, getSubInventory(), item => `${item.productId}_${item.color}_${item.size}`));
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_sub remote database:", e);
@@ -869,7 +888,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           size: ri.size || "",
           quantity: safeNum(ri.quantity)
         }));
-        saveReturnInventory(formatted);
+        saveReturnInventory(mergeWithLocal(formatted, getReturnInventory(), item => `${item.orderId}_${item.productName}_${item.color}_${item.size}`));
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_return remote database:", e);
@@ -895,7 +914,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           movementType: (m.movement_type || "Manual Adjustment") as any,
           source: m.source || "Database"
         }));
-        saveStockMovements(formatted);
+        saveStockMovements(mergeWithLocal(formatted, getStockMovements()));
       }
     } catch (e) {
       console.warn("Could not sync corevia_stock_movements remote database:", e);

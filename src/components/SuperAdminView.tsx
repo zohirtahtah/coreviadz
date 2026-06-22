@@ -179,7 +179,17 @@ export default function SuperAdminView({
   const [newPlan, setNewPlan] = useState<"Free" | "Basic" | "Pro" | "Enterprise">("Basic");
 
   const loadSaaSRealData = async () => {
-    if (!supabase) return;
+    if (!supabase) {
+      // Fallback to localStorage companies when Supabase is not configured
+      const stored = localStorage.getItem("corevia_saas_companies_v1");
+      if (stored) {
+        try {
+          const parsed: SaaSCompany[] = JSON.parse(stored);
+          setCompanies(parsed);
+        } catch (e) {}
+      }
+      return;
+    }
 
     setIsLoadingSaaS(true);
     try {
@@ -241,7 +251,20 @@ export default function SuperAdminView({
         };
       });
 
-      setCompanies(saasCompanies);
+      // If Supabase returned no companies, fall back to localStorage
+      if (saasCompanies.length === 0) {
+        const stored = localStorage.getItem("corevia_saas_companies_v1");
+        if (stored) {
+          try {
+            const parsed: SaaSCompany[] = JSON.parse(stored);
+            setCompanies(parsed);
+          } catch (e) {}
+        } else {
+          setCompanies(saasCompanies);
+        }
+      } else {
+        setCompanies(saasCompanies);
+      }
 
       const saasLogs: SaaSActivityLog[] = (users || []).map((u, i) => {
         const compName = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id)?.business_name || `${u.username || u.email.split("@")[0]} Trading`;

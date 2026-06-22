@@ -54,7 +54,8 @@ import {
   pushSingleDatasetToCloud, 
   pullMultiTenantData, 
   pushFullTenantData,
-  cleanSlateResetSandbox
+  cleanSlateResetSandbox,
+  resilientUpsert
 } from "./supabaseSync";
 
 // =========================================================================
@@ -99,7 +100,7 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
 
     // Also persist company to Supabase corevia_companies (Single Source of Truth)
     if (supabase) {
-      supabase.from("corevia_companies").upsert({
+      resilientUpsert("corevia_companies", [{
         id: companyId,
         name: newCompany.companyName,
         owner_name: newCompany.ownerName,
@@ -109,7 +110,7 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
         seats_limit: newCompany.seatsLimit,
         status: newCompany.accountStatus,
         subscription_end_date: newCompany.expirationDate
-      }).then(() => {}, err => console.warn("registerSaaSCompany: corevia_companies upsert error", err));
+      }]);
     }
     
     // Seed system registration log
