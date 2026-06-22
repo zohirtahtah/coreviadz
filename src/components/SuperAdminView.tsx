@@ -193,21 +193,35 @@ export default function SuperAdminView({
 
     setIsLoadingSaaS(true);
     try {
-      const { data: users, error: reErr } = await supabase
-        .from("corevia_saas_users")
-        .select("*");
+      // Try RPC functions first (bypasses RLS), fall back to direct queries
+      let users: any[] | null = null;
+      let realCompanies: any[] | null = null;
+      let profiles: any[] | null = null;
 
-      if (reErr) throw reErr;
+      try {
+        const { data } = await supabase.rpc("get_all_companies");
+        realCompanies = data as any[];
+      } catch {
+        const { data } = await supabase.from("corevia_companies").select("*");
+        realCompanies = data;
+      }
 
-      // Fetch companies from 'corevia_companies' (SOLE Authoritative Source of truth for companies)
-      const { data: realCompanies } = await supabase
-        .from("corevia_companies")
-        .select("*");
+      try {
+        const { data } = await supabase.rpc("get_all_saas_users");
+        users = data as any[];
+      } catch {
+        const { data, error: reErr } = await supabase.from("corevia_saas_users").select("*");
+        if (reErr) throw reErr;
+        users = data;
+      }
 
-      // Fetch profile data from 'corevia_profile' (Secondary Extension Table)
-      const { data: profiles } = await supabase
-        .from("corevia_profile")
-        .select("*");
+      try {
+        const { data } = await supabase.rpc("get_all_profiles");
+        profiles = data as any[];
+      } catch {
+        const { data } = await supabase.from("corevia_profile").select("*");
+        profiles = data;
+      }
 
       const saasCompanies: SaaSCompany[] = (realCompanies || []).map(rc => {
         const companyId = rc.id;
