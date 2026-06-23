@@ -23,7 +23,15 @@ ALTER TABLE corevia_companies
   ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'unverified';
 
 -- Sync status from accountStatus for existing rows where status is null
-UPDATE corevia_companies SET status = LOWER(accountStatus) WHERE status IS NULL AND accountStatus IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'corevia_companies' AND column_name = 'accountstatus'
+  ) THEN
+    UPDATE corevia_companies SET status = LOWER(accountStatus) WHERE status IS NULL AND accountStatus IS NOT NULL;
+  END IF;
+END $$;
 
 -- ============================================================
 -- SECTION 2: Expand/Update Profiles
