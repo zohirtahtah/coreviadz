@@ -13,6 +13,7 @@ import {
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
+import TrialBadge from "./TrialBadge";
 
 interface SidebarProps {
   activeTab: string;
@@ -32,6 +33,8 @@ interface SidebarProps {
   clearNotifications: () => void;
   session?: any;
   isServerSuperAdmin?: boolean | null;
+  accountStatus?: string;
+  trialStartAt?: string;
 }
 
 export default function Sidebar({
@@ -51,7 +54,9 @@ export default function Sidebar({
   notifications,
   clearNotifications,
   session,
-  isServerSuperAdmin
+  isServerSuperAdmin,
+  accountStatus,
+  trialStartAt
 }: SidebarProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -448,6 +453,9 @@ export default function Sidebar({
         {/* Right side options: language switchers, alerts and visuals */}
         <div className="flex items-center gap-2 sm:gap-2.5" id="topbar_right_instruments">
           
+          {/* Trial Countdown Badge */}
+          <TrialBadge status={accountStatus || ""} trialStartAt={trialStartAt || ""} lang={lang} />
+
           {/* Quick Config Pills Deck (Side-by-side theme + language selector) */}
           <div className="flex items-center bg-[#18181b] dark:bg-[#121214] border border-[#27272a] rounded-xl p-0.5 gap-1.2" id="header_control_dock">
             

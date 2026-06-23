@@ -245,6 +245,7 @@ export default function App() {
             seatsUsed: 1,
             accountStatus: data.status || "Active",
             expirationDate: data.subscription_end_date || "",
+            trialStartAt: data.trial_start_at || "",
             activeDevices: [],
             otpCode: "123456"
           };
@@ -2049,6 +2050,8 @@ export default function App() {
         clearNotifications={handleClearNotifications}
         session={session}
         isServerSuperAdmin={isServerSuperAdmin}
+        accountStatus={saasAccount?.accountStatus}
+        trialStartAt={saasAccount?.trialStartAt}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}
