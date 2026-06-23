@@ -50,27 +50,10 @@ ALTER TABLE corevia_company_users
   ADD COLUMN IF NOT EXISTS allowed_pages_array TEXT[] DEFAULT '{}';
 
 -- SECTION 3: Add SKU, Price, Alert Threshold to existing inventory
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_basic') THEN
-    ALTER TABLE corevia_inventory_basic
-      ADD COLUMN IF NOT EXISTS sku TEXT,
-      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_sub') THEN
-    ALTER TABLE corevia_inventory_sub
-      ADD COLUMN IF NOT EXISTS sku TEXT,
-      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_return') THEN
-    ALTER TABLE corevia_inventory_return
-      ADD COLUMN IF NOT EXISTS sku TEXT,
-      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
-  END IF;
-END $$;
+-- Single corevia_inventory table (replaces the old three-table split)
+ALTER TABLE corevia_inventory ADD COLUMN IF NOT EXISTS sku TEXT;
+ALTER TABLE corevia_inventory ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0;
+ALTER TABLE corevia_inventory ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
 
 -- SECTION 4: Create corevia_invoices (فواتير المشتريات/المبيعات/المرتجعات)
 -- New table for unified invoice tracking with SKU-level detail
@@ -87,18 +70,21 @@ CREATE TABLE IF NOT EXISTS corevia_invoices (
   is_deleted BOOLEAN DEFAULT FALSE
 );
 
--- SECTION 5: Create corevia_activity_center (سجل العمليات البسيط)
--- Lightweight audit log matching the user's schema
--- Complement to existing corevia_activity_logs (heavy audit)
+-- SECTION 5: Create/heal corevia_activity_center (سجل العمليات البسيط)
+-- Lightweight audit log
 CREATE TABLE IF NOT EXISTS corevia_activity_center (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id TEXT DEFAULT 'cop_default',
   user_name TEXT NOT NULL,
-  action_type TEXT NOT NULL CHECK (action_type IN ('ADD', 'UPDATE', 'DELETE', 'RESTORE')),
+  action_type TEXT NOT NULL,
   page_name TEXT NOT NULL,
-  details TEXT NOT NULL,
+  details TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Heal columns if table was pre-existing with different schema
+ALTER TABLE corevia_activity_center ADD COLUMN IF NOT EXISTS details TEXT;
+ALTER TABLE corevia_activity_center ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE corevia_activity_center DROP CONSTRAINT IF EXISTS corevia_activity_center_action_type_check;
 
 -- Add page_name + details columns to existing corevia_activity_logs for compatibility
 DO $$
@@ -152,7 +138,7 @@ DECLARE
 BEGIN
   SELECT COUNT(*)::INTEGER INTO v_count
   FROM corevia_company_users
-  WHERE company_id = p_company_id AND (deleted_at IS NULL);
+  WHERE company_id = p_company_id AND (archived_at IS NULL);
 
   UPDATE corevia_companies
   SET current_seats = v_count + 1

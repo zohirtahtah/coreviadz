@@ -4,20 +4,19 @@ import { saveAs } from "file-saver";
 
 const TABLES: { key: string; table: string; label: string }[] = [
   { key: "orders", table: "corevia_orders", label: "الطلبيات_والمبيعات" },
+  { key: "order_items", table: "corevia_order_items", label: "بنود_الطلبيات" },
   { key: "products", table: "corevia_products", label: "المنتجات_والطرازات" },
-  { key: "inventory_basic", table: "corevia_inventory_basic", label: "المخزن_الرئيسي" },
-  { key: "inventory_sub", table: "corevia_inventory_sub", label: "المخزن_الفرعي" },
-  { key: "inventory_return", table: "corevia_inventory_return", label: "مخزن_المرتجعات" },
+  { key: "inventory", table: "corevia_inventory", label: "المخزون_الرئيسي" },
   { key: "suppliers", table: "corevia_suppliers", label: "الموردون_والفواتير" },
   { key: "expenses", table: "corevia_expenses", label: "المصروفات" },
   { key: "workers", table: "corevia_workers", label: "العمال_والموظفون" },
-  { key: "salary_sheets", table: "corevia_salary_sheets", label: "كشوف_الرواتب" },
   { key: "stock_movements", table: "corevia_stock_movements", label: "حركة_المخزون" },
   { key: "activity_center", table: "corevia_activity_center", label: "سجل_العمليات" },
   { key: "company_users", table: "corevia_company_users", label: "المستخدمون_والصلاحيات" },
   { key: "chat_messages", table: "corevia_chat_messages", label: "المراسلات_الداخلية" },
-  { key: "employee_submissions", table: "corevia_employee_submissions", label: "تقارير_الموظفين" },
+  { key: "notifications", table: "corevia_notifications", label: "الإشعارات_الداخلية" },
   { key: "profile", table: "corevia_profile", label: "الملف_التجاري" },
+  { key: "saas_users", table: "corevia_saas_users", label: "حسابات_المدراء_العامة" },
 ];
 
 export async function generateCompanyBackup(
