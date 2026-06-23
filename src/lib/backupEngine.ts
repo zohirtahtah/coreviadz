@@ -19,6 +19,17 @@ const TABLES: { key: string; table: string; label: string }[] = [
   { key: "saas_users", table: "corevia_saas_users", label: "حسابات_المدراء_العامة" },
 ];
 
+function toCSV(data: any[]): string {
+  if (!data || data.length === 0) return "";
+  const headers = Object.keys(data[0]);
+  const esc = (v: any): string => {
+    if (v === null || v === undefined) return "";
+    const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [headers.map(esc).join(","), ...data.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
+}
+
 export async function generateCompanyBackup(
   companyId: string,
   companyName: string
@@ -41,14 +52,14 @@ export async function generateCompanyBackup(
 
         if (error) {
           results[t.key] = `ERROR: ${error.message}`;
-          backupFolder.file(`${t.label}.json`, JSON.stringify({ error: error.message }, null, 2));
+          backupFolder.file(`${t.label}.csv`, `ERROR,${error.message}`);
         } else {
           results[t.key] = `OK: ${data?.length ?? 0} rows`;
-          backupFolder.file(`${t.label}.json`, JSON.stringify(data || [], null, 2));
+          backupFolder.file(`${t.label}.csv`, toCSV(data || []));
         }
       } catch (err: any) {
         results[t.key] = `FAIL: ${err?.message || err}`;
-        backupFolder.file(`${t.label}.json`, JSON.stringify({ error: err?.message || "Unknown" }, null, 2));
+        backupFolder.file(`${t.label}.csv`, `ERROR,${err?.message || "Unknown"}`);
       }
     }
 

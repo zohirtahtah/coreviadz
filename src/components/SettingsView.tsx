@@ -7,26 +7,12 @@ import React, { useState } from "react";
 import { BusinessProfile, LanguageType } from "../types";
 import { translations } from "../translations";
 import { 
-  Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Sliders, Upload, Image,
-  Database, RefreshCw, CloudLightning, Copy, Check, CheckCircle2, Download, Terminal,
-  Server, Sparkles, Key, AlertCircle
+  Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Upload, Image,
+  Database, CloudLightning, CheckCircle2, Download, Key, AlertCircle
 } from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
-import UsersPermissionsView from "./UsersPermissionsView";
 import { supabase, isSupabaseConfigured } from "../supabaseClient";
-import { pushFullTenantData, pullMultiTenantData } from "../supabaseSync";
 import { generateCompanyBackup } from "../lib/backupEngine";
-import {
-  getOrders, saveOrders,
-  getProducts, saveProducts,
-  getSuppliers, saveSuppliers,
-  getWorkers, saveWorkers,
-  getSalarySheets, saveSalarySheets,
-  getFixedExpenses, saveFixedExpenses,
-  getVarExpenses, saveVarExpenses,
-  getAdExpenses, saveAdExpenses,
-  saveBusinessProfile
-} from "../storageUtils";
 
 interface SettingsViewProps {
   profile: BusinessProfile;
@@ -36,9 +22,7 @@ interface SettingsViewProps {
   onSaveCustomColors: (arr: string[]) => void;
   onTriggerNotification: (msg: string) => void;
   onTriggerRefreshOrders?: () => void;
-  onReloadAllStates?: () => void;
   session?: any;
-  seatsLimit?: number;
 }
 
 export default function SettingsView({
@@ -49,9 +33,7 @@ export default function SettingsView({
   onSaveCustomColors,
   onTriggerNotification,
   onTriggerRefreshOrders,
-  onReloadAllStates,
-  session,
-  seatsLimit
+  session
 }: SettingsViewProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -118,60 +100,18 @@ export default function SettingsView({
   // New color adding block
   const [newColorEntry, setNewColorEntry] = useState("");
 
+  // Page Lock Management state
+  const [pageLockPassword, setPageLockPassword] = useState(() => localStorage.getItem("corevia_page_lock_password") || "");
+  const [lockedPages, setLockedPages] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("corevia_locked_pages") || "[]"); }
+    catch { return []; }
+  });
+  // Admin password change state
+  const [currentAdminPw, setCurrentAdminPw] = useState("");
+  const [newAdminPw, setNewAdminPw] = useState("");
+
   // Supabase Integration & Synchronization Modules
-  const [isSyncingToSupabase, setIsSyncingToSupabase] = useState(false);
-  const [isPullingFromSupabase, setIsPullingFromSupabase] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
-  const [dbTestResult, setDbTestResult] = useState<string | null>(null);
-  const [isTestingConnection, setIsTestingConnection] = useState(false);
-  const [showSqlSchema, setShowSqlSchema] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
-
-  // Connection tester
-  const handleTestConnection = async () => {
-    if (!supabase) {
-      setDbTestResult("MISSING_KEYS");
-      return;
-    }
-    setIsTestingConnection(true);
-    setDbTestResult(null);
-
-    try {
-      // Execute simple query to test connection
-      const { data, error } = await supabase.from("corevia_profile").select("id").limit(1);
-      
-      if (error) {
-        // Table might not exist yet, which is expected before schema setup
-        if (error.code === "PGRST116" || error.code === "42P01") {
-          setDbTestResult("CONNECTED_BUT_NO_TABLES");
-          onTriggerNotification(
-            lang === "ar"
-              ? "🟢 متصل بـ Supabase بنجاح! ولكن يرجى تشغيل كود إنشاء الجداول الأولية أولاً."
-              : "🟢 Connected to Supabase! However, you need to execute the SQL tables schema script."
-          );
-        } else {
-          throw error;
-        }
-      } else {
-        setDbTestResult("FULLY_CONNECTED");
-        onTriggerNotification(
-          lang === "ar"
-            ? "🟢 تم الاتصال بنجاح وقراءة قاعدة البيانات بنشاط!"
-            : "🟢 Successfully connected and authenticated with Supabase database!"
-        );
-      }
-    } catch (err: any) {
-      console.error("Supabase test error:", err);
-      setDbTestResult(`ERROR: ${err.message || "Failed to query database"}`);
-      onTriggerNotification(
-        lang === "ar"
-          ? "❌ فشل الاتصال بقاعدة البيانات. تحقق من صحة المفاتيح وصلاحية الخادم."
-          : "❌ Connection failed. Check credentials and server availability."
-      );
-    } finally {
-      setIsTestingConnection(false);
-    }
-  };
 
   // Download compressed database backup (ZIP)
   const handleDownloadBackup = async () => {
@@ -201,540 +141,10 @@ export default function SettingsView({
     }
   };
 
-  // Push Local Data to Supabase
-  const handlePushToSupabase = async () => {
-    if (!supabase) {
-      setDbTestResult("MISSING_KEYS");
-      return;
-    }
-    setIsSyncingToSupabase(true);
-    setDbTestResult(null);
 
-    try {
-      const companyId = session?.company_id || "cop_default";
-      const email = session?.email || "unknown@corevia.com";
-
-      onTriggerNotification(lang === "ar" ? "جاري مزامنة ورفع جميع البيانات والملفات السحابية..." : "Uploading multi-tenant secure sandbox state onto cloud...");
-      await pushFullTenantData(companyId, email);
-
-      onTriggerNotification(lang === "ar" ? "✅ تمت مزامنة جميع البيانات ورفعها بنجاح إلى قاعدة Supabase!" : "✅ Successfully backed up & synchronized all datasets with Supabase Cloud Postgres.");
-      setDbTestResult("CONNECTED_AND_SYNCED");
-    } catch (err: any) {
-      console.error("Supabase backup error:", err);
-      setDbTestResult(`ERROR_PUSH: ${err.message || "Failed to sync tables"}`);
-      onTriggerNotification(lang === "ar" ? "❌ فشل رفع الملفات والمزامنة السحابية." : "❌ Cloud sync failed. Ensure your SQL tables are created.");
-    } finally {
-      setIsSyncingToSupabase(false);
-    }
-  };
-
-  // Pull Cloud Data from Supabase
-  const handlePullFromSupabase = async () => {
-    if (!supabase) {
-      setDbTestResult("MISSING_KEYS");
-      return;
-    }
-    const confirmAction = window.confirm(
-      lang === "ar"
-        ? "⚠️ تحذير: تنزيل البيانات من Supabase سيستبدل جميع البيانات المحلية المحفوظة في هذا المتصفح تماماً. هل أنت متأكد من الاستمرار؟"
-        : "⚠️ Warning: Downloading data from Supabase will fully overwrite your browser's local sandbox state. Proceed?"
-    );
-    if (!confirmAction) return;
-
-    setIsPullingFromSupabase(true);
-    setDbTestResult(null);
-
-    try {
-      const companyId = session?.company_id || "cop_default";
-      onTriggerNotification(lang === "ar" ? "جاري تنزيل وهيكلة البيانات المعزولة سحابياً..." : "Downloading multi-tenant cloud schemas...");
-      const success = await pullMultiTenantData(companyId);
-
-      if (success) {
-        onTriggerNotification(lang === "ar" ? "✅ تم جلب وتنزيل قاعدة بيانات السحابة بالكامل بنجاح للمتصفح!" : "✅ Data synchronized successfully. Pulled all tables clean from Supabase cloud.");
-        setDbTestResult("CONNECTED_AND_PULLED");
-        if (onReloadAllStates) {
-          onReloadAllStates();
-        }
-      } else {
-        throw new Error("Failed to pull database data");
-      }
-    } catch (err: any) {
-      console.error(err);
-      setDbTestResult(`ERROR_PULL: ${err.message || "Unknown error during data download"}`);
-      onTriggerNotification(lang === "ar" ? `❌ خطأ في التنزيل: يرجى التأكد من تشغيل كود SQL الأساسي` : `❌ Download failed: Ensure you have executed the tables database script first.`);
-    } finally {
-      setIsPullingFromSupabase(false);
-    }
-  };
-
-  const copySqlSchemaText = () => {
-    const rawSql = `-- Corevia Enterprise Database SQL Schema & Security Hardening
--- Paste this script into your Supabase SQL Editor and run it in 1 click!
-
--- 0. Tenant Companies and Users
-create table if not exists corevia_companies (
-  id text primary key,
-  name text not null,
-  business_type text,
-  owner_name text,
-  phone text,
-  email text,
-  seatsLimit integer default 5,
-  accountStatus text default 'Active',
-  subscriptionPlan text default 'Standard_Monthly',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_saas_users (
-  user_id text primary key,
-  company_id text references corevia_companies(id) on delete set null,
-  email text not null,
-  username text,
-  has_completed_onboarding boolean default false,
-  role text default 'admin',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_company_users (
-  id text primary key,
-  company_id text default 'cop_default',
-  full_name text not null,
-  phone text not null,
-  email text,
-  username text,
-  job_title text,
-  password text,
-  assigned_responsibilities text,
-  allowed_pages jsonb default '[]'::jsonb,
-  status text default 'Active',
-  last_activity text,
-  auth_user_id text,
-  invitation_token text,
-  invitation_expires text,
-  invitation_used boolean default false,
-  deleted_at timestamp with time zone default null,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 1. Business Profile
-create table if not exists corevia_profile (
-  id text primary key,
-  company_id text default null,
-  business_name text not null,
-  business_type text,
-  currency text default 'DZD',
-  country text default 'Algeria',
-  owner_name text,
-  phone text,
-  email text,
-  address text,
-  website text,
-  commercial_registry text,
-  tax_number text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 2. Products and Inventory
-create table if not exists corevia_products (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  wholesale_cost_price numeric not null,
-  wholesale_percentage numeric,
-  wholesale_price numeric not null,
-  retail_cost_price numeric not null,
-  retail_percentage numeric,
-  retail_price numeric not null,
-  colors jsonb default '[]'::jsonb,
-  sizes text[] default '{}'::text[],
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_inventory_basic (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_sub (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_return (
-  id text primary key,
-  company_id text default 'cop_default',
-  order_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_stock_movements (
-  id text primary key,
-  company_id text default 'cop_default',
-  date timestamp with time zone default timezone('utc'::text, now()),
-  order_id text,
-  product_name text,
-  color text,
-  size text,
-  quantity_change numeric,
-  movement_type text,
-  source text
-);
-
--- 3. Corevia Orders
-create table if not exists corevia_orders (
-  id text primary key,
-  company_id text default 'cop_default',
-  date text not null,
-  customer_name text not null,
-  phone text not null,
-  wilaya text,
-  commune text,
-  delivery_location text,
-  delivery_company text,
-  delivery_type text,
-  delivery_price numeric default 0,
-  items jsonb default '[]'::jsonb,
-  total_price numeric not null,
-  paid_amount numeric default 0,
-  discount numeric default 0,
-  customer_pays_delivery boolean default true,
-  is_exchange boolean default false,
-  exchange_order_ref text,
-  agent_name text,
-  source text,
-  status text default 'pending',
-  return_cost numeric,
-  return_date text,
-  notes text,
-  deleted_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 4. Supplier Pipeline
-create table if not exists corevia_suppliers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  phone text,
-  address text,
-  email text,
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 5. Business Expenses
-create table if not exists corevia_expenses (
-  id text primary key,
-  company_id text default 'cop_default',
-  type text not null,
-  name text,
-  amount numeric,
-  date text,
-  month_year text,
-  platform text,
-  amount_usd numeric,
-  exchange_rate numeric,
-  amount_currency numeric,
-  start_date text,
-  end_date text,
-  notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 6. Payroll & Workers
-create table if not exists corevia_workers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  code text,
-  phone text,
-  base_salary numeric,
-  daily_hours numeric,
-  overtime_rate numeric,
-  role text,
-  monthly_salary numeric,
-  payrolls jsonb default '[]'::jsonb,
-  created_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_salary_sheets (
-  id text primary key,
-  company_id text default 'cop_default',
-  worker_id text not null,
-  worker_name text,
-  month_year text,
-  date_from text,
-  date_to text,
-  overtime_hours numeric,
-  absence_days numeric,
-  missing_hours numeric,
-  paid_vacation_days numeric,
-  expenses jsonb default '[]'::jsonb,
-  pay_status text,
-  calculated_salary jsonb,
-  updated_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_employee_submissions (
-  id text primary key,
-  company_id text default 'cop_default',
-  employee_id text not null,
-  employee_name text not null,
-  type text not null,
-  amount numeric not null,
-  description text,
-  date text not null,
-  status text default 'pending',
-  created_at text
-);
-
--- 7. Realtime Chat Messages
-create table if not exists corevia_chat_messages (
-  id text primary key,
-  company_id text default 'cop_default',
-  sender_id text not null,
-  sender_name text not null,
-  sender_job_title text,
-  content text,
-  voice_url text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 8. Enterprise Core Activity logs audit trail
-create table if not exists corevia_activity_logs (
-  id text primary key,
-  company_id text default 'cop_default',
-  actor_name text not null,
-  actor_role text,
-  operation text not null,
-  item_type text,
-  old_value jsonb,
-  new_value jsonb,
-  ip_address text,
-  browser_details text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- --- SAAS MULTI-TENANT ISOLATION POLICIES (RLS SECURITY) ---
-alter table corevia_companies enable row level security;
-alter table corevia_saas_users enable row level security;
-alter table corevia_company_users enable row level security;
-alter table corevia_profile enable row level security;
-alter table corevia_products enable row level security;
-alter table corevia_inventory_basic enable row level security;
-alter table corevia_inventory_sub enable row level security;
-alter table corevia_inventory_return enable row level security;
-alter table corevia_stock_movements enable row level security;
-alter table corevia_orders enable row level security;
-alter table corevia_suppliers enable row level security;
-alter table corevia_expenses enable row level security;
-alter table corevia_workers enable row level security;
-alter table corevia_salary_sheets enable row level security;
-alter table corevia_employee_submissions enable row level security;
-alter table corevia_chat_messages enable row level security;
-alter table corevia_activity_logs enable row level security;
-
--- Define a policy helper query concept (Secure claim lookup)
-drop policy if exists tenant_isolation on corevia_companies;
-create policy tenant_isolation on corevia_companies for all using (
-  id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), id)
-);
-
-drop policy if exists tenant_isolation on corevia_saas_users;
-create policy tenant_isolation on corevia_saas_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
-);
-
-drop policy if exists tenant_isolation on corevia_company_users;
-create policy tenant_isolation on corevia_company_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
-);
-
--- Apply standard tenant filter policies to remaining framework tables
-do $$
-declare
-  t text;
-begin
-  for t in array['corevia_profile', 'corevia_products', 'corevia_inventory_basic', 'corevia_inventory_sub', 'corevia_inventory_return', 'corevia_stock_movements', 'corevia_orders', 'corevia_suppliers', 'corevia_expenses', 'corevia_workers', 'corevia_salary_sheets', 'corevia_employee_submissions', 'corevia_chat_messages', 'corevia_activity_logs']
-  loop
-    execute format('drop policy if exists tenant_isolation_policy on %I;', t);
-    execute format('create policy tenant_isolation_policy on %I for all using (
-      company_id = coalesce(
-        (select company_id from corevia_saas_users where user_id = auth.uid() limit 1),
-        (select company_id from corevia_company_users where id = auth.uid() limit 1),
-        company_id
-      )
-    );', t);
-  end loop;
-end;
-$$;
-
--- --- DATABASE-FIRST SECURITY-CRITICAL PROCEDURAL FUNCTIONS ---
-
--- 1. Database-First Payroll Calculator RPC Function
-create or replace function calculate_worker_payroll_v1(
-  p_base_salary numeric,
-  p_working_days_count numeric,
-  p_absence_days_count numeric,
-  p_overtime_hours_count numeric,
-  p_daily_working_hours numeric,
-  p_overtime_multiplier numeric,
-  p_deductions_amount numeric,
-  p_bonuses_amount numeric
-)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_daily_base_rate numeric;
-  v_hourly_overtime_rate numeric;
-  v_overtime_pay numeric;
-  v_absence_deduction numeric;
-  v_net_salary numeric;
-begin
-  v_daily_base_rate := round((p_base_salary / coalesce(p_working_days_count, 22)), 4);
-  v_hourly_overtime_rate := round(((p_base_salary / (coalesce(p_working_days_count, 22) * coalesce(p_daily_working_hours, 8))) * coalesce(p_overtime_multiplier, 1.5)), 4);
-  v_overtime_pay := round((coalesce(p_overtime_hours_count, 0) * v_hourly_overtime_rate), 2);
-  v_absence_deduction := round((coalesce(p_absence_days_count, 0) * v_daily_base_rate), 2);
-  v_net_salary := round((p_base_salary + v_overtime_pay - v_absence_deduction - coalesce(p_deductions_amount, 0) + coalesce(p_bonuses_amount, 0)), 2);
-  if v_net_salary < 0 then
-    v_net_salary := 0;
-  end if;
-  return json_build_object(
-    'daily_base_rate', v_daily_base_rate,
-    'hourly_overtime_rate', v_hourly_overtime_rate,
-    'overtime_pay', v_overtime_pay,
-    'absence_deduction', v_absence_deduction,
-    'net_salary', v_net_salary
-  );
-end;
-$$;
-
--- 2. Subscription User Seats Verification RPC Function
-create or replace function check_seat_limit_v1(p_company_id text)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_limit integer;
-  v_used integer;
-  v_allowed boolean;
-begin
-  select coalesce(seatsLimit, 5) into v_limit from corevia_companies where id = p_company_id;
-  if v_limit is null then
-    v_limit := 5;
-  end if;
-  select count(*)::integer into v_used from corevia_company_users where company_id = p_company_id and (deleted_at is null);
-  v_used := v_used + 1; -- 1 Owner seat allocation
-  if v_used >= v_limit then
-    v_allowed := false;
-  else
-    v_allowed := true;
-  end if;
-  return json_build_object(
-    'limit', v_limit,
-    'used', v_used,
-    'allowed', v_allowed
-  );
-end;
-$$;
-
--- 3. Transacted Atomic Inventory & Stock Movements Process triggers
-create or replace function process_inventory_and_logs_v1(
-  p_company_id text,
-  p_order_id text,
-  p_product_name text,
-  p_color text,
-  p_size text,
-  p_qty_change numeric,
-  p_movement_type text,
-  p_source text
-)
-returns void
-language plpgsql
-security definer
-as $$
-begin
-  -- Insert auditable movement record
-  insert into corevia_stock_movements(id, company_id, order_id, product_name, color, size, quantity_change, movement_type, source)
-  values ('mv-' || floor(random() * 10000000)::text, p_company_id, p_order_id, p_product_name, p_color, p_size, p_qty_change, p_movement_type, p_source);
-  
-  -- Update primary sub inventory
-  if p_size is not null and p_size <> '' then
-    insert into corevia_inventory_sub(id, company_id, product_id, product_name, color, size, quantity)
-    values ('sub-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_size, p_qty_change)
-    on conflict (id) do update set quantity = corevia_inventory_sub.quantity + p_qty_change;
-  end if;
-
-  -- Update basic inventory
-  insert into corevia_inventory_basic(id, company_id, product_id, product_name, color, quantity)
-  values ('bsc-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_qty_change)
-  on conflict (id) do update set quantity = corevia_inventory_basic.quantity + p_qty_change;
-end;
-$$;`;
-
-    navigator.clipboard.writeText(rawSql);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
-    onTriggerNotification(lang === "ar" ? "✅ تم نسخ سكريبت SQL للحافظة!" : "✅ SQL Script copied to clipboard!");
-  };
 
   // Sub-tabs active page indicator
-  const [activePage, setActivePage] = useState<"company" | "control" | "integrations" | "users">("company");
+  const [activePage, setActivePage] = useState<"company" | "control" | "integrations">("company");
 
   // Logo file upload handler
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -966,16 +376,7 @@ $$;`;
         >
           {activeTabsText.integrations}
         </button>
-        <button
-          onClick={() => setActivePage("users")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-            activePage === "users"
-              ? "border-rose-500 text-rose-400"
-              : "border-transparent text-slate-450 hover:text-slate-200"
-          }`}
-        >
-          {lang === "ar" ? "👥 المستخدمين والصلاحيات" : "👥 Users & Permissions"}
-        </button>
+
       </div>
 
       {/* Tab 1: Company Profile Configuration */}
@@ -1352,577 +753,156 @@ $$;`;
                   </p>
                 </div>
 
-                {/* Operations Panel */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                   
-                  {/* Test Connection Button */}
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={isTestingConnection}
-                    className="bg-[#18181b] hover:bg-zinc-800 border border-zinc-800 text-zinc-100 hover:text-white rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
-                  >
-                    <RefreshCw className={`w-5 h-5 text-indigo-400 ${isTestingConnection ? "animate-spin" : ""}`} />
-                    <span>{isRtl ? "فحص و اختبار الاتصال" : "Test Live Connection"}</span>
-                  </button>
-
-                  {/* Push Backup Data (Local to Cloud) */}
-                  <button
-                    onClick={handlePushToSupabase}
-                    disabled={isSyncingToSupabase}
-                    className="bg-[#18181b] hover:bg-zinc-850 border border-emerald-500/15 text-emerald-400 hover:text-emerald-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
-                  >
-                    <Upload className="w-5 h-5 text-emerald-500" />
-                    <span>{isRtl ? "رفع النسخة المحلية الاحتياطية ☁️" : "Push Browser Backup to Cloud ☁️"}</span>
-                  </button>
-
-                  {/* Pull Local Data (Cloud to Local) */}
-                  <button
-                    onClick={handlePullFromSupabase}
-                    disabled={isPullingFromSupabase}
-                    className="bg-[#18181b] hover:bg-zinc-850 border border-indigo-500/15 text-indigo-400 hover:text-indigo-350 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
-                  >
-                    <Download className="w-5 h-5 text-indigo-400" />
-                    <span>{isRtl ? "جلب وتنزيل قاعدة البيانات" : "Pull Data from Supabase"}</span>
-                  </button>
-
-                  {/* Download Compressed Backup (ZIP) */}
+                {/* Download Backup + Reminder Time */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
                     onClick={handleDownloadBackup}
                     disabled={isBackingUp}
-                    className="bg-[#18181b] hover:bg-zinc-850 border border-amber-500/15 text-amber-400 hover:text-amber-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+                    className="bg-[#18181b] hover:bg-zinc-800 border border-amber-500/15 text-amber-400 hover:text-amber-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
                   >
                     <Download className={`w-5 h-5 text-amber-500 ${isBackingUp ? "animate-bounce" : ""}`} />
-                    <span>{isRtl ? "تنزيل نسخة احتياطية مضغوطة 📦" : "Download Backup ZIP 📦"}</span>
+                    <span>{isRtl ? "تنزيل نسخة احتياطية 📦" : "Download Backup 📦"}</span>
                   </button>
-
+                  <button
+                    onClick={() => {
+                      const current = localStorage.getItem("corevia_backup_reminder_days") || "7";
+                      const days = prompt(isRtl ? "كم يوماً بين تذكيرات النسخ الاحتياطي؟" : "Days between backup reminders?", current);
+                      if (days && !isNaN(parseInt(days))) {
+                        localStorage.setItem("corevia_backup_reminder_days", days);
+                        onTriggerNotification(isRtl ? `✅ تم تعيين التذكير كل ${days} يوم` : `✅ Reminder set every ${days} days`);
+                      }
+                    }}
+                    className="bg-[#18181b] hover:bg-zinc-800 border border-indigo-500/15 text-indigo-400 hover:text-indigo-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>{isRtl ? "تعديل وقت التذكير" : "Edit Reminder Time"}</span>
+                  </button>
                 </div>
-
-                {/* DB Test Result Output */}
-                {dbTestResult && (
-                  <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900 font-mono text-[10.5px] text-zinc-400 text-left space-y-1" dir="ltr">
-                    <span className="text-zinc-500">DATABASE_DIAGNOSTICS_PAYLOAD:</span>
-                    <pre className="overflow-x-auto whitespace-pre-wrap mt-1 text-zinc-200">
-                      {dbTestResult === "CONNECTED_BUT_NO_TABLES" && (
-                        "🟢 Connection verified! But table structures are missing. Run SQL script below to provision standard schema."
-                      )}
-                      {dbTestResult === "FULLY_CONNECTED" && (
-                        "🟢 Verified active link! Corevia ERP PostgreSQL schema tables are online and fully queried."
-                      )}
-                      {dbTestResult === "CONNECTED_AND_SYNCED" && (
-                        "✅ Succeeded: Packaged profile properties, orders, products, suppliers, salary and expenses uploaded successfully!"
-                      )}
-                      {dbTestResult === "CONNECTED_AND_PULLED" && (
-                        "✅ Succeeded: Overwritten browser cache and retrieved latest cloud schema datasets."
-                      )}
-                      {!["CONNECTED_BUT_NO_TABLES", "FULLY_CONNECTED", "CONNECTED_AND_SYNCED", "CONNECTED_AND_PULLED"].includes(dbTestResult) && dbTestResult}
-                    </pre>
-                  </div>
-                )}
 
               </div>
             )}
           </div>
 
-          {/* COPY SCRIPT SQL ACCORDION CARD */}
+          {/* Page Lock Management */}
           <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-3">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-emerald-500" />
-                <h4 className="text-xs font-bold text-white">
-                  {isRtl ? "سكريبت تهيئة وجداول SQL أولية للبث" : "Supabase PostgreSQL Provisioning SQL Script"}
-                </h4>
+            <h3 className="text-sm font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
+              <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+              <span>{isRtl ? "إدارة قفل الصفحات" : "Page Lock Management"}</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "كلمة مرور قفل الصفحات" : "Page Lock Password"}
+                </label>
+                <input
+                  type="text"
+                  value={pageLockPassword}
+                  onChange={(e) => setPageLockPassword(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+              <div className="flex items-end pb-1">
+                <button
+                  onClick={() => {
+                    if (!pageLockPassword.trim()) return;
+                    localStorage.setItem("corevia_page_lock_password", pageLockPassword);
+                    onTriggerNotification(isRtl ? "✅ تم حفظ كلمة مرور قفل الصفحات" : "✅ Page lock password saved");
+                  }}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                >
+                  {isRtl ? "حفظ كلمة القفل" : "Save Lock Password"}
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="text-slate-400 font-bold text-[10.5px] mb-2">
+                {isRtl ? "الصفحات المقفلة:" : "Locked Pages:"}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {["workers", "expenses", "suppliers", "profit", "yearly"].map(page => (
+                  <label key={page} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={lockedPages.includes(page)}
+                      onChange={() => {
+                        setLockedPages(prev =>
+                          prev.includes(page) ? prev.filter(p => p !== page) : [...prev, page]
+                        );
+                      }}
+                      className="w-4 h-4 accent-amber-500"
+                    />
+                    <span className="text-xs text-slate-300 capitalize">{page}</span>
+                  </label>
+                ))}
               </div>
               <button
-                onClick={() => setShowSqlSchema(!showSqlSchema)}
-                className="text-xs font-extrabold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-3 py-1 bg-zinc-900 rounded-lg cursor-pointer"
+                onClick={() => {
+                  localStorage.setItem("corevia_locked_pages", JSON.stringify(lockedPages));
+                  onTriggerNotification(isRtl ? "✅ تم حفظ الصفحات المقفلة" : "✅ Locked pages saved");
+                }}
+                className="mt-3 py-1.5 px-4 bg-[#27272a] hover:bg-[#3f3f46] text-white rounded-lg text-xs font-bold cursor-pointer"
               >
-                {showSqlSchema ? (isRtl ? "إخفاء الكود ✕" : "Hide Script ✕") : (isRtl ? "عرض السكريبت 📄" : "Show Script 📄")}
+                {isRtl ? "حفظ الصفحات المقفلة" : "Save Locked Pages"}
               </button>
             </div>
-
-            <p className="text-xs text-zinc-450 leading-relaxed">
-              💡 {isRtl 
-                ? "لتهيئة الجداول وتجنيب المشروع أخطاء الاتصال، فقط انسخ هذا الكريبت المجمع، واذهب إلى لوحة تحكم Supabase > SQL Editor > اضغط على New Query والصق السكريبت واضغط على RUN لتثبيته في ثانية واحدة!"
-                : "To easily initialize Postgres tables for Corevia ERP, copy this optimized structure, and navigate to your Supabase Dashboard > SQL Editor > Paste and click RUN!"}
-            </p>
-
-            {showSqlSchema && (
-              <div className="space-y-2">
-                <div className="flex justify-end">
-                  <button
-                    onClick={copySqlSchemaText}
-                    className="flex items-center gap-1 text-[10px] uppercase font-black tracking-wider bg-emerald-500/15 border border-emerald-500/25 hover:bg-emerald-550/20 text-emerald-400 px-3 py-1.5 rounded-lg active:scale-95 transition cursor-pointer"
-                  >
-                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedSql ? (isRtl ? "تم النسخ!" : "COPIED!") : (isRtl ? "نسخ الكود بالكامل" : "COPY SCRIPT")}</span>
-                  </button>
-                </div>
-                
-                <div className="relative rounded-xl overflow-hidden border border-zinc-850 bg-zinc-950 max-h-72 overflow-y-auto" dir="ltr">
-                  <pre className="p-4 text-[10px] text-zinc-300 font-mono text-left whitespace-pre select-all">
-{`-- Corevia Enterprise Database SQL Schema & Security Hardening
--- Paste this script into your Supabase SQL Editor and run it in 1 click!
-
--- 0. Tenant Companies and Users
-create table if not exists corevia_companies (
-  id text primary key,
-  name text not null,
-  business_type text,
-  owner_name text,
-  phone text,
-  email text,
-  seatsLimit integer default 5,
-  accountStatus text default 'Active',
-  subscriptionPlan text default 'Standard_Monthly',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_saas_users (
-  user_id text primary key,
-  company_id text references corevia_companies(id) on delete set null,
-  email text not null,
-  username text,
-  has_completed_onboarding boolean default false,
-  role text default 'admin',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_company_users (
-  id text primary key,
-  company_id text default 'cop_default',
-  full_name text not null,
-  phone text not null,
-  email text,
-  username text,
-  job_title text,
-  password text,
-  assigned_responsibilities text,
-  allowed_pages jsonb default '[]'::jsonb,
-  status text default 'Active',
-  last_activity text,
-  auth_user_id text,
-  invitation_token text,
-  invitation_expires text,
-  invitation_used boolean default false,
-  deleted_at timestamp with time zone default null,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 1. Business Profile
-create table if not exists corevia_profile (
-  id text primary key,
-  company_id text default null,
-  business_name text not null,
-  business_type text,
-  currency text default 'DZD',
-  country text default 'Algeria',
-  owner_name text,
-  phone text,
-  email text,
-  address text,
-  website text,
-  commercial_registry text,
-  tax_number text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 2. Products and Inventory
-create table if not exists corevia_products (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  wholesale_cost_price numeric not null,
-  wholesale_percentage numeric,
-  wholesale_price numeric not null,
-  retail_cost_price numeric not null,
-  retail_percentage numeric,
-  retail_price numeric not null,
-  colors jsonb default '[]'::jsonb,
-  sizes text[] default '{}'::text[],
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_inventory_basic (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_sub (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_return (
-  id text primary key,
-  company_id text default 'cop_default',
-  order_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_stock_movements (
-  id text primary key,
-  company_id text default 'cop_default',
-  date timestamp with time zone default timezone('utc'::text, now()),
-  order_id text,
-  product_name text,
-  color text,
-  size text,
-  quantity_change numeric,
-  movement_type text,
-  source text
-);
-
--- 3. Corevia Orders
-create table if not exists corevia_orders (
-  id text primary key,
-  company_id text default 'cop_default',
-  date text not null,
-  customer_name text not null,
-  phone text not null,
-  wilaya text,
-  commune text,
-  delivery_location text,
-  delivery_company text,
-  delivery_type text,
-  delivery_price numeric default 0,
-  items jsonb default '[]'::jsonb,
-  total_price numeric not null,
-  paid_amount numeric default 0,
-  discount numeric default 0,
-  customer_pays_delivery boolean default true,
-  is_exchange boolean default false,
-  exchange_order_ref text,
-  agent_name text,
-  source text,
-  status text default 'pending',
-  return_cost numeric,
-  return_date text,
-  notes text,
-  deleted_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 4. Supplier Pipeline
-create table if not exists corevia_suppliers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  phone text,
-  address text,
-  email text,
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 5. Business Expenses
-create table if not exists corevia_expenses (
-  id text primary key,
-  company_id text default 'cop_default',
-  type text not null,
-  name text,
-  amount numeric,
-  date text,
-  month_year text,
-  platform text,
-  amount_usd numeric,
-  exchange_rate numeric,
-  amount_currency numeric,
-  start_date text,
-  end_date text,
-  notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 6. Payroll & Workers
-create table if not exists corevia_workers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  code text,
-  phone text,
-  base_salary numeric,
-  daily_hours numeric,
-  overtime_rate numeric,
-  role text,
-  monthly_salary numeric,
-  payrolls jsonb default '[]'::jsonb,
-  created_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_salary_sheets (
-  id text primary key,
-  company_id text default 'cop_default',
-  worker_id text not null,
-  worker_name text,
-  month_year text,
-  date_from text,
-  date_to text,
-  overtime_hours numeric,
-  absence_days numeric,
-  missing_hours numeric,
-  paid_vacation_days numeric,
-  expenses jsonb default '[]'::jsonb,
-  pay_status text,
-  calculated_salary jsonb,
-  updated_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_employee_submissions (
-  id text primary key,
-  company_id text default 'cop_default',
-  employee_id text not null,
-  employee_name text not null,
-  type text not null,
-  amount numeric not null,
-  description text,
-  date text not null,
-  status text default 'pending',
-  created_at text
-);
-
--- 7. Realtime Chat Messages
-create table if not exists corevia_chat_messages (
-  id text primary key,
-  company_id text default 'cop_default',
-  sender_id text not null,
-  sender_name text not null,
-  sender_job_title text,
-  content text,
-  voice_url text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 8. Enterprise Core Activity logs audit trail
-create table if not exists corevia_activity_logs (
-  id text primary key,
-  company_id text default 'cop_default',
-  actor_name text not null,
-  actor_role text,
-  operation text not null,
-  item_type text,
-  old_value jsonb,
-  new_value jsonb,
-  ip_address text,
-  browser_details text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- --- SAAS MULTI-TENANT ISOLATION POLICIES (RLS SECURITY) ---
-alter table corevia_companies enable row level security;
-alter table corevia_saas_users enable row level security;
-alter table corevia_company_users enable row level security;
-alter table corevia_profile enable row level security;
-alter table corevia_products enable row level security;
-alter table corevia_inventory_basic enable row level security;
-alter table corevia_inventory_sub enable row level security;
-alter table corevia_inventory_return enable row level security;
-alter table corevia_stock_movements enable row level security;
-alter table corevia_orders enable row level security;
-alter table corevia_suppliers enable row level security;
-alter table corevia_expenses enable row level security;
-alter table corevia_workers enable row level security;
-alter table corevia_salary_sheets enable row level security;
-alter table corevia_employee_submissions enable row level security;
-alter table corevia_chat_messages enable row level security;
-alter table corevia_activity_logs enable row level security;
-
--- Define a policy helper query concept (Secure claim lookup)
-drop policy if exists tenant_isolation on corevia_companies;
-create policy tenant_isolation on corevia_companies for all using (
-  id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), id)
-);
-
-drop policy if exists tenant_isolation on corevia_saas_users;
-create policy tenant_isolation on corevia_saas_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
-);
-
-drop policy if exists tenant_isolation on corevia_company_users;
-create policy tenant_isolation on corevia_company_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
-);
-
--- Apply standard tenant filter policies to remaining framework tables
-do $$
-declare
-  t text;
-begin
-  for t in array['corevia_profile', 'corevia_products', 'corevia_inventory_basic', 'corevia_inventory_sub', 'corevia_inventory_return', 'corevia_stock_movements', 'corevia_orders', 'corevia_suppliers', 'corevia_expenses', 'corevia_workers', 'corevia_salary_sheets', 'corevia_employee_submissions', 'corevia_chat_messages', 'corevia_activity_logs']
-  loop
-    execute format('drop policy if exists tenant_isolation_policy on %I;', t);
-    execute format('create policy tenant_isolation_policy on %I for all using (
-      company_id = coalesce(
-        (select company_id from corevia_saas_users where user_id = auth.uid() limit 1),
-        (select company_id from corevia_company_users where id = auth.uid() limit 1),
-        company_id
-      )
-    );', t);
-  end loop;
-end;
-$$;
-
--- --- DATABASE-FIRST SECURITY-CRITICAL PROCEDURAL FUNCTIONS ---
-
--- 1. Database-First Payroll Calculator RPC Function
-create or replace function calculate_worker_payroll_v1(
-  p_base_salary numeric,
-  p_working_days_count numeric,
-  p_absence_days_count numeric,
-  p_overtime_hours_count numeric,
-  p_daily_working_hours numeric,
-  p_overtime_multiplier numeric,
-  p_deductions_amount numeric,
-  p_bonuses_amount numeric
-)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_daily_base_rate numeric;
-  v_hourly_overtime_rate numeric;
-  v_overtime_pay numeric;
-  v_absence_deduction numeric;
-  v_net_salary numeric;
-begin
-  v_daily_base_rate := round((p_base_salary / coalesce(p_working_days_count, 22)), 4);
-  v_hourly_overtime_rate := round(((p_base_salary / (coalesce(p_working_days_count, 22) * coalesce(p_daily_working_hours, 8))) * coalesce(p_overtime_multiplier, 1.5)), 4);
-  v_overtime_pay := round((coalesce(p_overtime_hours_count, 0) * v_hourly_overtime_rate), 2);
-  v_absence_deduction := round((coalesce(p_absence_days_count, 0) * v_daily_base_rate), 2);
-  v_net_salary := round((p_base_salary + v_overtime_pay - v_absence_deduction - coalesce(p_deductions_amount, 0) + coalesce(p_bonuses_amount, 0)), 2);
-  if v_net_salary < 0 then
-    v_net_salary := 0;
-  end if;
-  return json_build_object(
-    'daily_base_rate', v_daily_base_rate,
-    'hourly_overtime_rate', v_hourly_overtime_rate,
-    'overtime_pay', v_overtime_pay,
-    'absence_deduction', v_absence_deduction,
-    'net_salary', v_net_salary
-  );
-end;
-$$;
-
--- 2. Subscription User Seats Verification RPC Function
-create or replace function check_seat_limit_v1(p_company_id text)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_limit integer;
-  v_used integer;
-  v_allowed boolean;
-begin
-  select coalesce(seatsLimit, 5) into v_limit from corevia_companies where id = p_company_id;
-  if v_limit is null then
-    v_limit := 5;
-  end if;
-  select count(*)::integer into v_used from corevia_company_users where company_id = p_company_id and (deleted_at is null);
-  v_used := v_used + 1; -- 1 Owner seat allocation
-  if v_used >= v_limit then
-    v_allowed := false;
-  else
-    v_allowed := true;
-  end if;
-  return json_build_object(
-    'limit', v_limit,
-    'used', v_used,
-    'allowed', v_allowed
-  );
-end;
-$$;
-
--- 3. Transacted Atomic Inventory & Stock Movements Process triggers
-create or replace function process_inventory_and_logs_v1(
-  p_company_id text,
-  p_order_id text,
-  p_product_name text,
-  p_color text,
-  p_size text,
-  p_qty_change numeric,
-  p_movement_type text,
-  p_source text
-)
-returns void
-language plpgsql
-security definer
-as $$
-begin
-  -- Insert auditable movement record
-  insert into corevia_stock_movements(id, company_id, order_id, product_name, color, size, quantity_change, movement_type, source)
-  values ('mv-' || floor(random() * 10000000)::text, p_company_id, p_order_id, p_product_name, p_color, p_size, p_qty_change, p_movement_type, p_source);
-  
-  -- Update primary sub inventory
-  if p_size is not null and p_size <> '' then
-    insert into corevia_inventory_sub(id, company_id, product_id, product_name, color, size, quantity)
-    values ('sub-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_size, p_qty_change)
-    on conflict (id) do update set quantity = corevia_inventory_sub.quantity + p_qty_change;
-  end if;
-
-  -- Update basic inventory
-  insert into corevia_inventory_basic(id, company_id, product_id, product_name, color, quantity)
-  values ('bsc-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_qty_change)
-  on conflict (id) do update set quantity = corevia_inventory_basic.quantity + p_qty_change;
-end;
-$$;`}
-                  </pre>
-                </div>
-              </div>
-            )}
           </div>
+
+          {/* Change Admin Password */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
+              <Key className="w-5 h-5 text-rose-500" />
+              <span>{isRtl ? "تغيير كلمة مرور المدير" : "Change Admin Password"}</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "كلمة المرور الحالية" : "Current Password"}
+                </label>
+                <input
+                  type="password"
+                  value={currentAdminPw}
+                  onChange={(e) => setCurrentAdminPw(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "كلمة المرور الجديدة" : "New Password"}
+                </label>
+                <input
+                  type="password"
+                  value={newAdminPw}
+                  onChange={(e) => setNewAdminPw(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!newAdminPw || newAdminPw.length < 6) {
+                  onTriggerNotification(isRtl ? "❌ كلمة المرور يجب أن تكون 6 أحرف على الأقل" : "❌ Password must be at least 6 characters");
+                  return;
+                }
+                try {
+                  const { error } = await supabase.auth.updateUser({ password: newAdminPw });
+                  if (error) throw error;
+                  onTriggerNotification(isRtl ? "✅ تم تغيير كلمة المرور بنجاح" : "✅ Password changed successfully");
+                  setCurrentAdminPw("");
+                  setNewAdminPw("");
+                } catch (err: any) {
+                  onTriggerNotification(isRtl ? "❌ فشل تغيير كلمة المرور: " + (err?.message || "") : "❌ Failed: " + (err?.message || ""));
+                }
+              }}
+              className="py-2.5 px-6 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+            >
+              {isRtl ? "تغيير كلمة المرور" : "Change Password"}
+            </button>
+          </div>
+
         </div>
       )}
 
@@ -1982,17 +962,6 @@ $$;`}
         </div>
       )}
 
-      {activePage === "users" && (
-        <div className="bounce-in">
-          <UsersPermissionsView
-            lang={lang}
-            session={session}
-            onTriggerNotification={onTriggerNotification}
-            seatsLimit={seatsLimit}
-            companyName={bName || ""}
-          />
-        </div>
-      )}
 
     </div>
   );

@@ -66,11 +66,14 @@ export default function PageLockModal({
     }
   }, [masterPassword, masterInput, isRtl]);
 
-  if (unlocked) return <>{children}</>;
-
   return (
-    <div className="flex items-center justify-center p-6 min-h-[60vh]">
-      <div className="w-full max-w-md bg-[#121214] border border-[#27272a] rounded-2xl p-8 shadow-2xl text-center space-y-5">
+    <div className="relative">
+      <div className={unlocked ? "" : "pointer-events-none select-none blur-sm"}>
+        {children}
+      </div>
+      {!unlocked && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="w-full max-w-md bg-[#121214] border border-[#27272a] rounded-2xl p-8 shadow-2xl text-center space-y-5">
         <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto">
           <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -143,7 +146,9 @@ export default function PageLockModal({
             </button>
           </div>
         )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

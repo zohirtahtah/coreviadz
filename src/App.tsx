@@ -2305,9 +2305,7 @@ export default function App() {
             onSaveCustomColors={saveCustomColorsAndPersist}
             onTriggerNotification={triggerToast}
             onTriggerRefreshOrders={() => setOrders(getOrders())}
-            onReloadAllStates={loadStateFromLocal}
             session={session}
-            seatsLimit={seatsLimit}
           />
         )}
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { 
   Building2, Users, Ban, ShieldAlert, BookOpen, ShieldCheck, Smartphone, 
   Search, Filter, LogOut, Plus, Minus, KeyRound, Globe, RefreshCcw, 
-  Activity, Landmark, UserCheck, Calendar, Phone, Mail, Shield, AlertTriangle, Eye, ShieldX
+  Activity, Landmark, UserCheck, Calendar, Phone, Mail, Shield, AlertTriangle, Eye, ShieldX, Settings
 } from "lucide-react";
 import { SaaSCompany, SaaSActivityLog, SuperAdminConfig, LanguageType } from "../types";
 import { supabase } from "../supabaseClient";
@@ -58,12 +58,17 @@ export default function SuperAdminView({
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug" | "tickets">("directory");
+  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug" | "tickets" | "settings">("directory");
 
   // Support ticket states
   const [supportTickets, setSupportTickets] = useState<any[]>([]);
   const [unreadTicketCount, setUnreadTicketCount] = useState(0);
   const [ticketReplyMap, setTicketReplyMap] = useState<Record<string, string>>({});
+
+  // General settings state
+  const [adminPhone, setAdminPhone] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [loadingSettings, setLoadingSettings] = useState(false);
 
   // Selection state for drill-down action of device list or editing
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
@@ -349,6 +354,22 @@ export default function SuperAdminView({
     const interval = setInterval(fetchTickets, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Load general settings from corevia_system_settings
+  useEffect(() => {
+    if (!supabase || !session?.company_id) return;
+    (async () => {
+      const { data } = await supabase
+        .from("corevia_system_settings")
+        .select("*")
+        .eq("id", session.company_id)
+        .maybeSingle();
+      if (data) {
+        setAdminPhone(data.admin_phone || "");
+        setAdminEmail(data.admin_email || "");
+      }
+    })();
+  }, [session?.company_id]);
 
   // Filter computation
   const filteredCompanies = useMemo(() => {
@@ -914,6 +935,15 @@ export default function SuperAdminView({
                   </span>
                 )}
               </span>
+            </button>
+            <button
+              onClick={() => setActiveSubTab("settings")}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "settings" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>{isRtl ? "الإعدادات العامة" : "Settings"}</span>
             </button>
           </div>
 
@@ -1781,6 +1811,76 @@ export default function SuperAdminView({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB VI: GENERAL SETTINGS */}
+      {activeSubTab === "settings" && (
+        <div className="space-y-6" id="super_admin_tab_settings">
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <Settings className="w-4 h-4 text-indigo-400" />
+                <span>{isRtl ? "الإعدادات العامة للمنصة" : "General Platform Settings"}</span>
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "هاتف الأدمن (للإشعارات)" : "Admin Phone (for notifications)"}
+                </label>
+                <input
+                  type="text"
+                  value={adminPhone}
+                  onChange={(e) => setAdminPhone(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "بريد الأدمن (للإشعارات)" : "Admin Email (for notifications)"}
+                </label>
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!supabase || !session?.company_id) return;
+                setLoadingSettings(true);
+                try {
+                  const { error } = await supabase.from("corevia_system_settings").upsert({
+                    id: session.company_id,
+                    admin_phone: adminPhone,
+                    admin_email: adminEmail,
+                    updated_at: new Date().toISOString(),
+                  });
+                  if (error) throw error;
+                  onTriggerNotification(
+                    isRtl ? "✅ تم حفظ إعدادات المنصة العامة" : "✅ General settings saved",
+                    "success"
+                  );
+                } catch (err: any) {
+                  onTriggerNotification(
+                    isRtl ? "❌ فشل في الحفظ: " + err.message : "❌ Save failed: " + err.message,
+                    "info"
+                  );
+                } finally {
+                  setLoadingSettings(false);
+                }
+              }}
+              disabled={loadingSettings}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer"
+            >
+              {loadingSettings
+                ? (isRtl ? "جاري الحفظ..." : "Saving...")
+                : (isRtl ? "حفظ الإعدادات العامة" : "Save General Settings")}
+            </button>
           </div>
         </div>
       )}
