@@ -49,6 +49,7 @@ import {
 } from "./googleSyncUtils";
 import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { handleLoginSeatCheck, releaseSeatOnSignOut } from "./lib/seatsManager";
 import { 
   fetchUserSaaSMeta, 
   saveOnboardingCompletionInCloud, 
@@ -836,6 +837,9 @@ export default function App() {
     } catch (err) {
       console.warn("Could not contact server to clear auth cookies:", err);
     }
+
+    // Release the active seat on explicit sign-out
+    await releaseSeatOnSignOut(session?.company_id);
 
     if (supabase) {
       try {
@@ -1659,7 +1663,23 @@ export default function App() {
         setLang={setLang}
         theme={theme}
         setTheme={setTheme}
-        onAuthSuccess={(newSession) => {
+        onAuthSuccess={async (newSession) => {
+          // Check seat availability before allowing login
+          if (newSession?.company_id) {
+            try {
+              await handleLoginSeatCheck(newSession.company_id);
+            } catch (e: any) {
+              if (e?.message === "SEAT_LIMIT_EXCEEDED") {
+                triggerToast(
+                  lang === "ar"
+                    ? "تجاوزت الشركة الحد الأقصى للمقاعد المتاحة. يرجى تسجيل الخروج من جهاز آخر أولاً."
+                    : "Company has reached the maximum active seat limit. Please sign out from another device first.",
+                  "info"
+                );
+              }
+              return;
+            }
+          }
           setSession(newSession);
           saveUserSession(newSession);
           
