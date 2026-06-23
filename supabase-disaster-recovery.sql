@@ -6,8 +6,13 @@
 -- scheduler (e.g. GitHub Actions, cron-job.org) to invoke
 -- CALL generate_daily_disaster_snapshot(); once per day.
 
--- 1. Enable pg_cron scheduling extension (idempotent)
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- 1. Enable pg_cron scheduling extension (optional — Team plan+ only)
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pg_cron not available — scheduling skipped. Use external scheduler instead.';
+END $$;
 
 -- 2. Disaster Recovery Backup Archive Table
 -- Stores isolated per-company, per-table JSON snapshots
@@ -70,11 +75,18 @@ $$;
 
 -- 5. Schedule the job daily at midnight (00:00)
 -- Requires pg_cron extension (Team plan+ on Supabase)
-SELECT cron.schedule(
-    'corevia_daily_disaster_backup',
-    '0 0 * * *',
-    'CALL generate_daily_disaster_snapshot();'
-);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.schedule(
+        'corevia_daily_disaster_backup',
+        '0 0 * * *',
+        'CALL generate_daily_disaster_snapshot();'
+    );
+  ELSE
+    RAISE NOTICE 'pg_cron not installed — skip scheduling. Call generate_daily_disaster_snapshot() manually or via external cron.';
+  END IF;
+END $$;
 
 -- 6. Super Admin Single-Company Restore Function
 -- Restores ONE company's data from a specific backup date
