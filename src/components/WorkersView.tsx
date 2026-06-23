@@ -7,6 +7,7 @@ import {
   XCircle
 } from "lucide-react";
 import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
+import { supabase } from "../supabaseClient";
 
 import { cleanArabicName, cleanPhoneDigits } from "./UsersPermissionsView";
 import { calculateWorkerPayroll } from "../supabaseSync";
@@ -355,6 +356,9 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const [formPaid, setFormPaid] = useState(false);
   const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
   const [formPaymentDate, setFormPaymentDate] = useState("");
+  // Login credentials for worker
+  const [formEmail, setFormEmail] = useState("");
+  const [formPassword, setFormPassword] = useState("");
 
   // Labels helper
   const getsLabel = (lblAr: string, lblFr: string, lblEn: string) => {
@@ -1054,6 +1058,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     setFormPaid(false);
     setFormPaymentAmount(0);
     setFormPaymentDate("");
+    setFormEmail("");
+    setFormPassword("");
   };
 
   // Handle month selection change in adding/editing employee profile
@@ -1128,7 +1134,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   };
 
   // Form Submission
-  const handleSubmitForm = (e: React.FormEvent) => {
+  const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       onTriggerNotification(isRtl ? "يلزم إدخال اسم العامل للمتابعة" : "Employee name is required", "warning");
@@ -1358,6 +1364,28 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
       onSaveWorkers(listCopy);
+
+      // Create login account if email provided
+      if (formEmail.trim() && supabase) {
+        try {
+          const username = formName.trim().replace(/\s+/g, "_").toLowerCase();
+          const { error: userErr } = await supabase.from("corevia_company_users").upsert({
+            user_id: freshId,
+            company_id: session?.company_id || "",
+            email: formEmail.trim().toLowerCase(),
+            username,
+            password: formPassword || formPhone.trim(),
+            role: formRole,
+            status: "Active",
+            allowed_pages: ["dashboard", "orders", "products", "inventory", "workers", "expenses", "reports", "yearly", "profit", "activity_log"],
+            created_at: new Date().toISOString(),
+          });
+          if (userErr) console.warn("WorkersView: Failed to create login account", userErr);
+        } catch (loginErr) {
+          console.warn("WorkersView: Login account creation error", loginErr);
+        }
+      }
+
       onTriggerNotification(isRtl ? "تم تفصيل وتوظيف العامل الجديد بنجاح" : "Staff onboarded successfully!", "success");
     }
 
@@ -2369,6 +2397,28 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                     onChange={(e) => setFormPhone(e.target.value)}
                     className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
                     placeholder="مكالمات الموظف"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-zinc-500 font-bold">البريد الإلكتروني (للدخول إلى الموقع)</label>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
+                    placeholder="email@example.com"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-zinc-500 font-bold">كلمة المرور (للدخول إلى الموقع)</label>
+                  <input
+                    type="password"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                    className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
+                    placeholder="أدخل كلمة المرور"
                   />
                 </div>
 
