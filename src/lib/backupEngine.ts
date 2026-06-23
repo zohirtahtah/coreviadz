@@ -3,32 +3,22 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
 const TABLES: { key: string; table: string; label: string }[] = [
-  { key: "orders", table: "corevia_orders", label: "الطلبيات_والمبيعات" },
-  { key: "order_items", table: "corevia_order_items", label: "بنود_الطلبيات" },
-  { key: "products", table: "corevia_products", label: "المنتجات_والطرازات" },
-  { key: "inventory", table: "corevia_inventory", label: "المخزون_الرئيسي" },
-  { key: "suppliers", table: "corevia_suppliers", label: "الموردون_والفواتير" },
-  { key: "expenses", table: "corevia_expenses", label: "المصروفات" },
-  { key: "workers", table: "corevia_workers", label: "العمال_والموظفون" },
-  { key: "stock_movements", table: "corevia_stock_movements", label: "حركة_المخزون" },
-  { key: "activity_center", table: "corevia_activity_center", label: "سجل_العمليات" },
-  { key: "company_users", table: "corevia_company_users", label: "المستخدمون_والصلاحيات" },
-  { key: "chat_messages", table: "corevia_chat_messages", label: "المراسلات_الداخلية" },
-  { key: "notifications", table: "corevia_notifications", label: "الإشعارات_الداخلية" },
-  { key: "profile", table: "corevia_profile", label: "الملف_التجاري" },
-  { key: "saas_users", table: "corevia_saas_users", label: "حسابات_المدراء_العامة" },
+  { key: "companies", table: "corevia_companies", label: "companies" },
+  { key: "orders", table: "corevia_orders", label: "orders" },
+  { key: "order_items", table: "corevia_order_items", label: "order_items" },
+  { key: "products", table: "corevia_products", label: "products" },
+  { key: "inventory", table: "corevia_inventory", label: "inventory" },
+  { key: "suppliers", table: "corevia_suppliers", label: "suppliers" },
+  { key: "expenses", table: "corevia_expenses", label: "expenses" },
+  { key: "workers", table: "corevia_workers", label: "workers" },
+  { key: "stock_movements", table: "corevia_stock_movements", label: "stock_movements" },
+  { key: "activity_center", table: "corevia_activity_center", label: "activity_logs" },
+  { key: "company_users", table: "corevia_company_users", label: "users" },
+  { key: "chat_messages", table: "corevia_chat_messages", label: "chat_messages" },
+  { key: "notifications", table: "corevia_notifications", label: "notifications" },
+  { key: "profile", table: "corevia_profile", label: "settings" },
+  { key: "saas_users", table: "corevia_saas_users", label: "saas_users" },
 ];
-
-function toCSV(data: any[]): string {
-  if (!data || data.length === 0) return "";
-  const headers = Object.keys(data[0]);
-  const esc = (v: any): string => {
-    if (v === null || v === undefined) return "";
-    const s = typeof v === "object" ? JSON.stringify(v) : String(v);
-    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [headers.map(esc).join(","), ...data.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
-}
 
 export async function generateCompanyBackup(
   companyId: string,
@@ -36,12 +26,12 @@ export async function generateCompanyBackup(
 ): Promise<boolean> {
   try {
     const zip = new JSZip();
-    const safeName = companyName.replace(/[^a-zA-Z0-9_\u0621-\u064A]/g, "_");
+    const safeName = companyName.replace(/[^a-zA-Z0-9_]/g, "_");
     const folderName = `Backup_${safeName}_${new Date().toISOString().split("T")[0]}`;
     const backupFolder = zip.folder(folderName);
     if (!backupFolder) return false;
 
-    const results: Record<string, string> = {};
+    const results: Record<string, { status: string; count: number }> = {};
 
     for (const t of TABLES) {
       try {
@@ -51,23 +41,25 @@ export async function generateCompanyBackup(
           .eq("company_id", companyId);
 
         if (error) {
-          results[t.key] = `ERROR: ${error.message}`;
-          backupFolder.file(`${t.label}.csv`, `ERROR,${error.message}`);
+          results[t.key] = { status: `ERROR: ${error.message}`, count: 0 };
+          backupFolder.file(`${t.label}.json`, JSON.stringify({ error: error.message }, null, 2));
         } else {
-          results[t.key] = `OK: ${data?.length ?? 0} rows`;
-          backupFolder.file(`${t.label}.csv`, toCSV(data || []));
+          const count = data?.length ?? 0;
+          results[t.key] = { status: "OK", count };
+          backupFolder.file(`${t.label}.json`, JSON.stringify(data || [], null, 2));
         }
       } catch (err: any) {
-        results[t.key] = `FAIL: ${err?.message || err}`;
-        backupFolder.file(`${t.label}.csv`, `ERROR,${err?.message || "Unknown"}`);
+        results[t.key] = { status: `FAIL: ${err?.message || err}`, count: 0 };
+        backupFolder.file(`${t.label}.json`, JSON.stringify({ error: err?.message || "Unknown" }, null, 2));
       }
     }
 
-    // Write a manifest file
+    // Write metadata file
     backupFolder.file(
-      "بيان_النسخ.json",
+      "metadata.json",
       JSON.stringify(
         {
+          version: "1.0",
           company: companyName,
           companyId,
           exportedAt: new Date().toISOString(),

@@ -8,8 +8,6 @@ interface PageLockModalProps {
   lang?: "ar" | "en" | "fr";
 }
 
-const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
-
 function getLockKey(pageName: string): string {
   return `corevia_unlock_${pageName}`;
 }
@@ -32,25 +30,20 @@ export default function PageLockModal({
   const lockKey = useMemo(() => getLockKey(pageName), [pageName]);
 
   useEffect(() => {
-    const savedTime = localStorage.getItem(lockKey);
+    const savedTime = sessionStorage.getItem(lockKey);
     if (savedTime) {
-      const elapsed = Date.now() - parseInt(savedTime, 10);
-      if (elapsed < LOCK_DURATION_MS) {
-        setUnlocked(true);
-      } else {
-        localStorage.removeItem(lockKey);
-      }
+      setUnlocked(true);
     }
   }, [lockKey]);
 
   const handleVerify = useCallback(() => {
     if (inputPassword === currentPassword) {
-      localStorage.setItem(lockKey, Date.now().toString());
+      sessionStorage.setItem(lockKey, Date.now().toString());
       setUnlocked(true);
       setError("");
       setInputPassword("");
     } else {
-      setError(isRtl ? "كلمة مرور قفل الصفحات غير صحيحة!" : "Incorrect page lock password!");
+      setError(isRtl ? "الصفحة مقفلة حالياً. يرجى الاتصال بالمسؤول لفتحها." : "The page is currently locked. Please contact your administrator to unlock it.");
     }
   }, [inputPassword, currentPassword, lockKey, isRtl]);
 

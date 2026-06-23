@@ -7,11 +7,11 @@ import React, { useState } from "react";
 import { BusinessProfile, LanguageType } from "../types";
 import { translations } from "../translations";
 import { 
-  Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Upload, Image,
-  Database, CloudLightning, CheckCircle2, Download, Key, AlertCircle
+  Settings, ShieldAlert, Plus, X, Paintbrush, Upload, Image,
+  Download, Key
 } from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
-import { supabase, isSupabaseConfigured } from "../supabaseClient";
+import { supabase } from "../supabaseClient";
 import { generateCompanyBackup } from "../lib/backupEngine";
 
 interface SettingsViewProps {
@@ -100,15 +100,16 @@ export default function SettingsView({
   // New color adding block
   const [newColorEntry, setNewColorEntry] = useState("");
 
-  // Page Lock Management state
-  const [pageLockPassword, setPageLockPassword] = useState(() => localStorage.getItem("corevia_page_lock_password") || "");
-  const [lockedPages, setLockedPages] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("corevia_locked_pages") || "[]"); }
-    catch { return []; }
-  });
+  // Protected Pages state
+  const [masterPwCurrent, setMasterPwCurrent] = useState("");
+  const [masterPwNew, setMasterPwNew] = useState("");
+  const [masterPwConfirm, setMasterPwConfirm] = useState("");
+  const [protectedPagesList, setProtectedPagesList] = useState<string[]>([]);
+  const [savingProtectedPages, setSavingProtectedPages] = useState(false);
   // Admin password change state
   const [currentAdminPw, setCurrentAdminPw] = useState("");
   const [newAdminPw, setNewAdminPw] = useState("");
+  const [confirmAdminPw, setConfirmAdminPw] = useState("");
 
   // Supabase Integration & Synchronization Modules
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -142,6 +143,85 @@ export default function SettingsView({
   };
 
 
+
+  // Load protected pages from DB on mount
+  React.useEffect(() => {
+    if (!supabase || !session?.company_id) return;
+    (async () => {
+      const { data } = await supabase
+        .from("corevia_system_settings")
+        .select("master_password, locked_pages")
+        .eq("id", session.company_id)
+        .maybeSingle();
+      if (data?.master_password) setMasterPwCurrent(data.master_password);
+      if (data?.locked_pages) {
+        try { setProtectedPagesList(JSON.parse(data.locked_pages)); }
+        catch { setProtectedPagesList([]); }
+      }
+    })();
+  }, [session?.company_id]);
+
+  const handleSaveProtectedPages = async () => {
+    if (!supabase || !session?.company_id) return;
+    if (masterPwNew && masterPwNew !== masterPwConfirm) {
+      onTriggerNotification(isRtl ? "❌ كلمة المرور الجديدة غير متطابقة مع التأكيد" : "❌ New password does not match confirmation");
+      return;
+    }
+    setSavingProtectedPages(true);
+    try {
+      const passwordToSave = masterPwNew || masterPwCurrent;
+      const { error: err1 } = await supabase.from("corevia_system_settings").upsert({
+        id: session.company_id,
+        master_password: passwordToSave,
+        locked_pages: JSON.stringify(protectedPagesList),
+        updated_at: new Date().toISOString(),
+      });
+      if (err1) throw err1;
+      // Also persist to corevia_companies for App.tsx to read
+      const { error: err2 } = await supabase.from("corevia_companies").upsert({
+        id: session.company_id,
+        page_lock_password: passwordToSave,
+        locked_pages: protectedPagesList,
+      });
+      if (err2) throw err2;
+      // Fallback sync to localStorage
+      localStorage.setItem("corevia_page_lock_password", passwordToSave);
+      localStorage.setItem("corevia_locked_pages", JSON.stringify(protectedPagesList));
+      setMasterPwCurrent(passwordToSave);
+      setMasterPwNew("");
+      setMasterPwConfirm("");
+      onTriggerNotification(isRtl ? "✅ تم حفظ إعدادات الصفحات المحمية" : "✅ Protected pages settings saved");
+    } catch (err: any) {
+      onTriggerNotification(isRtl ? "❌ فشل الحفظ: " + (err?.message || "") : "❌ Save failed: " + (err?.message || ""));
+    } finally {
+      setSavingProtectedPages(false);
+    }
+  };
+
+  const handleChangeAdminPassword = async () => {
+    if (!newAdminPw || newAdminPw.length < 6) {
+      onTriggerNotification(isRtl ? "❌ كلمة المرور يجب أن تكون 6 أحرف على الأقل" : "❌ Password must be at least 6 characters");
+      return;
+    }
+    if (newAdminPw !== confirmAdminPw) {
+      onTriggerNotification(isRtl ? "❌ كلمة المرور الجديدة غير متطابقة مع التأكيد" : "❌ New password does not match confirmation");
+      return;
+    }
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newAdminPw });
+      if (error) throw error;
+      // Also update corevia_saas_users
+      if (session?.user_id) {
+        await supabase.from("corevia_saas_users").update({ password_hash: newAdminPw }).eq("user_id", session.user_id);
+      }
+      onTriggerNotification(isRtl ? "✅ تم تغيير كلمة المرور بنجاح" : "✅ Password changed successfully");
+      setCurrentAdminPw("");
+      setNewAdminPw("");
+      setConfirmAdminPw("");
+    } catch (err: any) {
+      onTriggerNotification(isRtl ? "❌ فشل تغيير كلمة المرور: " + (err?.message || "") : "❌ Failed: " + (err?.message || ""));
+    }
+  };
 
   // Sub-tabs active page indicator
   const [activePage, setActivePage] = useState<"company" | "control" | "integrations">("company");
@@ -671,193 +751,142 @@ export default function SettingsView({
         </div>
       )}
 
-      {/* Tab 2: Supabase Relational Database Integration & Synchronization Console */}
+      {/* Tab 2: Platform Control */}
       {activePage === "control" && (
-        <div className="space-y-6 bounce-in text-right" id="supabase_connector_console">
-          
-          {/* Main Status Header Card */}
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/60 pb-4 mb-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                  isSupabaseConfigured ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-400"
-                }`}>
-                  <Database className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-white">
-                    {isRtl ? "ربط قاعدة بيانات Supabase (PostgreSQL)" : "Supabase PostgreSQL Database Connector"}
-                  </h3>
-                  <p className="text-[11px] text-zinc-400 mt-0.5">
-                    {isRtl 
-                      ? "إدارة الدخول، وحفظ الطلبيات، والمخزن، والعمال في سحابة مؤمنة."
-                      : "Cloud-hosted relational replication for orders, warehouse stocks and active staff."}
-                  </p>
-                </div>
-              </div>
+        <div className="space-y-4 bounce-in" id="platform_control_console">
 
-              {/* Status Pill */}
-              <div>
-                {isSupabaseConfigured ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full text-[10px] font-black">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isRtl ? "متصل كودياً بالسحابة" : "Connected in code"}</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/25 rounded-full text-[10px] font-black animate-pulse">
-                    <CloudLightning className="w-3.5 h-3.5" />
-                    <span>{isRtl ? "غير متصل (يعمل محلياً)" : "Disconnected (Local Sandbox)"}</span>
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Instruction block based on configure status */}
-            {!isSupabaseConfigured ? (
-              <div className="space-y-4">
-                <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-4 text-xs text-zinc-350 leading-relaxed text-right space-y-2">
-                  <p className="font-bold text-white flex items-center gap-1.5 justify-end">
-                    <span>{isRtl ? "مطلوب إعداد مفاتيح البيئة (Environment Variables)" : "Environment Keys Required!"}</span>
-                    <AlertCircle className="w-4 h-4 text-amber-500" />
-                  </p>
-                  <p>
-                    {isRtl 
-                      ? "لتفعيل الدخول السحابي وحسابات الأدمن الحقيقية والمزامنة عبر Vercel أو الخادم المحلي، يرجى تسجيل الدخول في Supabase.com وإنشاء مشروع جديد، ثم إضافة المتغيرات التالية في الإعدادات الخاصة بموقعك:"
-                      : "To enable live cloud admin accounts, login sessions and multi-device persistence in Vercel or locally, please register at Supabase.com, create a project, and add these environmental variables:"}
-                  </p>
-                  <div className="bg-[#040406]/85 p-3 rounded-lg border border-zinc-800 font-mono text-[10px] text-left text-zinc-400 space-y-1" dir="ltr">
-                    <div>VITE_SUPABASE_URL=<span className="text-zinc-500">_YOUR_SUPABASE_PROJECT_URL_</span></div>
-                    <div>VITE_SUPABASE_ANON_KEY=<span className="text-zinc-500">_YOUR_SUPABASE_ANON_PUBLIC_KEY_</span></div>
-                  </div>
-                </div>
-
-                <div className="text-zinc-400 text-xs">
-                  {isRtl 
-                    ? "💡 بمجرد وضع هذه المتغيرات في لوحة تحكم Vercel أو ملف .env محلياً، سيقوم الموقع تلقائياً بالتحويل من التخزين المحلي المؤقت (LocalStorage) إلى السحاب اللامتناهي للطلبيات والمخازن!"
-                    : "💡 Once configured on Vercel or locally inside your environment variables, Corevia ERP will seamlessly upgrade from local Web storage to persistent Postgres Cloud Synchronization!"}
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-xs text-zinc-350 leading-relaxed space-y-2">
-                  <p className="font-black text-white flex items-center gap-1.5 justify-end">
-                    <span>{isRtl ? "سحابة المزامنة نشطة! 🚀" : "Cloud Connection is Enabled! 🚀"}</span>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </p>
-                  <p>
-                    {isRtl 
-                      ? "لقد قمنا بتثبيت مكتبة Supabase JS بنجاح. يمكنك الآن اختبار الاتصال المباشر وقراءة/كتابة البيانات السحابية، ورفع النسخ المحلية الاحتياطية وتنزيلها من السحاب فورياً."
-                      : "Your application is successfully linked to your PostgreSQL database. You can test your connection, upload current local browser database backups, and recover data anytime."}
-                  </p>
-                </div>
-
-                {/* Download Backup + Reminder Time */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <button
-                    onClick={handleDownloadBackup}
-                    disabled={isBackingUp}
-                    className="bg-[#18181b] hover:bg-zinc-800 border border-amber-500/15 text-amber-400 hover:text-amber-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
-                  >
-                    <Download className={`w-5 h-5 text-amber-500 ${isBackingUp ? "animate-bounce" : ""}`} />
-                    <span>{isRtl ? "تنزيل نسخة احتياطية 📦" : "Download Backup 📦"}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      const current = localStorage.getItem("corevia_backup_reminder_days") || "7";
-                      const days = prompt(isRtl ? "كم يوماً بين تذكيرات النسخ الاحتياطي؟" : "Days between backup reminders?", current);
-                      if (days && !isNaN(parseInt(days))) {
-                        localStorage.setItem("corevia_backup_reminder_days", days);
-                        onTriggerNotification(isRtl ? `✅ تم تعيين التذكير كل ${days} يوم` : `✅ Reminder set every ${days} days`);
-                      }
-                    }}
-                    className="bg-[#18181b] hover:bg-zinc-800 border border-indigo-500/15 text-indigo-400 hover:text-indigo-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span>{isRtl ? "تعديل وقت التذكير" : "Edit Reminder Time"}</span>
-                  </button>
-                </div>
-
-              </div>
-            )}
-          </div>
-
-          {/* Page Lock Management */}
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
-              <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-              <span>{isRtl ? "إدارة قفل الصفحات" : "Page Lock Management"}</span>
+          {/* Backup Section */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-5 space-y-4">
+            <h3 className="text-xs font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
+              <Download className="w-4 h-4 text-amber-500" />
+              <span>{isRtl ? "النسخ الاحتياطي" : "Backup"}</span>
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
-                  {isRtl ? "كلمة مرور قفل الصفحات" : "Page Lock Password"}
-                </label>
-                <input
-                  type="text"
-                  value={pageLockPassword}
-                  onChange={(e) => setPageLockPassword(e.target.value)}
-                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
-                />
-              </div>
-              <div className="flex items-end pb-1">
-                <button
-                  onClick={() => {
-                    if (!pageLockPassword.trim()) return;
-                    localStorage.setItem("corevia_page_lock_password", pageLockPassword);
-                    onTriggerNotification(isRtl ? "✅ تم حفظ كلمة مرور قفل الصفحات" : "✅ Page lock password saved");
-                  }}
-                  className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold cursor-pointer"
-                >
-                  {isRtl ? "حفظ كلمة القفل" : "Save Lock Password"}
-                </button>
-              </div>
-            </div>
-            <div>
-              <p className="text-slate-400 font-bold text-[10.5px] mb-2">
-                {isRtl ? "الصفحات المقفلة:" : "Locked Pages:"}
-              </p>
-              <div className="flex flex-wrap gap-3">
-                {["workers", "expenses", "suppliers", "profit", "yearly"].map(page => (
-                  <label key={page} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={lockedPages.includes(page)}
-                      onChange={() => {
-                        setLockedPages(prev =>
-                          prev.includes(page) ? prev.filter(p => p !== page) : [...prev, page]
-                        );
-                      }}
-                      className="w-4 h-4 accent-amber-500"
-                    />
-                    <span className="text-xs text-slate-300 capitalize">{page}</span>
-                  </label>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={handleDownloadBackup}
+                disabled={isBackingUp}
+                className="flex-1 min-w-[140px] bg-[#18181b] hover:bg-zinc-800 border border-amber-500/15 text-amber-400 hover:text-amber-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+              >
+                <Download className={`w-5 h-5 text-amber-500 ${isBackingUp ? "animate-bounce" : ""}`} />
+                <span>{isRtl ? "تنزيل نسخة احتياطية" : "Download Backup"}</span>
+              </button>
               <button
                 onClick={() => {
-                  localStorage.setItem("corevia_locked_pages", JSON.stringify(lockedPages));
-                  onTriggerNotification(isRtl ? "✅ تم حفظ الصفحات المقفلة" : "✅ Locked pages saved");
+                  if (confirm(isRtl ? "هل أنت متأكد من حذف النسخة الاحتياطية المحفوظة؟" : "Are you sure you want to delete the saved backup?")) {
+                    localStorage.removeItem("corevia_cached_backup");
+                    onTriggerNotification(isRtl ? "✅ تم حذف النسخة الاحتياطية" : "✅ Backup deleted");
+                  }
                 }}
-                className="mt-3 py-1.5 px-4 bg-[#27272a] hover:bg-[#3f3f46] text-white rounded-lg text-xs font-bold cursor-pointer"
+                className="flex-1 min-w-[140px] bg-[#18181b] hover:bg-zinc-800 border border-rose-500/15 text-rose-400 hover:text-rose-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
               >
-                {isRtl ? "حفظ الصفحات المقفلة" : "Save Locked Pages"}
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                </svg>
+                <span>{isRtl ? "حذف النسخة الاحتياطية" : "Delete Backup"}</span>
+              </button>
+              <button
+                onClick={() => {
+                  const current = localStorage.getItem("corevia_backup_reminder_days") || "7";
+                  const days = prompt(isRtl ? "كم يوماً بين تذكيرات النسخ الاحتياطي؟" : "Days between backup reminders?", current);
+                  if (days && !isNaN(parseInt(days))) {
+                    localStorage.setItem("corevia_backup_reminder_days", days);
+                    onTriggerNotification(isRtl ? `✅ تم تعيين التذكير كل ${days} يوم` : `✅ Reminder set every ${days} days`);
+                  }
+                }}
+                className="flex-1 min-w-[140px] bg-[#18181b] hover:bg-zinc-800 border border-indigo-500/15 text-indigo-400 hover:text-indigo-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{isRtl ? "تعديل وقت التذكير" : "Edit Reminder Time"}</span>
               </button>
             </div>
           </div>
 
-          {/* Change Admin Password */}
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
-              <Key className="w-5 h-5 text-rose-500" />
-              <span>{isRtl ? "تغيير كلمة مرور المدير" : "Change Admin Password"}</span>
+          {/* Protected Pages */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-5 space-y-4">
+            <h3 className="text-xs font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
+              <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+              <span>{isRtl ? "الصفحات المحمية" : "Protected Pages"}</span>
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "كلمة المرور الحالية" : "Current Master Password"}
+                </label>
+                <input
+                  type="password"
+                  value={masterPwCurrent}
+                  onChange={(e) => setMasterPwCurrent(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "كلمة المرور الجديدة" : "New Master Password"}
+                </label>
+                <input
+                  type="password"
+                  value={masterPwNew}
+                  onChange={(e) => setMasterPwNew(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "تأكيد كلمة المرور" : "Confirm Master Password"}
+                </label>
+                <input
+                  type="password"
+                  value={masterPwConfirm}
+                  onChange={(e) => setMasterPwConfirm(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
+            </div>
+
+            <p className="text-slate-400 font-bold text-[10.5px]">
+              {isRtl ? "الصفحات المحمية (اختر الصفحات التي تطلب كلمة مرور):" : "Protected pages (require password to access):"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {["dashboard", "orders", "products", "inventory", "workers", "suppliers", "expenses", "reports", "yearly", "profit", "activity_log", "settings", "super_admin"].map(page => (
+                <label key={page} className="flex items-center gap-1.5 cursor-pointer bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-1.5 hover:border-amber-500/40 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={protectedPagesList.includes(page)}
+                    onChange={() => {
+                      setProtectedPagesList(prev =>
+                        prev.includes(page) ? prev.filter(p => p !== page) : [...prev, page]
+                      );
+                    }}
+                    className="w-3.5 h-3.5 accent-amber-500"
+                  />
+                  <span className="text-[11px] text-slate-300 capitalize">{page.replace(/_/g, " ")}</span>
+                </label>
+              ))}
+            </div>
+
+            <button
+              onClick={handleSaveProtectedPages}
+              disabled={savingProtectedPages}
+              className="py-2 px-5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold cursor-pointer"
+            >
+              {savingProtectedPages
+                ? (isRtl ? "جارٍ الحفظ..." : "Saving...")
+                : (isRtl ? "حفظ الإعدادات" : "Save Settings")}
+            </button>
+          </div>
+
+          {/* Account Security */}
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-5 space-y-4">
+            <h3 className="text-xs font-black text-white flex items-center gap-2 border-b border-[#27272a] pb-3">
+              <Key className="w-4 h-4 text-rose-500" />
+              <span>{isRtl ? "أمان الحساب" : "Account Security"}</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
                   {isRtl ? "كلمة المرور الحالية" : "Current Password"}
@@ -880,23 +909,20 @@ export default function SettingsView({
                   className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
                 />
               </div>
+              <div>
+                <label className="block text-slate-400 font-bold text-[10.5px] mb-1">
+                  {isRtl ? "تأكيد كلمة المرور" : "Confirm Password"}
+                </label>
+                <input
+                  type="password"
+                  value={confirmAdminPw}
+                  onChange={(e) => setConfirmAdminPw(e.target.value)}
+                  className="w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg text-xs"
+                />
+              </div>
             </div>
             <button
-              onClick={async () => {
-                if (!newAdminPw || newAdminPw.length < 6) {
-                  onTriggerNotification(isRtl ? "❌ كلمة المرور يجب أن تكون 6 أحرف على الأقل" : "❌ Password must be at least 6 characters");
-                  return;
-                }
-                try {
-                  const { error } = await supabase.auth.updateUser({ password: newAdminPw });
-                  if (error) throw error;
-                  onTriggerNotification(isRtl ? "✅ تم تغيير كلمة المرور بنجاح" : "✅ Password changed successfully");
-                  setCurrentAdminPw("");
-                  setNewAdminPw("");
-                } catch (err: any) {
-                  onTriggerNotification(isRtl ? "❌ فشل تغيير كلمة المرور: " + (err?.message || "") : "❌ Failed: " + (err?.message || ""));
-                }
-              }}
+              onClick={handleChangeAdminPassword}
               className="py-2.5 px-6 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold cursor-pointer"
             >
               {isRtl ? "تغيير كلمة المرور" : "Change Password"}

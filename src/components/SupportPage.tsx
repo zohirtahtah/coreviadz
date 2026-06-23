@@ -12,6 +12,11 @@ export default function SupportPage({ lang, session, onClose }: SupportPageProps
   const isRtl = lang === "ar";
   const [adminPhone, setAdminPhone] = useState("+213 XX XX XX XX");
   const [adminEmail, setAdminEmail] = useState("admin@corevia.com");
+  const [supportWhatsapp, setSupportWhatsapp] = useState("");
+  const [supportTelegram, setSupportTelegram] = useState("");
+  const [supportWebsite, setSupportWebsite] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [businessHours, setBusinessHours] = useState("");
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
   const [sending, setSending] = useState(false);
@@ -22,12 +27,17 @@ export default function SupportPage({ lang, session, onClose }: SupportPageProps
       try {
         const { data } = await supabase
           .from("corevia_system_settings")
-          .select("admin_phone, admin_email")
+          .select("*")
           .limit(1)
           .maybeSingle();
         if (data) {
           setAdminPhone(data.admin_phone || adminPhone);
           setAdminEmail(data.admin_email || adminEmail);
+          setSupportWhatsapp(data.support_whatsapp || "");
+          setSupportTelegram(data.support_telegram || "");
+          setSupportWebsite(data.support_website || "");
+          setSupportMessage(data.support_message || "");
+          setBusinessHours(data.business_hours || "");
         }
       } catch {}
     })();
@@ -92,8 +102,38 @@ export default function SupportPage({ lang, session, onClose }: SupportPageProps
               <span className="text-indigo-400 text-xs">{isRtl ? "البريد: " : "Email: "}</span>
               {adminEmail}
             </div>
+            {supportWhatsapp && (
+              <div className="text-slate-300">
+                <span className="text-indigo-400 text-xs">WhatsApp: </span>
+                {supportWhatsapp}
+              </div>
+            )}
+            {supportTelegram && (
+              <div className="text-slate-300">
+                <span className="text-indigo-400 text-xs">Telegram: </span>
+                {supportTelegram}
+              </div>
+            )}
+            {supportWebsite && (
+              <div className="text-slate-300">
+                <span className="text-indigo-400 text-xs">{isRtl ? "الموقع: " : "Website: "}</span>
+                {supportWebsite}
+              </div>
+            )}
+            {businessHours && (
+              <div className="text-slate-300">
+                <span className="text-indigo-400 text-xs">{isRtl ? "ساعات العمل: " : "Hours: "}</span>
+                {businessHours}
+              </div>
+            )}
           </div>
         </div>
+
+        {supportMessage && (
+          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-5 text-center">
+            <p className="text-sm text-slate-200 leading-relaxed">{supportMessage}</p>
+          </div>
+        )}
 
         <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">

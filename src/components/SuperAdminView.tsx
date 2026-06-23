@@ -68,6 +68,11 @@ export default function SuperAdminView({
   // General settings state
   const [adminPhone, setAdminPhone] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
+  const [supportWhatsapp, setSupportWhatsapp] = useState("");
+  const [supportTelegram, setSupportTelegram] = useState("");
+  const [supportWebsite, setSupportWebsite] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [businessHours, setBusinessHours] = useState("");
   const [loadingSettings, setLoadingSettings] = useState(false);
 
   // Selection state for drill-down action of device list or editing
@@ -367,6 +372,11 @@ export default function SuperAdminView({
       if (data) {
         setAdminPhone(data.admin_phone || "");
         setAdminEmail(data.admin_email || "");
+        setSupportWhatsapp(data.support_whatsapp || "");
+        setSupportTelegram(data.support_telegram || "");
+        setSupportWebsite(data.support_website || "");
+        setSupportMessage(data.support_message || "");
+        setBusinessHours(data.business_hours || "");
       }
     })();
   }, [session?.company_id]);
@@ -1818,17 +1828,30 @@ export default function SuperAdminView({
       {/* TAB VI: GENERAL SETTINGS */}
       {activeSubTab === "settings" && (
         <div className="space-y-6" id="super_admin_tab_settings">
+          
+          {/* Support Information */}
           <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-5">
             <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <Settings className="w-4 h-4 text-indigo-400" />
-                <span>{isRtl ? "الإعدادات العامة للمنصة" : "General Platform Settings"}</span>
+                <span>{isRtl ? "معلومات الدعم الفني" : "Support Information"}</span>
               </h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "هاتف الأدمن (للإشعارات)" : "Admin Phone (for notifications)"}
+                  {isRtl ? "بريد الدعم الإلكتروني" : "Support Email"}
+                </label>
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "رقم هاتف الدعم" : "Support Phone"}
                 </label>
                 <input
                   type="text"
@@ -1839,15 +1862,60 @@ export default function SuperAdminView({
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "بريد الأدمن (للإشعارات)" : "Admin Email (for notifications)"}
+                  {isRtl ? "رقم واتساب" : "WhatsApp Number"}
                 </label>
                 <input
-                  type="email"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
+                  type="text"
+                  value={supportWhatsapp}
+                  onChange={(e) => setSupportWhatsapp(e.target.value)}
                   className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "تيليغرام" : "Telegram"}
+                </label>
+                <input
+                  type="text"
+                  value={supportTelegram}
+                  onChange={(e) => setSupportTelegram(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "الموقع الإلكتروني" : "Website"}
+                </label>
+                <input
+                  type="text"
+                  value={supportWebsite}
+                  onChange={(e) => setSupportWebsite(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  {isRtl ? "ساعات العمل" : "Business Hours"}
+                </label>
+                <input
+                  type="text"
+                  value={businessHours}
+                  onChange={(e) => setBusinessHours(e.target.value)}
+                  placeholder={isRtl ? "مثال: 09:00 - 18:00 (السبت - الخميس)" : "e.g. 09:00 - 18:00 (Sat - Thu)"}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">
+                {isRtl ? "رسالة الدعم (تظهر في صفحة الدعم)" : "Support Message (shown on support page)"}
+              </label>
+              <textarea
+                value={supportMessage}
+                onChange={(e) => setSupportMessage(e.target.value)}
+                rows={3}
+                className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600 resize-none"
+              />
             </div>
             <button
               onClick={async () => {
@@ -1858,11 +1926,16 @@ export default function SuperAdminView({
                     id: session.company_id,
                     admin_phone: adminPhone,
                     admin_email: adminEmail,
+                    support_whatsapp: supportWhatsapp,
+                    support_telegram: supportTelegram,
+                    support_website: supportWebsite,
+                    support_message: supportMessage,
+                    business_hours: businessHours,
                     updated_at: new Date().toISOString(),
                   });
                   if (error) throw error;
                   onTriggerNotification(
-                    isRtl ? "✅ تم حفظ إعدادات المنصة العامة" : "✅ General settings saved",
+                    isRtl ? "✅ تم حفظ معلومات الدعم" : "✅ Support information saved",
                     "success"
                   );
                 } catch (err: any) {
@@ -1879,9 +1952,10 @@ export default function SuperAdminView({
             >
               {loadingSettings
                 ? (isRtl ? "جاري الحفظ..." : "Saving...")
-                : (isRtl ? "حفظ الإعدادات العامة" : "Save General Settings")}
+                : (isRtl ? "حفظ معلومات الدعم" : "Save Support Info")}
             </button>
           </div>
+
         </div>
       )}
 
