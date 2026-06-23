@@ -40,6 +40,7 @@ import UsersPermissionsView from "./components/UsersPermissionsView";
 import ActivityLogView from "./components/ActivityLogView";
 import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
+import CompanyGuard from "./components/CompanyGuard";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -2022,20 +2023,12 @@ export default function App() {
     address: ""
   };
 
+  const companyStatus = saasAccount?.accountStatus;
+
   return (
-    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"} ${isSuspended ? "pt-10" : ""}`} id="applet_main_scaffold">
+    <div className={`min-h-screen text-slate-100 transition-colors flex ${lang === "ar" ? "flex-row-reverse" : "flex-row"}`} id="applet_main_scaffold">
       
-      {/* SaaS Suspended warning banner */}
-      {isSuspended && (
-        <div className="fixed top-0 inset-x-0 h-10 bg-rose-600 text-white flex items-center justify-center font-bold px-4 text-xs z-50 shadow-md gap-2" id="suspension_danger_banner">
-          <AlertCircle className="w-4 h-4 text-white shrink-0 animate-pulse" />
-          <span>
-            {lang === "ar" 
-              ? "تنبيه: حساب مؤسستكم مجمد حالياً بسبب انتهاء صلاحية الاشتراك. لقد تم تحويل صلاحياتكم إلى وضع القراءة فقط. يرجى التواصل مع الدعم الفني لتجديد الاشتراك." 
-              : "Your company account is currently suspended. Please contact support for assistance (Read-Only Mode)."}
-          </span>
-        </div>
-      )}
+      <CompanyGuard lang={lang} status={companyStatus}>
       
       {/* SIDEBAR NAVIGATION DOCK */}
       <Sidebar
@@ -2377,6 +2370,7 @@ export default function App() {
         </div>
       )}
 
+      </CompanyGuard>
     </div>
   );
 
