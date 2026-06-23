@@ -372,12 +372,19 @@ export default function SuperAdminView({
       if (data) {
         setAdminPhone(data.admin_phone || "");
         setAdminEmail(data.admin_email || "");
-        setSupportWhatsapp(data.support_whatsapp || "");
-        setSupportTelegram(data.support_telegram || "");
-        setSupportWebsite(data.support_website || "");
-        setSupportMessage(data.support_message || "");
-        setBusinessHours(data.business_hours || "");
       }
+      // Load extended support info from localStorage
+      try {
+        const saved = localStorage.getItem("corevia_support_info");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setSupportWhatsapp(parsed.whatsapp || "");
+          setSupportTelegram(parsed.telegram || "");
+          setSupportWebsite(parsed.website || "");
+          setSupportMessage(parsed.message || "");
+          setBusinessHours(parsed.hours || "");
+        }
+      } catch {} 
     })();
   }, [session?.company_id]);
 
@@ -1926,14 +1933,12 @@ export default function SuperAdminView({
                     id: session.company_id,
                     admin_phone: adminPhone,
                     admin_email: adminEmail,
-                    support_whatsapp: supportWhatsapp,
-                    support_telegram: supportTelegram,
-                    support_website: supportWebsite,
-                    support_message: supportMessage,
-                    business_hours: businessHours,
                     updated_at: new Date().toISOString(),
                   });
                   if (error) throw error;
+                  // Save extended fields to localStorage (table has no columns for them)
+                  const extra = { whatsapp: supportWhatsapp, telegram: supportTelegram, website: supportWebsite, message: supportMessage, hours: businessHours };
+                  localStorage.setItem("corevia_support_info", JSON.stringify(extra));
                   onTriggerNotification(
                     isRtl ? "✅ تم حفظ معلومات الدعم" : "✅ Support information saved",
                     "success"

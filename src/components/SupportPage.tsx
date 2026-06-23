@@ -33,12 +33,19 @@ export default function SupportPage({ lang, session, onClose }: SupportPageProps
         if (data) {
           setAdminPhone(data.admin_phone || adminPhone);
           setAdminEmail(data.admin_email || adminEmail);
-          setSupportWhatsapp(data.support_whatsapp || "");
-          setSupportTelegram(data.support_telegram || "");
-          setSupportWebsite(data.support_website || "");
-          setSupportMessage(data.support_message || "");
-          setBusinessHours(data.business_hours || "");
         }
+        // Load extended support info from localStorage
+        try {
+          const saved = localStorage.getItem("corevia_support_info");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            setSupportWhatsapp(parsed.whatsapp || "");
+            setSupportTelegram(parsed.telegram || "");
+            setSupportWebsite(parsed.website || "");
+            setSupportMessage(parsed.message || "");
+            setBusinessHours(parsed.hours || "");
+          }
+        } catch {} 
       } catch {}
     })();
   }, []);
