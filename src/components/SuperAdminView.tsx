@@ -360,14 +360,14 @@ export default function SuperAdminView({
     return () => clearInterval(interval);
   }, []);
 
-  // Load general settings from corevia_system_settings
+  // Load general settings from corevia_system_settings (singleton row)
   useEffect(() => {
-    if (!supabase || !session?.company_id) return;
+    if (!supabase) return;
     (async () => {
       const { data } = await supabase
         .from("corevia_system_settings")
         .select("*")
-        .eq("id", session.company_id)
+        .limit(1)
         .maybeSingle();
       if (data) {
         setAdminPhone(data.admin_phone || "");
@@ -386,7 +386,7 @@ export default function SuperAdminView({
         }
       } catch {} 
     })();
-  }, [session?.company_id]);
+  }, []);
 
   // Filter computation
   const filteredCompanies = useMemo(() => {
@@ -1926,11 +1926,18 @@ export default function SuperAdminView({
             </div>
             <button
               onClick={async () => {
-                if (!supabase || !session?.company_id) return;
+                if (!supabase) return;
                 setLoadingSettings(true);
                 try {
+                  // Get existing row id (singleton)
+                  const { data: existing } = await supabase
+                    .from("corevia_system_settings")
+                    .select("id")
+                    .limit(1)
+                    .maybeSingle();
+                  const settingsId = existing?.id || crypto.randomUUID();
                   const { error } = await supabase.from("corevia_system_settings").upsert({
-                    id: session.company_id,
+                    id: settingsId,
                     admin_phone: adminPhone,
                     admin_email: adminEmail,
                     updated_at: new Date().toISOString(),
