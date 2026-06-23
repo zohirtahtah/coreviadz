@@ -1,21 +1,16 @@
--- ============================================================
 -- Corevia ERP — Disaster Recovery System
 -- Run AFTER all v1–v6 migrations have been executed.
--- ============================================================
 -- NOTE: pg_cron extension requires at least Supabase Team plan.
 -- On Free / Pro plans, skip the cron.schedule() call and
 -- use the Supabase Dashboard > Edge Functions or an external
 -- scheduler (e.g. GitHub Actions, cron-job.org) to invoke
 -- CALL generate_daily_disaster_snapshot(); once per day.
--- ============================================================
 
 -- 1. Enable pg_cron scheduling extension (idempotent)
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- ============================================================
 -- 2. Disaster Recovery Backup Archive Table
 -- Stores isolated per-company, per-table JSON snapshots
--- ============================================================
 CREATE TABLE IF NOT EXISTS corevia_disaster_recovery_backups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id TEXT NOT NULL,
@@ -28,10 +23,8 @@ CREATE TABLE IF NOT EXISTS corevia_disaster_recovery_backups (
 CREATE INDEX IF NOT EXISTS idx_dr_company ON corevia_disaster_recovery_backups (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dr_cleanup ON corevia_disaster_recovery_backups (created_at);
 
--- ============================================================
 -- 3. Daily Disaster Snapshot Procedure
 -- Captures all corevia_ tables per-company into the archive
--- ============================================================
 CREATE OR REPLACE PROCEDURE generate_daily_disaster_snapshot()
 LANGUAGE plpgsql
 AS $$
@@ -75,21 +68,17 @@ BEGIN
 END;
 $$;
 
--- ============================================================
 -- 5. Schedule the job daily at midnight (00:00)
 -- Requires pg_cron extension (Team plan+ on Supabase)
--- ============================================================
 SELECT cron.schedule(
     'corevia_daily_disaster_backup',
     '0 0 * * *',
     'CALL generate_daily_disaster_snapshot();'
 );
 
--- ============================================================
 -- 6. Super Admin Single-Company Restore Function
 -- Restores ONE company's data from a specific backup date
 -- without affecting any other tenants.
--- ============================================================
 CREATE OR REPLACE FUNCTION super_admin_restore_single_company(
     target_company_id TEXT,
     target_backup_date DATE
@@ -148,9 +137,7 @@ $$;
 -- Grant execution to authenticated users (checked by app super_admin gate)
 GRANT EXECUTE ON FUNCTION super_admin_restore_single_company TO authenticated;
 
--- ============================================================
 -- 7. Manual Snapshot Trigger (for immediate ad-hoc backup)
--- ============================================================
 CREATE OR REPLACE FUNCTION trigger_manual_disaster_snapshot()
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -164,9 +151,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION trigger_manual_disaster_snapshot TO authenticated;
 
--- ============================================================
 -- 8. Helper: List available backup dates for a company
--- ============================================================
 CREATE OR REPLACE FUNCTION get_company_backup_dates(target_company_id TEXT)
 RETURNS TABLE (backup_date DATE, table_count INTEGER, total_rows BIGINT)
 LANGUAGE plpgsql

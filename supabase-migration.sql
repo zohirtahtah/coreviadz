@@ -1,7 +1,5 @@
--- ===================================================
 -- Corevia ERP - Supabase Migration
 -- Run this SQL in Supabase Dashboard > SQL Editor
--- ===================================================
 
 -- Create corevia_profile table for storing business profile settings
 CREATE TABLE IF NOT EXISTS corevia_profile (

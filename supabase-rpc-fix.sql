@@ -1,7 +1,5 @@
--- =============================================================================
 -- RPC functions for Super Admin Dashboard to bypass Row-Level Security
 -- Run this in the Supabase SQL Editor (https://supabase.com/dashboard/project/.../sql/new)
--- =============================================================================
 
 -- 0. Disable RLS on corevia_companies so admin queries return ALL companies
 ALTER TABLE corevia_companies DISABLE ROW LEVEL SECURITY;

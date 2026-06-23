@@ -1,7 +1,5 @@
--- ============================================================
 -- Corevia ERP v4 — Backup Reminder Columns
 -- Run AFTER supabase-migration-v3.sql has been executed.
--- ============================================================
 
 -- Add backup reminder schedule columns to corevia_companies
 ALTER TABLE corevia_companies

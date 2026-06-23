@@ -1,7 +1,5 @@
--- ============================================================
 -- Corevia ERP v5 — Force Terminate Employee Sessions
 -- Run AFTER supabase-migration-v4.sql has been executed.
--- ============================================================
 
 CREATE OR REPLACE FUNCTION force_logout_user_by_id(user_uuid UUID)
 RETURNS BOOLEAN

@@ -1,13 +1,9 @@
--- ============================================================
 -- Corevia ERP v2 Migration — توسيع وتحديث قاعدة البيانات
 -- Adapted to merge with existing corevia_* schema
 -- Run in Supabase SQL Editor (safe for production data)
--- ============================================================
 
--- ============================================================
 -- SECTION 1: Expand corevia_companies (الشركات)
 -- Add new columns for subscription tracking, locks, country
--- ============================================================
 ALTER TABLE corevia_companies
   ADD COLUMN IF NOT EXISTS country TEXT,
   ADD COLUMN IF NOT EXISTS municipality TEXT,
@@ -33,11 +29,9 @@ BEGIN
   END IF;
 END $$;
 
--- ============================================================
 -- SECTION 2: Expand/Update Profiles
 -- corevia_profile = business info, corevia_saas_users = admin
 -- corevia_company_users = employees
--- ============================================================
 
 -- Add profile extension columns (rc1, rc2, nif, logo_url, passcode)
 ALTER TABLE corevia_profile
@@ -55,28 +49,31 @@ ALTER TABLE corevia_saas_users
 ALTER TABLE corevia_company_users
   ADD COLUMN IF NOT EXISTS allowed_pages_array TEXT[] DEFAULT '{}';
 
--- ============================================================
 -- SECTION 3: Add SKU, Price, Alert Threshold to existing inventory
--- ============================================================
-ALTER TABLE corevia_inventory_basic
-  ADD COLUMN IF NOT EXISTS sku TEXT,
-  ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_basic') THEN
+    ALTER TABLE corevia_inventory_basic
+      ADD COLUMN IF NOT EXISTS sku TEXT,
+      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_sub') THEN
+    ALTER TABLE corevia_inventory_sub
+      ADD COLUMN IF NOT EXISTS sku TEXT,
+      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_inventory_return') THEN
+    ALTER TABLE corevia_inventory_return
+      ADD COLUMN IF NOT EXISTS sku TEXT,
+      ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
+  END IF;
+END $$;
 
-ALTER TABLE corevia_inventory_sub
-  ADD COLUMN IF NOT EXISTS sku TEXT,
-  ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
-
-ALTER TABLE corevia_inventory_return
-  ADD COLUMN IF NOT EXISTS sku TEXT,
-  ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 0;
-
--- ============================================================
 -- SECTION 4: Create corevia_invoices (فواتير المشتريات/المبيعات/المرتجعات)
 -- New table for unified invoice tracking with SKU-level detail
--- ============================================================
 CREATE TABLE IF NOT EXISTS corevia_invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id TEXT DEFAULT 'cop_default',
@@ -90,11 +87,9 @@ CREATE TABLE IF NOT EXISTS corevia_invoices (
   is_deleted BOOLEAN DEFAULT FALSE
 );
 
--- ============================================================
 -- SECTION 5: Create corevia_activity_center (سجل العمليات البسيط)
 -- Lightweight audit log matching the user's schema
 -- Complement to existing corevia_activity_logs (heavy audit)
--- ============================================================
 CREATE TABLE IF NOT EXISTS corevia_activity_center (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id TEXT DEFAULT 'cop_default',
@@ -106,19 +101,20 @@ CREATE TABLE IF NOT EXISTS corevia_activity_center (
 );
 
 -- Add page_name + details columns to existing corevia_activity_logs for compatibility
-ALTER TABLE corevia_activity_logs
-  ADD COLUMN IF NOT EXISTS page_name TEXT,
-  ADD COLUMN IF NOT EXISTS details TEXT;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'corevia_activity_logs') THEN
+    ALTER TABLE corevia_activity_logs
+      ADD COLUMN IF NOT EXISTS page_name TEXT,
+      ADD COLUMN IF NOT EXISTS details TEXT;
+  END IF;
+END $$;
 
--- ============================================================
 -- SECTION 6: Enable RLS on new tables
--- ============================================================
 ALTER TABLE corevia_invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE corevia_activity_center ENABLE ROW LEVEL SECURITY;
 
--- ============================================================
 -- SECTION 7: RLS Policies for new tables
--- ============================================================
 
 -- Policy for corevia_invoices: company_id isolation
 DROP POLICY IF EXISTS tenant_isolation_policy ON corevia_invoices;
@@ -145,9 +141,7 @@ CREATE POLICY tenant_isolation_policy ON corevia_activity_center FOR ALL
 -- Allow Super Admin to read all rows (via SECURITY DEFINER or direct)
 -- Note: If RLS was disabled on corevia_companies by supabase-rpc-fix.sql, it stays disabled
 
--- ============================================================
 -- SECTION 8: Helper RPC for seat counting
--- ============================================================
 CREATE OR REPLACE FUNCTION sync_current_seats(p_company_id TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql

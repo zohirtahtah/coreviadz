@@ -1,18 +1,14 @@
--- ============================================================
 -- Corevia ERP v2 — Database Triggers for Automated Inventory
 -- Automatically updates inventory quantities when invoices
 -- are created, preventing manual errors (0% error policy).
 -- Run AFTER supabase-migration-v2.sql has been executed.
--- ============================================================
 
--- ============================================================
 -- HELPER FUNCTION: apply_inventory_change()
 -- Shared logic used by INSERT and RESTORE triggers.
 -- Maps invoice target_table to the correct corevia_inventory_* table:
 --   'table_1' → corevia_inventory_basic  (no size tracking)
 --   'table_2' → corevia_inventory_sub    (size tracking)
 --   'table_3' → corevia_inventory_return (returned items)
--- ============================================================
 CREATE OR REPLACE FUNCTION apply_inventory_change(
   p_company_id    TEXT,
   p_target_table  TEXT,
@@ -118,10 +114,8 @@ BEGIN
 END;
 $$;
 
--- ============================================================
 -- TRIGGER FUNCTION: process_inventory_update()
 -- Called AFTER INSERT on corevia_invoices
--- ============================================================
 CREATE OR REPLACE FUNCTION process_inventory_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -144,20 +138,16 @@ BEGIN
 END;
 $$;
 
--- ============================================================
 -- TRIGGER: trigger_invoice_inventory_sync
 -- Fires AFTER INSERT on corevia_invoices
--- ============================================================
 DROP TRIGGER IF EXISTS trigger_invoice_inventory_sync ON corevia_invoices;
 CREATE TRIGGER trigger_invoice_inventory_sync
 AFTER INSERT ON corevia_invoices
 FOR EACH ROW
 EXECUTE FUNCTION process_inventory_update();
 
--- ============================================================
 -- TRIGGER FUNCTION: process_inventory_restore()
 -- Called when is_deleted changes from TRUE to FALSE (restore)
--- ============================================================
 CREATE OR REPLACE FUNCTION process_inventory_restore()
 RETURNS TRIGGER
 LANGUAGE plpgsql
