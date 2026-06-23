@@ -1,1 +1,0 @@
-{"success":true,"auth_user_id":null,"inviteQueued":true,"invitation_status":"pending","last_invite_error":"admin_client_not_configured","message":"Supabase Admin client not configured (missing SERVICE_ROLE_KEY). Employee saved, invitation pending."}
