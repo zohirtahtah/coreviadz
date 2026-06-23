@@ -15,6 +15,7 @@ import SheetsSyncSettings from "./SheetsSyncSettings";
 import UsersPermissionsView from "./UsersPermissionsView";
 import { supabase, isSupabaseConfigured } from "../supabaseClient";
 import { pushFullTenantData, pullMultiTenantData } from "../supabaseSync";
+import { generateCompanyBackup } from "../lib/backupEngine";
 import {
   getOrders, saveOrders,
   getProducts, saveProducts,
@@ -120,6 +121,7 @@ export default function SettingsView({
   // Supabase Integration & Synchronization Modules
   const [isSyncingToSupabase, setIsSyncingToSupabase] = useState(false);
   const [isPullingFromSupabase, setIsPullingFromSupabase] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
   const [dbTestResult, setDbTestResult] = useState<string | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [showSqlSchema, setShowSqlSchema] = useState(false);
@@ -168,6 +170,34 @@ export default function SettingsView({
       );
     } finally {
       setIsTestingConnection(false);
+    }
+  };
+
+  // Download compressed database backup (ZIP)
+  const handleDownloadBackup = async () => {
+    if (!supabase) {
+      onTriggerNotification(lang === "ar" ? "❌ السحابة غير مهيأة." : "❌ Cloud not configured.");
+      return;
+    }
+    const companyId = session?.company_id;
+    if (!companyId) {
+      onTriggerNotification(lang === "ar" ? "❌ لا يوجد معرف شركة." : "❌ No company ID.");
+      return;
+    }
+    setIsBackingUp(true);
+    try {
+      onTriggerNotification(lang === "ar" ? "جاري تجميع وضغط قاعدة البيانات..." : "Packaging and compressing database...");
+      const ok = await generateCompanyBackup(companyId, bName || "Company");
+      if (ok) {
+        onTriggerNotification(lang === "ar" ? "✅ تم تنزيل النسخة الاحتياطية (ZIP) بنجاح!" : "✅ Backup ZIP downloaded successfully!");
+      } else {
+        onTriggerNotification(lang === "ar" ? "❌ فشلت عملية النسخ الاحتياطي." : "❌ Backup failed.");
+      }
+    } catch (err: any) {
+      console.error("Backup error:", err);
+      onTriggerNotification(lang === "ar" ? "❌ خطأ في النسخ الاحتياطي." : "❌ Backup error.");
+    } finally {
+      setIsBackingUp(false);
     }
   };
 
@@ -1324,7 +1354,7 @@ $$;`;
 
                 {/* Operations Panel */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  
+                   
                   {/* Test Connection Button */}
                   <button
                     onClick={handleTestConnection}
@@ -1353,6 +1383,16 @@ $$;`;
                   >
                     <Download className="w-5 h-5 text-indigo-400" />
                     <span>{isRtl ? "جلب وتنزيل قاعدة البيانات" : "Pull Data from Supabase"}</span>
+                  </button>
+
+                  {/* Download Compressed Backup (ZIP) */}
+                  <button
+                    onClick={handleDownloadBackup}
+                    disabled={isBackingUp}
+                    className="bg-[#18181b] hover:bg-zinc-850 border border-amber-500/15 text-amber-400 hover:text-amber-300 rounded-xl p-3 text-xs font-bold flex flex-col items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:opacity-55"
+                  >
+                    <Download className={`w-5 h-5 text-amber-500 ${isBackingUp ? "animate-bounce" : ""}`} />
+                    <span>{isRtl ? "تنزيل نسخة احتياطية مضغوطة 📦" : "Download Backup ZIP 📦"}</span>
                   </button>
 
                 </div>

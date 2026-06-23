@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, Unlock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History, Menu, X, MessageSquare, UserCheck
+  Shield, History, Menu, X, MessageSquare, UserCheck, MessageCircle, HardDrive
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -184,6 +184,8 @@ export default function Sidebar({
     { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: false },
     { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
     { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
+    { id: "support", label: lang === "ar" ? "مركز الدعم" : lang === "fr" ? "Centre d'Aide" : "Support", icon: MessageCircle, isRestricted: false },
+    { id: "backup", label: lang === "ar" ? "النسخ الاحتياطي" : lang === "fr" ? "Sauvegarde" : "Backup", icon: HardDrive, isRestricted: false },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
     { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
   ];

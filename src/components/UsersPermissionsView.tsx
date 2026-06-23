@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { 
-  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X, 
-  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck
+import {
+  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X,
+  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck, LogOut
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
@@ -10,6 +10,7 @@ import { logActivity } from "../activityLogService";
 import { getWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
 import { supabase, createSecondaryClient } from "../supabaseClient";
+import { forceTerminateEmployeeSessions } from "../lib/forceLogout";
 
 // Name & Phone smart normalizations for bulletproof Algerian/Arabic de-duplication
 export function cleanArabicName(name: string): string {
@@ -385,6 +386,34 @@ export default function UsersPermissionsView({
     );
     setUserToDeleteRecord(emp);
     setLinkedWorkerFound(match || null);
+  };
+
+  const handleForceTerminateSessions = async (emp: Employee) => {
+    if (!emp.auth_user_id) {
+      onTriggerNotification(
+        isRtl ? "⚠️ هذا الموظف ليس لديه حساب Auth مرتبط لإنهاء جلساته." : "⚠️ This employee has no linked auth account."
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      isRtl
+        ? `هل أنت متأكد من إنهاء جميع جلسات "${emp.fullName}" النشطة؟ سيتم طرده من جميع الأجهزة فوراً.`
+        : `Force terminate all active sessions for "${emp.fullName}"? They will be logged out from all devices.`
+    );
+    if (!confirmed) return;
+
+    setIsLoading(true);
+    const ok = await forceTerminateEmployeeSessions(emp.auth_user_id, emp.fullName, companyId);
+    if (ok) {
+      onTriggerNotification(
+        isRtl ? `✅ تم إنهاء جميع جلسات "${emp.fullName}" وتحرير مقعده.` : `✅ All sessions terminated for "${emp.fullName}".`
+      );
+    } else {
+      onTriggerNotification(
+        isRtl ? "❌ فشلت عملية إنهاء الجلسات." : "❌ Failed to terminate sessions."
+      );
+    }
+    setIsLoading(false);
   };
 
   const handleExecuteDelete = async (deleteWorkerProfile: boolean) => {
@@ -952,7 +981,15 @@ export default function UsersPermissionsView({
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
-                            
+
+                            <button
+                              onClick={() => handleForceTerminateSessions(emp)}
+                              className="p-1.5 bg-[#141416] hover:bg-orange-950/40 border border-[#27272a] text-orange-500 hover:text-orange-400 rounded-lg transition-colors cursor-pointer"
+                              title={isRtl ? "إنهاء جميع الجلسات النشطة وطرد الموظف" : "Force terminate all active sessions"}
+                            >
+                              <LogOut className="w-3.5 h-3.5" />
+                            </button>
+
                             <button
                               onClick={() => handleDeleteEmployeeItem(emp)}
                               className="p-1.5 bg-[#141416] hover:bg-rose-950/40 border border-[#27272a] text-rose-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"

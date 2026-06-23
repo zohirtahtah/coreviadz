@@ -42,6 +42,9 @@ import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
 import CompanyGuard from "./components/CompanyGuard";
 import PageLockModal from "./components/PageLockModal";
+import SupportPage from "./components/SupportPage";
+import BackupPage from "./pages/BackupPage";
+import BackupReminderModal from "./components/BackupReminderModal";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -209,6 +212,24 @@ export default function App() {
     return saved ? saved : "dashboard";
   });
   const [isSyncingOnAuth, setIsSyncingOnAuth] = useState<boolean>(false);
+  const [showSupport, setShowSupport] = useState<boolean>(() => {
+    try {
+      const path = window.location.pathname;
+      return path === "/support" || path.endsWith("/support");
+    } catch (e) {
+      return false;
+    }
+  });
+
+  // Listen for popstate to sync support state with URL
+  useEffect(() => {
+    const handler = () => {
+      const path = window.location.pathname;
+      setShowSupport(path === "/support" || path.endsWith("/support"));
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
 
   // ==========================================
   // MULTI-TENANT SaaS COMPLETED INTEGRATION
@@ -1658,6 +1679,25 @@ export default function App() {
     );
   }
 
+  // SUPPORT PAGE: Accessible under any circumstances (even logged out / blocked / disabled)
+  if (showSupport) {
+    return (
+      <SupportPage
+        lang={lang}
+        session={session}
+        onClose={() => {
+          setShowSupport(false);
+          window.history.pushState(null, "", "/");
+        }}
+      />
+    );
+  }
+
+  // Floating "?" support button (always visible on every screen)
+  if (!showSupport) {
+    // Render it after the main return (see bottom of component)
+  }
+
   // If user is not logged in / approved / or is suspended, render the Auth gateway
   if (!session || !session.isRegistered || !session.isApproved || session.isSuspended) {
     return (
@@ -2306,6 +2346,25 @@ export default function App() {
           />
         )}
 
+        {activeTab === "support" && (
+          <SupportPage
+            lang={lang}
+            session={session}
+            onClose={() => {
+              setActiveTab("dashboard");
+              window.history.pushState(null, "", "/");
+            }}
+          />
+        )}
+
+        {activeTab === "backup" && (
+          <BackupPage
+            lang={lang}
+            session={session}
+            onTriggerNotification={triggerToast}
+          />
+        )}
+
         {activeTab === "super-admin" && (
           isServerSuperAdmin === true ? (
             <SuperAdminView
@@ -2404,6 +2463,28 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Floating support button */}
+      <button
+        onClick={() => {
+          setShowSupport(true);
+          setActiveTab("support");
+          window.history.pushState(null, "", "/support");
+        }}
+        className="fixed bottom-6 right-6 z-50 w-11 h-11 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-xl flex items-center justify-center text-lg font-bold transition-all hover:scale-110 active:scale-95 cursor-pointer"
+        title={lang === "ar" ? "مركز الدعم" : "Support Center"}
+      >
+        ?
+      </button>
+
+      {/* Scheduled backup reminder modal */}
+      {session?.company_id && (
+        <BackupReminderModal
+          lang={lang}
+          companyId={session.company_id}
+          companyName={saasAccount?.companyName || session?.username || "Company"}
+        />
       )}
 
       </CompanyGuard>

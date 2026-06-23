@@ -58,7 +58,12 @@ export default function SuperAdminView({
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug">("directory");
+  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug" | "tickets">("directory");
+
+  // Support ticket states
+  const [supportTickets, setSupportTickets] = useState<any[]>([]);
+  const [unreadTicketCount, setUnreadTicketCount] = useState(0);
+  const [ticketReplyMap, setTicketReplyMap] = useState<Record<string, string>>({});
 
   // Selection state for drill-down action of device list or editing
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
@@ -321,6 +326,29 @@ export default function SuperAdminView({
   useEffect(() => {
     loadSaaSRealData();
   }, [activeSubTab]);
+
+  // Poll for new support tickets every 10 seconds
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchTickets = async () => {
+      try {
+        const { data } = await supabase
+          .from("corevia_support_tickets")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (data) {
+          setSupportTickets(data);
+          setUnreadTicketCount(data.filter(t => t.has_new_admin_alert).length);
+        }
+      } catch (e) {
+        // silent
+      }
+    };
+    fetchTickets();
+    const interval = setInterval(fetchTickets, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Filter computation
   const filteredCompanies = useMemo(() => {
@@ -869,6 +897,23 @@ export default function SuperAdminView({
             >
               <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
               <span>{isRtl ? "فحص المشاكل (Debug)" : "Debug Panel"}</span>
+            </button>
+            <button
+              onClick={() => setActiveSubTab("tickets")}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "tickets" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className="relative">
+                <span>
+                  {isRtl ? "تذاكر الدعم" : "Support Tickets"}
+                </span>
+                {unreadTicketCount > 0 && (
+                  <span className="absolute -top-2 -right-3 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                    {unreadTicketCount}
+                  </span>
+                )}
+              </span>
             </button>
           </div>
 
@@ -1619,6 +1664,123 @@ export default function SuperAdminView({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* TAB V: SUPPORT TICKETS */}
+      {activeSubTab === "tickets" && (
+        <div className="space-y-6" id="super_admin_tab_tickets">
+          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>
+                  {isRtl ? "تذاكر الدعم الفني" : "Support Tickets"}
+                </span>
+                {unreadTicketCount > 0 && (
+                  <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {unreadTicketCount} {isRtl ? "جديد" : "New"}
+                  </span>
+                )}
+              </h3>
+              <span className="text-[11px] text-slate-500">{supportTickets.length} {isRtl ? "تذكرة" : "tickets"}</span>
+            </div>
+
+            {supportTickets.length === 0 ? (
+              <div className="p-12 text-center text-slate-500 text-xs">
+                {isRtl ? "لا توجد تذاكر دعم حتى الآن." : "No support tickets yet."}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {supportTickets.map((ticket) => (
+                  <div key={ticket.id} className={`p-4 bg-slate-900 border rounded-xl space-y-3 ${ticket.has_new_admin_alert ? "border-rose-500/30" : "border-slate-800"}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white">{ticket.user_name || "Anonymous"}</span>
+                          {ticket.has_new_admin_alert && (
+                            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                          )}
+                          {ticket.is_resolved && (
+                            <span className="text-[10px] text-emerald-400 font-bold">
+                              {isRtl ? "تم الحل" : "Resolved"}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400">{ticket.user_email}</p>
+                        <p className="text-xs text-slate-200 mt-2 whitespace-pre-wrap">{ticket.message_content}</p>
+                        {ticket.company_id && (
+                          <p className="text-[10px] text-slate-500 font-mono">Company: {ticket.company_id}</p>
+                        )}
+                        <p className="text-[10px] text-slate-600 font-mono">
+                          {new Date(ticket.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+
+                    {ticket.admin_response && (
+                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+                        <p className="text-[10px] font-bold text-indigo-400 mb-1">
+                          {isRtl ? "رد الإدارة:" : "Admin Response:"}
+                        </p>
+                        <p className="text-xs text-slate-200">{ticket.admin_response}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <textarea
+                        placeholder={isRtl ? "اكتب رد الإدارة..." : "Write admin response..."}
+                        value={ticketReplyMap[ticket.id] || ""}
+                        onChange={(e) => setTicketReplyMap(prev => ({ ...prev, [ticket.id]: e.target.value }))}
+                        className="flex-1 p-2 bg-slate-800 border border-slate-700 text-xs text-white rounded-lg outline-none focus:border-indigo-600 resize-none"
+                        rows={2}
+                      />
+                      <div className="flex flex-col gap-1">
+                        <button
+                          onClick={async () => {
+                            const reply = ticketReplyMap[ticket.id]?.trim();
+                            if (!reply || !supabase) return;
+                            try {
+                              await supabase
+                                .from("corevia_support_tickets")
+                                .update({ admin_response: reply, has_new_admin_alert: false, is_resolved: true })
+                                .eq("id", ticket.id);
+                              setTicketReplyMap(prev => { const next = { ...prev }; delete next[ticket.id]; return next; });
+                              setSupportTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, admin_response: reply, has_new_admin_alert: false, is_resolved: true } : t));
+                              setUnreadTicketCount(prev => Math.max(0, prev - (ticket.has_new_admin_alert ? 1 : 0)));
+                              onTriggerNotification(isRtl ? "تم إرسال الرد بنجاح" : "Reply sent successfully", "success");
+                            } catch (e) {
+                              onTriggerNotification("Error sending reply", "info");
+                            }
+                          }}
+                          disabled={!ticketReplyMap[ticket.id]?.trim()}
+                          className="p-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          {isRtl ? "إرسال" : "Reply"}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!supabase) return;
+                            try {
+                              await supabase
+                                .from("corevia_support_tickets")
+                                .update({ has_new_admin_alert: false })
+                                .eq("id", ticket.id);
+                              setSupportTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, has_new_admin_alert: false } : t));
+                              setUnreadTicketCount(prev => Math.max(0, prev - (ticket.has_new_admin_alert ? 1 : 0)));
+                            } catch (e) {}
+                          }}
+                          className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                          title={isRtl ? "تحديد كمقروء" : "Mark as read"}
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
