@@ -1929,19 +1929,25 @@ export default function SuperAdminView({
                 if (!supabase) return;
                 setLoadingSettings(true);
                 try {
-                  // Get existing row id (singleton)
+                  // Get existing row id (singleton) then UPDATE (no INSERT policy)
                   const { data: existing } = await supabase
                     .from("corevia_system_settings")
                     .select("id")
                     .limit(1)
                     .maybeSingle();
-                  const settingsId = existing?.id || crypto.randomUUID();
-                  const { error } = await supabase.from("corevia_system_settings").upsert({
-                    id: settingsId,
-                    admin_phone: adminPhone,
-                    admin_email: adminEmail,
-                    updated_at: new Date().toISOString(),
-                  });
+                  if (!existing) {
+                    onTriggerNotification(isRtl ? "❌ لا يوجد صف إعدادات بعد. اتصل بالمسؤول." : "❌ No settings row exists yet.", "info");
+                    setLoadingSettings(false);
+                    return;
+                  }
+                  const { error } = await supabase
+                    .from("corevia_system_settings")
+                    .update({
+                      admin_phone: adminPhone,
+                      admin_email: adminEmail,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", existing.id);
                   if (error) throw error;
                   // Save extended fields to localStorage (table has no columns for them)
                   const extra = { whatsapp: supportWhatsapp, telegram: supportTelegram, website: supportWebsite, message: supportMessage, hours: businessHours };
