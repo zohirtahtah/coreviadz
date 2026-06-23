@@ -121,8 +121,8 @@ DROP POLICY IF EXISTS tenant_isolation_policy ON corevia_invoices;
 CREATE POLICY tenant_isolation_policy ON corevia_invoices FOR ALL
   USING (
     company_id = COALESCE(
-      (SELECT company_id FROM corevia_saas_users WHERE user_id = auth.uid() LIMIT 1),
-      (SELECT company_id FROM corevia_company_users WHERE id = auth.uid() LIMIT 1),
+      (SELECT company_id FROM corevia_saas_users WHERE user_id = auth.uid()::text LIMIT 1),
+      (SELECT company_id FROM corevia_company_users WHERE id = auth.uid()::text LIMIT 1),
       company_id
     )
   );
@@ -132,8 +132,8 @@ DROP POLICY IF EXISTS tenant_isolation_policy ON corevia_activity_center;
 CREATE POLICY tenant_isolation_policy ON corevia_activity_center FOR ALL
   USING (
     company_id = COALESCE(
-      (SELECT company_id FROM corevia_saas_users WHERE user_id = auth.uid() LIMIT 1),
-      (SELECT company_id FROM corevia_company_users WHERE id = auth.uid() LIMIT 1),
+      (SELECT company_id FROM corevia_saas_users WHERE user_id = auth.uid()::text LIMIT 1),
+      (SELECT company_id FROM corevia_company_users WHERE id = auth.uid()::text LIMIT 1),
       company_id
     )
   );
