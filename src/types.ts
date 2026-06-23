@@ -368,6 +368,8 @@ export interface SaaSCompany {
   accountStatus: "Pending Verification" | "Active" | "Read Only" | "Suspended" | "Disabled";
   expirationDate: string;
   trialStartAt?: string;
+  pageLockPassword?: string;
+  lockedPages?: string[];
   activeDevices: ActiveDevice[];
   twoFactorEnabled?: boolean;
   otpCode?: string;

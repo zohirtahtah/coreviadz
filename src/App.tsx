@@ -41,6 +41,7 @@ import ActivityLogView from "./components/ActivityLogView";
 import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
 import CompanyGuard from "./components/CompanyGuard";
+import PageLockModal from "./components/PageLockModal";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -247,6 +248,8 @@ export default function App() {
             accountStatus: data.status || "Active",
             expirationDate: data.subscription_end_date || "",
             trialStartAt: data.trial_start_at || "",
+            pageLockPassword: data.page_lock_password || activeProfile?.passcode || "1234",
+            lockedPages: data.locked_pages || [],
             activeDevices: [],
             otpCode: "123456"
           };
@@ -2175,63 +2178,73 @@ export default function App() {
         )}
 
         {activeTab === "suppliers" && (
-          <SuppliersView
-            suppliers={suppliers}
-            onSaveSuppliers={saveSuppliersAndPersist}
-            invoices={invoices}
-            onSaveInvoices={saveInvoicesAndPersist}
-            products={products}
-            lang={lang}
-            onSoftDeleteInvoice={handleSoftDeleteInvoice}
-            onTriggerNotification={triggerToast}
-          />
+          <PageLockModal pageName="suppliers" defaultPassword={saasAccount?.pageLockPassword} masterPassword={activeProfile?.passcode || "1234"} lang={lang}>
+            <SuppliersView
+              suppliers={suppliers}
+              onSaveSuppliers={saveSuppliersAndPersist}
+              invoices={invoices}
+              onSaveInvoices={saveInvoicesAndPersist}
+              products={products}
+              lang={lang}
+              onSoftDeleteInvoice={handleSoftDeleteInvoice}
+              onTriggerNotification={triggerToast}
+            />
+          </PageLockModal>
         )}
 
         {activeTab === "workers" && (
-          <WorkersView
-            workers={workers}
-            onSaveWorkers={saveWorkersAndPersist}
-            lang={lang}
-            onSoftDeleteWorker={handleSoftDeleteWorker}
-            onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
-            onTriggerNotification={triggerToast}
-            orders={orders}
-            onSectionChange={setActiveTab}
-            session={session}
-          />
+          <PageLockModal pageName="workers" defaultPassword={saasAccount?.pageLockPassword} masterPassword={activeProfile?.passcode || "1234"} lang={lang}>
+            <WorkersView
+              workers={workers}
+              onSaveWorkers={saveWorkersAndPersist}
+              lang={lang}
+              onSoftDeleteWorker={handleSoftDeleteWorker}
+              onDeleteEntireWorkerProfile={handleDeleteEntireWorkerProfile}
+              onTriggerNotification={triggerToast}
+              orders={orders}
+              onSectionChange={setActiveTab}
+              session={session}
+            />
+          </PageLockModal>
         )}
 
         {activeTab === "expenses" && (
-          <ExpensesView
-            expenses={expenses}
-            onSaveExpenses={saveExpensesAndPersist}
-            lang={lang}
-            onSoftDeleteExpense={handleSoftDeleteExpense}
-            onTriggerNotification={triggerToast}
-            onSectionChange={setActiveTab}
-          />
+          <PageLockModal pageName="expenses" defaultPassword={saasAccount?.pageLockPassword} masterPassword={activeProfile?.passcode || "1234"} lang={lang}>
+            <ExpensesView
+              expenses={expenses}
+              onSaveExpenses={saveExpensesAndPersist}
+              lang={lang}
+              onSoftDeleteExpense={handleSoftDeleteExpense}
+              onTriggerNotification={triggerToast}
+              onSectionChange={setActiveTab}
+            />
+          </PageLockModal>
         )}
 
         {activeTab === "profit" && (
-          <ProfitView
-            orders={orders}
-            expenses={expenses}
-            workers={workers}
-            lang={lang}
-            products={products}
-            basicInventory={basicInventory}
-            subInventory={subInventory}
-            returnInventory={returnInventory}
-          />
+          <PageLockModal pageName="profit" defaultPassword={saasAccount?.pageLockPassword} masterPassword={activeProfile?.passcode || "1234"} lang={lang}>
+            <ProfitView
+              orders={orders}
+              expenses={expenses}
+              workers={workers}
+              lang={lang}
+              products={products}
+              basicInventory={basicInventory}
+              subInventory={subInventory}
+              returnInventory={returnInventory}
+            />
+          </PageLockModal>
         )}
 
         {activeTab === "yearly" && (
-          <YearlyView
-            orders={orders}
-            expenses={expenses}
-            workers={workers}
-            lang={lang}
-          />
+          <PageLockModal pageName="yearly" defaultPassword={saasAccount?.pageLockPassword} masterPassword={activeProfile?.passcode || "1234"} lang={lang}>
+            <YearlyView
+              orders={orders}
+              expenses={expenses}
+              workers={workers}
+              lang={lang}
+            />
+          </PageLockModal>
         )}
 
         {activeTab === "trash" && (
