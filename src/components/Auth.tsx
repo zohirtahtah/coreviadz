@@ -469,7 +469,41 @@ export default function Auth({
           console.warn("[Auth Fallback Error]", localCheckErr);
         }
 
-        // Fallback — show the server error instead of simulating a login
+        // Offline/Vercel fallback: try Supabase Auth directly
+        if (supabase && finalEmail.includes("@") && finalPassword.length >= 6) {
+          try {
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+              email: finalEmail,
+              password: finalPassword
+            });
+            if (!authError && authData?.user) {
+              const { data: userData } = await supabase
+                .from("corevia_saas_users")
+                .select("*")
+                .eq("email", finalEmail.toLowerCase().trim())
+                .maybeSingle();
+              if (userData) {
+                const altSession: UserSession = {
+                  username: userData.username || finalEmail.split("@")[0],
+                  email: finalEmail,
+                  isRegistered: true,
+                  isApproved: true,
+                  isSuspended: false,
+                  userId: authData.user.id,
+                  user_id: authData.user.id,
+                  company_id: userData.company_id || `cop_${authData.user.id.substring(0, 15)}`,
+                  role: userData.role || "admin",
+                  jobTitle: "Admin"
+                };
+                onAuthSuccess(altSession);
+                onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح!" : "Logged in successfully!", "success");
+                setIsSubmitting(false);
+                return;
+              }
+            }
+          } catch {}
+        }
+        // Final fallback — show the server error
         onTriggerNotification(
           isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
           "info"
