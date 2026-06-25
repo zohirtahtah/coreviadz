@@ -35,6 +35,7 @@ interface SidebarProps {
   isServerSuperAdmin?: boolean | null;
   accountStatus?: string;
   trialStartAt?: string;
+  onRequestLockedPage?: (tabId: string) => void;
 }
 
 export default function Sidebar({
@@ -145,23 +146,14 @@ export default function Sidebar({
   if (isServerSuperAdmin !== undefined && isServerSuperAdmin !== null) {
     isSuperAdmin = isServerSuperAdmin === true;
   } else {
-    const currentEmail = session?.email || "";
-    if (
-      session?.role === "super_admin" || 
-      currentEmail.toLowerCase().trim() === "coreviadz@gmail.com" || 
-      currentEmail.toLowerCase().trim() === "admin@corevia.com"
-    ) {
+    if (session?.role === "super_admin") {
       isSuperAdmin = true;
     } else {
       try {
         const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
         if (sessionStored) {
           const parsed = JSON.parse(sessionStored);
-          if (
-            parsed.role === "super_admin" || 
-            parsed.email?.toLowerCase().trim() === "coreviadz@gmail.com" || 
-            parsed.email?.toLowerCase().trim() === "admin@corevia.com"
-          ) {
+          if (parsed.role === "super_admin") {
             isSuperAdmin = true;
           }
         }
@@ -238,13 +230,15 @@ export default function Sidebar({
       return;
     }
 
+    // If page is restricted and locked, request unlock via parent modal (no tab switch)
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
-      setShowLockScreen(tabId);
-      setEnteredCode("");
-      setErrorMsg("");
-    } else {
-      setActiveTab(tabId);
+      if (onRequestLockedPage) {
+        onRequestLockedPage(tabId);
+      }
+      return;
     }
+    
+    setActiveTab(tabId);
   };
 
   const verifyPasscode = () => {

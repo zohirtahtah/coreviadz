@@ -11,6 +11,7 @@ import { supabase } from "../supabaseClient";
 
 import { cleanArabicName, cleanPhoneDigits } from "./UsersPermissionsView";
 import { calculateWorkerPayroll } from "../supabaseSync";
+import { Employee, getLocalEmployees, saveLocalEmployees } from "../employeeService";
 
 interface WorkersViewProps {
   workers: Worker[];
@@ -356,9 +357,37 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const [formPaid, setFormPaid] = useState(false);
   const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
   const [formPaymentDate, setFormPaymentDate] = useState("");
-  // Login credentials for worker
-  const [formEmail, setFormEmail] = useState("");
-  const [formPassword, setFormPassword] = useState("");
+  // Company name for auto-generating login email
+  const [companyName, setCompanyName] = useState("");
+
+  // Fetch company name on mount
+  useEffect(() => {
+    if (session?.company_id && supabase) {
+      supabase.from("corevia_companies")
+        .select("name")
+        .eq("id", session.company_id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.name) setCompanyName(data.name);
+        })
+        .catch(() => {});
+    }
+  }, [session?.company_id]);
+
+  // Normalize name for email generation (Arabic→Latin)
+  const normalizeForEmail = (s: string) =>
+    s.toLowerCase().trim()
+      .replace(/[أإآا]/g, "a").replace(/[ب]/g, "b").replace(/[ت]/g, "t")
+      .replace(/[ث]/g, "th").replace(/[ج]/g, "j").replace(/[ح]/g, "h")
+      .replace(/[خ]/g, "kh").replace(/[د]/g, "d").replace(/[ذ]/g, "th")
+      .replace(/[ر]/g, "r").replace(/[ز]/g, "z").replace(/[س]/g, "s")
+      .replace(/[ش]/g, "sh").replace(/[ص]/g, "s").replace(/[ض]/g, "d")
+      .replace(/[ط]/g, "t").replace(/[ظ]/g, "z").replace(/[ع]/g, "a")
+      .replace(/[غ]/g, "gh").replace(/[ف]/g, "f").replace(/[ق]/g, "q")
+      .replace(/[ك]/g, "k").replace(/[ل]/g, "l").replace(/[م]/g, "m")
+      .replace(/[ن]/g, "n").replace(/[ه]/g, "h").replace(/[و]/g, "w")
+      .replace(/[يى]/g, "y").replace(/[ئء]/g, "e").replace(/[ؤ]/g, "o")
+      .replace(/[ة]/g, "t").replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
 
   // Labels helper
   const getsLabel = (lblAr: string, lblFr: string, lblEn: string) => {
@@ -1058,8 +1087,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     setFormPaid(false);
     setFormPaymentAmount(0);
     setFormPaymentDate("");
-    setFormEmail("");
-    setFormPassword("");
   };
 
   // Handle month selection change in adding/editing employee profile
@@ -1365,19 +1392,29 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
       onSaveWorkers(listCopy);
 
-      // Create login account if email provided
-      if (formEmail.trim() && supabase) {
+      // Auto-generate login credentials
+      const companySlug = companyName || session?.company_id || "company";
+      const cleanName = normalizeForEmail(formName.trim());
+      const cleanCompany = normalizeForEmail(companySlug);
+      const generatedEmail = `${cleanName}+${cleanCompany}@gmail.com`;
+      const generatedPassword = formPhone.trim() || `${cleanName}1234`;
+      const username = formName.trim().replace(/\s+/g, "_").toLowerCase();
+      const allowedPages = ["dashboard", "orders", "products", "inventory", "workers", "expenses", "reports", "yearly", "profit", "activity_log"];
+
+      // 1. Save to Supabase corevia_company_users
+      if (supabase) {
         try {
-          const username = formName.trim().replace(/\s+/g, "_").toLowerCase();
           const { error: userErr } = await supabase.from("corevia_company_users").upsert({
-            user_id: freshId,
+            id: freshId,
             company_id: session?.company_id || "",
-            email: formEmail.trim().toLowerCase(),
+            email: generatedEmail,
             username,
-            password: formPassword || formPhone.trim(),
-            role: formRole,
+            phone: formPhone.trim(),
+            password: generatedPassword,
+            full_name: formName.trim(),
+            job_title: formRole,
             status: "Active",
-            allowed_pages: ["dashboard", "orders", "products", "inventory", "workers", "expenses", "reports", "yearly", "profit", "activity_log"],
+            allowed_pages: allowedPages,
             created_at: new Date().toISOString(),
           });
           if (userErr) console.warn("WorkersView: Failed to create login account", userErr);
@@ -1386,7 +1423,39 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         }
       }
 
-      onTriggerNotification(isRtl ? "تم تفصيل وتوظيف العامل الجديد بنجاح" : "Staff onboarded successfully!", "success");
+      // 2. Save to localStorage corevia_employees_list_v2 (offline fallback)
+      try {
+        const localEmps = getLocalEmployees();
+        const newEmp: Employee = {
+          id: freshId,
+          companyId: session?.company_id || "",
+          fullName: formName.trim(),
+          phone: formPhone.trim(),
+          email: generatedEmail,
+          username,
+          jobTitle: formRole,
+          password: generatedPassword,
+          allowedPages,
+          status: "Active",
+          createdAt: new Date().toISOString()
+        };
+        const idx = localEmps.findIndex(e => e.id === freshId);
+        if (idx !== -1) {
+          localEmps[idx] = newEmp;
+        } else {
+          localEmps.push(newEmp);
+        }
+        saveLocalEmployees(localEmps);
+      } catch (localErr) {
+        console.warn("WorkersView: Failed to save employee to localStorage", localErr);
+      }
+
+      onTriggerNotification(
+        isRtl
+          ? `✅ تم توظيف العامل بنجاح! 📧 ${generatedEmail} 🔑 ${generatedPassword}`
+          : `✅ Staff onboarded! 📧 ${generatedEmail} 🔑 ${generatedPassword}`,
+        "success"
+      );
     }
 
     setShowForm(false);
@@ -2397,28 +2466,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
                     onChange={(e) => setFormPhone(e.target.value)}
                     className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
                     placeholder="مكالمات الموظف"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-zinc-500 font-bold">البريد الإلكتروني (للدخول إلى الموقع)</label>
-                  <input
-                    type="email"
-                    value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
-                    className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
-                    placeholder="email@example.com"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-zinc-500 font-bold">كلمة المرور (للدخول إلى الموقع)</label>
-                  <input
-                    type="password"
-                    value={formPassword}
-                    onChange={(e) => setFormPassword(e.target.value)}
-                    className="bg-[#040406] border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none"
-                    placeholder="أدخل كلمة المرور"
                   />
                 </div>
 

@@ -469,30 +469,11 @@ export default function Auth({
           console.warn("[Auth Fallback Error]", localCheckErr);
         }
 
-        // Fallback to local simulation in case server is not fully up or offline
-        if (!supabase || finalEmail.toLowerCase().trim() === "coreviadz@gmail.com") {
-          const adminUserId = "usr_super_admin_coreviadz";
-          const isSuperAdminEmail = finalEmail.toLowerCase().trim() === "coreviadz@gmail.com";
-          const emailPrefix = finalEmail.split("@")[0] || "usr";
-          const fallbackSession: UserSession = {
-            username: isSuperAdminEmail ? "Zohir Corevia" : (finalEmail.split("@")[0] || "User"),
-            email: finalEmail,
-            isRegistered: true,
-            isApproved: true,
-            isSuspended: false,
-            user_id: adminUserId,
-            userId: adminUserId,
-            company_id: isSuperAdminEmail ? `cop_${adminUserId.substring(0, 15)}` : `cop_${emailPrefix.substring(0, 10)}`,
-            role: isSuperAdminEmail ? "super_admin" : "admin"
-          };
-          onAuthSuccess(fallbackSession);
-          onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح (وضع المحاكاة المتصل بنظام التخزين المحلي)!" : "Logged in successfully (Simulated mode)!", "success");
-        } else {
-          onTriggerNotification(
-            isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
-            "info"
-          );
-        }
+        // Fallback — show the server error instead of simulating a login
+        onTriggerNotification(
+          isRtl ? `خطأ في تسجيل الدخول: ${err.message || err}` : `Login error: ${err.message || err}`,
+          "info"
+        );
       } finally {
         setIsSubmitting(false);
       }

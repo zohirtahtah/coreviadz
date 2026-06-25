@@ -195,14 +195,8 @@ export default function SuperAdminView({
 
   const loadSaaSRealData = async () => {
     if (!supabase) {
-      // Fallback to localStorage companies when Supabase is not configured
-      const stored = localStorage.getItem("corevia_saas_companies_v1");
-      if (stored) {
-        try {
-          const parsed: SaaSCompany[] = JSON.parse(stored);
-          setCompanies(parsed);
-        } catch (e) {}
-      }
+      // No Supabase client — cannot fetch real data
+      setCompanies([]);
       return;
     }
 
@@ -280,20 +274,8 @@ export default function SuperAdminView({
         };
       });
 
-      // If Supabase returned no companies, fall back to localStorage
-      if (saasCompanies.length === 0) {
-        const stored = localStorage.getItem("corevia_saas_companies_v1");
-        if (stored) {
-          try {
-            const parsed: SaaSCompany[] = JSON.parse(stored);
-            setCompanies(parsed);
-          } catch (e) {}
-        } else {
-          setCompanies(saasCompanies);
-        }
-      } else {
-        setCompanies(saasCompanies);
-      }
+      // Only show real DB companies — no localStorage fallback for fake data
+      setCompanies(saasCompanies);
 
       const saasLogs: SaaSActivityLog[] = (users || []).map((u, i) => {
         const compName = (profiles || []).find(p => p.id === u.company_id || p.company_id === u.company_id)?.business_name || `${u.username || u.email.split("@")[0]} Trading`;
@@ -320,11 +302,8 @@ export default function SuperAdminView({
     }
   };
 
-  // Keep Sync
-  useEffect(() => {
-    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(companies));
-  }, [companies]);
-
+  // Keep Sync — note: companies are no longer synced to localStorage;
+  // Supabase is the sole source of truth.
   useEffect(() => {
     localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logs));
   }, [logs]);
@@ -1020,8 +999,14 @@ export default function SuperAdminView({
               </span>
             </div>
 
-            {filteredCompanies.length === 0 ? (
+            {companies.length === 0 ? (
               <div className="p-12 text-center" id="empty_directory_log">
+                <Building2 className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                <p className="text-slate-400 text-xs font-bold mb-1">{isRtl ? "لا توجد شركات مسجلة بعد" : "No registered companies yet"}</p>
+                <p className="text-slate-500 text-[10px]">{isRtl ? "البيانات تُجلب مباشرة من Supabase — لا توجد بيانات وهمية" : "Data is fetched directly from Supabase — no placeholder data"}</p>
+              </div>
+            ) : filteredCompanies.length === 0 ? (
+              <div className="p-12 text-center" id="filtered_empty_directory_log">
                 <AlertTriangle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                 <p className="text-slate-400 text-xs">{isRtl ? "لم يتم العثور على أي مؤسسات مسجلة تطابق محددات البحث." : "No accounts match lookup criteria."}</p>
               </div>

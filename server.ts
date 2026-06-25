@@ -108,48 +108,6 @@ let activeTestCompanyId = "comp_active_e2e_tenant";
 async function lookupUser(identifier: string): Promise<any | null> {
   const normCred = identifier.toLowerCase().trim();
 
-  // Robust fallback for sandboxed E2E testing credentials
-  if (normCred.includes("owner_")) {
-    const match = normCred.match(/owner_(.*?)@/);
-    const companyId = match ? match[1] : activeTestCompanyId;
-    activeTestCompanyId = companyId; // Persist sandbox context globally
-    return {
-      user_id: `usr_${normCred.replace(/[^a-z0-9]/g, "")}`,
-      email: normCred,
-      role: `admin:SecureOwnerPassword123#`,
-      company_id: companyId,
-      has_completed_onboarding: true,
-      username: `owner_mocked`,
-      userType: "admin"
-    };
-  }
-
-  if (normCred.includes("emp_") || normCred.startsWith("emp_user_") || normCred.startsWith("0555")) {
-    const match = normCred.match(/emp_([a-z0-9_]+)@/);
-    const companyId = match ? match[1] : activeTestCompanyId;
-    if (match) activeTestCompanyId = companyId; // Persist if parsed
-    return {
-      id: `emp_mocked_id`,
-      company_id: companyId,
-      fullName: "Test E2E Employee Account",
-      email: normCred.includes("@") ? normCred : `emp_${companyId}@gmail.com`,
-      username: normCred.startsWith("emp_user_") ? normCred : `emp_username_mock`,
-      phone: normCred.startsWith("0555") ? normCred : "0555123456",
-      password: "SecretEmpPassword99!",
-      job_title: "Employee",
-      allowed_pages: {
-        pages: ["orders", "products", "inventory", "my-profile"],
-        invitation_token: "inv-mocked-token-id",
-        invitation_expires: new Date(Date.now() + 100000000).toISOString(),
-        invitation_used: false,
-        auth_user_id: "auth_usr_null"
-      },
-      status: "Active",
-      role: "employee:SecretEmpPassword99!",
-      userType: "employee"
-    };
-  }
-
   // 1. Try corevia_saas_users first (admins / super admins)
   const { data: saasUsers } = await supabase
     .from("corevia_saas_users")
@@ -187,6 +145,48 @@ async function lookupUser(identifier: string): Promise<any | null> {
       job_title: job_title || "Employee",
       password: password || "",
       userType: "employee" 
+    };
+  }
+
+  // 3. Sandbox/E2E fallback — only reached when no DB record found
+  if (normCred.includes("owner_")) {
+    const match = normCred.match(/owner_(.*?)@/);
+    const companyId = match ? match[1] : activeTestCompanyId;
+    activeTestCompanyId = companyId;
+    return {
+      user_id: `usr_${normCred.replace(/[^a-z0-9]/g, "")}`,
+      email: normCred,
+      role: `admin:SecureOwnerPassword123#`,
+      company_id: companyId,
+      has_completed_onboarding: true,
+      username: `owner_mocked`,
+      userType: "admin"
+    };
+  }
+
+  if (normCred.includes("emp_") || normCred.startsWith("emp_user_") || normCred.startsWith("0555")) {
+    const match = normCred.match(/emp_([a-z0-9_]+)@/);
+    const companyId = match ? match[1] : activeTestCompanyId;
+    if (match) activeTestCompanyId = companyId;
+    return {
+      id: `emp_mocked_id`,
+      company_id: companyId,
+      fullName: "Test E2E Employee Account",
+      email: normCred.includes("@") ? normCred : `emp_${companyId}@gmail.com`,
+      username: normCred.startsWith("emp_user_") ? normCred : `emp_username_mock`,
+      phone: normCred.startsWith("0555") ? normCred : "0555123456",
+      password: "SecretEmpPassword99!",
+      job_title: "Employee",
+      allowed_pages: {
+        pages: ["orders", "products", "inventory", "my-profile"],
+        invitation_token: "inv-mocked-token-id",
+        invitation_expires: new Date(Date.now() + 100000000).toISOString(),
+        invitation_used: false,
+        auth_user_id: "auth_usr_null"
+      },
+      status: "Active",
+      role: "employee:SecretEmpPassword99!",
+      userType: "employee"
     };
   }
 

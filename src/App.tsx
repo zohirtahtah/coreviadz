@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { 
   getBusinessProfile, saveBusinessProfile, getUserSession, saveUserSession,
   getOrders, saveOrders, getProducts, saveProducts, getBasicInventory, saveBasicInventory,
@@ -51,7 +51,7 @@ import {
   getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
   serializeOrderToRow, getDynamicOrderColumns, logSyncAudit 
 } from "./googleSyncUtils";
-import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2 } from "lucide-react";
+import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2, Lock } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { handleLoginSeatCheck, releaseSeatOnSignOut } from "./lib/seatsManager";
 import { 
@@ -164,34 +164,19 @@ export default function App() {
   const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
-  // Double-verify Super Admin privileges server-side to secure the admin layout
+  // Verify Super Admin privileges server-side
   useEffect(() => {
-    const isSuperAdminEmail = session?.email?.toLowerCase().trim() === "coreviadz@gmail.com" || session?.email?.toLowerCase().trim() === "admin@corevia.com";
-    if (session && (session.role === "super_admin" || session.role === "super-admin" || isSuperAdminEmail)) {
+    if (session && (session.role === "super_admin" || session.role === "super-admin")) {
       fetch("/api/auth/verify-super-admin")
         .then(res => {
           if (res.ok) return res.json();
           throw new Error("Super admin verification failed");
         })
         .then(data => {
-          if (data && data.isSuperAdmin) {
-            setIsServerSuperAdmin(true);
-          } else {
-            // Robust local fallback for founder/platform manager
-            if (isSuperAdminEmail) {
-              setIsServerSuperAdmin(true);
-            } else {
-              setIsServerSuperAdmin(false);
-            }
-          }
+          setIsServerSuperAdmin(data && data.isSuperAdmin ? true : false);
         })
         .catch(() => {
-          // Robust local fallback for founder/platform manager on network glitches
-          if (isSuperAdminEmail) {
-            setIsServerSuperAdmin(true);
-          } else {
-            setIsServerSuperAdmin(false);
-          }
+          setIsServerSuperAdmin(false);
         });
     } else {
       setIsServerSuperAdmin(false);
@@ -351,6 +336,37 @@ export default function App() {
       console.warn("Could not sync pathname:", e);
     }
   }, [activeTab]);
+
+  // Protected page unlock request (global modal over current page)
+  const [pendingLockedTab, setPendingLockedTab] = useState<string | null>(null);
+  const [lockPasswordInput, setLockPasswordInput] = useState("");
+  const [lockPasswordError, setLockPasswordError] = useState("");
+
+  const handleRequestLockedPage = useCallback((tabId: string) => {
+    setPendingLockedTab(tabId);
+    setLockPasswordInput("");
+    setLockPasswordError("");
+  }, []);
+
+  const handleCancelLockPage = useCallback(() => {
+    setPendingLockedTab(null);
+    setLockPasswordInput("");
+    setLockPasswordError("");
+  }, []);
+
+  const handleConfirmLockPage = useCallback(() => {
+    const pagePassword = saasAccount?.pageLockPassword || activeProfile?.passcode || "1234";
+    if (lockPasswordInput === pagePassword) {
+      setActiveTab(pendingLockedTab);
+      // Also mark tab as unlocked for Sidebar
+      setUnlockedTabs(prev => prev.includes(pendingLockedTab) ? prev : [...prev, pendingLockedTab]);
+      setPendingLockedTab(null);
+      setLockPasswordInput("");
+      setLockPasswordError("");
+    } else {
+      setLockPasswordError(lang === "ar" ? "كلمة المرور غير صحيحة" : "Incorrect password");
+    }
+  }, [lockPasswordInput, pendingLockedTab, saasAccount, activeProfile, lang]);
 
   useEffect(() => {
     sessionStorage.setItem("corevia_is_locked_v1", String(isLocked));
@@ -2115,6 +2131,7 @@ export default function App() {
         isServerSuperAdmin={isServerSuperAdmin}
         accountStatus={saasAccount?.accountStatus}
         trialStartAt={saasAccount?.trialStartAt}
+        onRequestLockedPage={handleRequestLockedPage}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}
@@ -2483,6 +2500,50 @@ export default function App() {
           companyId={session.company_id}
           companyName={saasAccount?.companyName || session?.username || "Company"}
         />
+      )}
+
+      {/* GLOBAL PROTECTED PAGE UNLOCK MODAL (overlays current page, no URL change) */}
+      {pendingLockedTab && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[9999] animate-fade-in" id="global_page_unlock_modal">
+          <div className="w-full max-w-sm bg-[#121214] border border-[#27272a] shadow-2xl rounded-2xl p-6 relative overflow-hidden text-center">
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-indigo-500 to-violet-600" />
+            <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center mb-4 text-indigo-400">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-black text-white mb-1">
+              {lang === "ar" ? "صفحة محمية" : "Protected Page"}
+            </h3>
+            <p className="text-xs text-slate-400 mb-6">
+              {lang === "ar" ? "يرجى إدخال كلمة المرور للوصول إلى هذه الصفحة" : "Enter password to access this page"}
+            </p>
+            <input
+              type="password"
+              value={lockPasswordInput}
+              onChange={(e) => { setLockPasswordInput(e.target.value); setLockPasswordError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleConfirmLockPage(); }}
+              className="w-full px-4 py-2.5 bg-[#1c1c1e] border border-[#27272a] rounded-xl text-white text-sm font-bold text-center outline-none focus:border-indigo-500/50 transition-all mb-2"
+              placeholder={lang === "ar" ? "كلمة المرور" : "Password"}
+              autoFocus
+            />
+            {lockPasswordError && (
+              <p className="text-xs text-red-400 mb-2">{lockPasswordError}</p>
+            )}
+            <div className={`flex items-center gap-3 ${lang === "ar" ? "flex-row-reverse" : "flex-row"}`}>
+              <button
+                onClick={handleCancelLockPage}
+                className="flex-1 py-2.5 bg-[#1c1c1e] hover:bg-[#27272a] text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-[#27272a] cursor-pointer"
+              >
+                {lang === "ar" ? "إلغاء" : "Cancel"}
+              </button>
+              <button
+                onClick={handleConfirmLockPage}
+                className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-indigo-500/10 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+              >
+                {lang === "ar" ? "فتح" : "Unlock"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       </CompanyGuard>
