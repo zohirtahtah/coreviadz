@@ -199,7 +199,28 @@ export default function SuperAdminView({
         .from("corevia_profile")
         .select("*");
 
-      const saasCompanies: SaaSCompany[] = (realCompanies || []).map(rc => {
+      const saasCompanies: SaaSCompany[] = (realCompanies || [])
+        .filter(rc => {
+          const companyId = rc.id || "";
+          const name = (rc.name || "").toLowerCase();
+          const email = (rc.owner_email || rc.email || "").toLowerCase();
+          
+          if (
+            companyId.startsWith("proof_") || 
+            companyId.startsWith("rbac_") || 
+            companyId === "cop_mock" || 
+            companyId === "cop_usr_mock" ||
+            name.includes("test") || 
+            name.includes("proof corp") || 
+            email.includes("rbac.com") || 
+            email.includes("proof.com") ||
+            email.includes("test.com")
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map(rc => {
         const companyId = rc.id;
         const prof = (profiles || []).find(p => p.id === companyId || p.company_id === companyId);
         const companyUsers = (users || []).filter(u => u.company_id === companyId);
