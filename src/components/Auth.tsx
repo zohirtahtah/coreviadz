@@ -477,29 +477,37 @@ export default function Auth({
               password: finalPassword
             });
             if (!authError && authData?.user) {
-              const { data: userData } = await supabase
-                .from("corevia_saas_users")
-                .select("*")
-                .eq("email", finalEmail.toLowerCase().trim())
-                .maybeSingle();
-              if (userData) {
-                const altSession: UserSession = {
-                  username: userData.username || finalEmail.split("@")[0],
-                  email: finalEmail,
-                  isRegistered: true,
-                  isApproved: true,
-                  isSuspended: false,
-                  userId: authData.user.id,
-                  user_id: authData.user.id,
-                  company_id: userData.company_id || `cop_${authData.user.id.substring(0, 15)}`,
-                  role: userData.role || "admin",
-                  jobTitle: "Admin"
-                };
-                onAuthSuccess(altSession);
-                onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح!" : "Logged in successfully!", "success");
-                setIsSubmitting(false);
-                return;
-              }
+              let companyId = `cop_${authData.user.id.substring(0, 15)}`;
+              let role = "admin";
+              let username = finalEmail.split("@")[0];
+              try {
+                const { data: userData } = await supabase
+                  .from("corevia_saas_users")
+                  .select("*")
+                  .eq("email", finalEmail.toLowerCase().trim())
+                  .maybeSingle();
+                if (userData) {
+                  companyId = userData.company_id || companyId;
+                  role = userData.role || role;
+                  username = userData.username || username;
+                }
+              } catch {}
+              const altSession: UserSession = {
+                username,
+                email: finalEmail,
+                isRegistered: true,
+                isApproved: true,
+                isSuspended: false,
+                userId: authData.user.id,
+                user_id: authData.user.id,
+                company_id: companyId,
+                role,
+                jobTitle: "Admin"
+              };
+              onAuthSuccess(altSession);
+              onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح!" : "Logged in successfully!", "success");
+              setIsSubmitting(false);
+              return;
             }
           } catch {}
         }
