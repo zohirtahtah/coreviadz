@@ -128,7 +128,7 @@ export default function UsersPermissionsView({
       }
 
       setUsername(uniqueSlug);
-      setEmail(`${uniqueSlug}@corevia.dz`);
+      setEmail(`${uniqueSlug}@gmail.com`);
     }
   }, [fullName, editingEmployee, employees]);
 
@@ -465,48 +465,52 @@ export default function UsersPermissionsView({
     let invitationToken = editingEmployee?.invitation_token;
     let invitationExpires = editingEmployee?.invitation_expires;
     let invitationUsed = editingEmployee?.invitation_used ?? false;
+    let isFirstLogin = isNew ? true : (editingEmployee?.is_first_login ?? false);
 
-    // Create a real Supabase Auth account for the new employee
+    // Create a real Supabase Auth account for the new employee using server admin endpoint
     if (isNew) {
-      const signUpSecondary = createSecondaryClient();
-      if (signUpSecondary) {
-        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
-        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
-          email: userEmail,
-          password: password.trim(),
-          options: {
-            data: {
-              company_id: companyId,
-              employee_id: employeeId,
-              role: "employee",
-              username: username.trim().toLowerCase(),
-              full_name: fullName.trim()
-            }
-          }
+      const userEmail = email.trim() || `${username.trim().toLowerCase()}@gmail.com`;
+      try {
+        const response = await fetch("/api/auth/create-employee-auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: userEmail,
+            password: password.trim(),
+            company_id: companyId,
+            employee_id: employeeId,
+            username: username.trim().toLowerCase(),
+            full_name: fullName.trim()
+          })
         });
 
-        if (authError) {
-          console.error("Supabase Auth SignUp error:", authError);
-          onTriggerNotification(
-            isRtl 
-              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
-              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
-          );
-          setIsLoading(false);
-          return;
+        if (!response.ok) {
+          const resData = await response.json();
+          throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
         }
 
-        authUserId = authData.user?.id;
+        const resData = await response.json();
+        authUserId = resData.auth_user_id;
+
+      } catch (authError: any) {
+        console.error("Supabase Auth SignUp error:", authError);
+        onTriggerNotification(
+          isRtl 
+            ? `❌ خطأ في نظام إنشاء هويات الموظفين: ${authError.message}`
+            : `❌ Employee Auth creation failed: ${authError.message}`
+        );
+        setIsLoading(false);
+        return;
       }
 
-      // Generate expiring (7 days) secure invitation link
-      invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
-      invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      // No invitations used under the new direct system
+      invitationToken = undefined;
+      invitationExpires = undefined;
       invitationUsed = false;
     } else {
       // If editing employee and password changed, sync password back to Supabase Auth
       if (editingEmployee && editingEmployee.password !== password.trim()) {
-        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.dz`;
+        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@gmail.com`;
         const signUpSecondary = createSecondaryClient();
         if (signUpSecondary) {
           try {
@@ -542,7 +546,8 @@ export default function UsersPermissionsView({
       auth_user_id: authUserId,
       invitation_token: invitationToken,
       invitation_expires: invitationExpires,
-      invitation_used: invitationUsed
+      invitation_used: invitationUsed,
+      is_first_login: isFirstLogin
     };
 
     const success = await saveEmployee(payload);
@@ -617,10 +622,10 @@ export default function UsersPermissionsView({
       if (isNew) {
         setCreatedCredentials({
           fullName: fullName.trim(),
-          email: email.trim() || `${username.trim().toLowerCase()}@corevia.dz`,
+          email: email.trim() || `${username.trim().toLowerCase()}@gmail.com`,
           username: username.trim().toLowerCase(),
           password: password.trim(),
-          loginUrl: `${window.location.origin}/?invite_token=${invitationToken}`
+          loginUrl: window.location.origin
         });
       } else {
         setIsModalOpen(false);
@@ -1203,7 +1208,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                             .replace(/\s+/g, ".")
                             .replace(/[^a-z0-9.]/g, "");
                           setUsername(slug);
-                          setEmail(`${slug}@corevia.dz`);
+                          setEmail(`${slug}@gmail.com`);
                         }
                       } else {
                         setFullName("");
@@ -1301,7 +1306,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       const val = e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
                       setUsername(val);
                       if (!editingEmployee && val) {
-                        setEmail(`${val}@corevia.dz`);
+                        setEmail(`${val}@gmail.com`);
                       }
                     }}
                     placeholder="mohamed.orders"
@@ -1316,7 +1321,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@corevia.dz"
+                    placeholder="name@gmail.com"
                     className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
                   />
                 </div>

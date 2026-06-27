@@ -25,7 +25,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "activate_invite";
+type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "activate_invite" | "first_login_change";
 
 export default function Auth({
   lang,
@@ -47,6 +47,7 @@ export default function Auth({
   const [phoneInput, setPhoneInput] = useState("");
   const [countryInput, setCountryInput] = useState("Algeria");
   const [otpInput, setOtpInput] = useState("");
+  const [tempOldPassword, setTempOldPassword] = useState("");
   
   // UI states
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -372,6 +373,21 @@ export default function Auth({
 
         const authenticatedSession: UserSession = resData.session;
 
+        if (authenticatedSession && (authenticatedSession as any).isFirstLogin) {
+          setTempOldPassword(finalPassword);
+          setPasswordInput("");
+          setConfirmPasswordInput("");
+          setAuthMode("first_login_change");
+          onTriggerNotification(
+            isRtl 
+              ? "🔒 هذا هو تسجيل دخولك الأول؛ يرجى تعيين كلمة مرور جديدة لحسابك للمتابعة والولوج الآمن." 
+              : "🔒 First login detected. Please choose a new secure password for your account to continue.",
+            "success"
+          );
+          setIsSubmitting(false);
+          return;
+        }
+
         // Optionally cache to local storage in parallel for fallback
         try {
           const currentLocal = getLocalEmployees();
@@ -441,7 +457,7 @@ export default function Auth({
 
             const employeeSession: UserSession = {
               username: matchedEmployee.fullName,
-              email: matchedEmployee.email || `${matchedEmployee.username}@corevia.dz`,
+              email: matchedEmployee.email || `${matchedEmployee.username}@gmail.com`,
               isRegistered: true,
               isApproved: true,
               isSuspended: false,
@@ -744,6 +760,77 @@ export default function Auth({
       } finally {
          setIsSubmitting(false);
       }
+    } else if (authMode === "first_login_change") {
+      if (!passwordInput) {
+        onTriggerNotification(isRtl ? "الرجاء إدخال كلمة المرور الجديدة" : "Please enter your new password", "info");
+        setIsSubmitting(false);
+        return;
+      }
+      if (passwordInput !== confirmPasswordInput) {
+        onTriggerNotification(isRtl ? "كلمات المرور غير متطابقة" : "Passwords do not match", "info");
+        setIsSubmitting(false);
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/auth/change-first-login-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            credential: emailInput.trim(),
+            oldPassword: tempOldPassword,
+            newPassword: passwordInput
+          })
+        });
+
+        const resData = await response.json();
+
+        if (!response.ok) {
+          throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
+        }
+
+        const authenticatedSession: UserSession = resData.session;
+
+        // Optionally cache to local storage in parallel for fallback
+        try {
+          const currentLocal = getLocalEmployees();
+          const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
+          const empObj: Employee = {
+            id: authenticatedSession.userId,
+            companyId: authenticatedSession.company_id || "cop_default",
+            fullName: authenticatedSession.username,
+            email: authenticatedSession.email,
+            phone: "",
+            jobTitle: authenticatedSession.jobTitle || "Employee",
+            allowedPages: authenticatedSession.allowedPages || [],
+            password: passwordInput,
+            status: "Active",
+            createdAt: new Date().toISOString()
+          };
+          if (idx !== -1) {
+            currentLocal[idx] = empObj;
+          } else {
+            currentLocal.push(empObj);
+          }
+          localStorage.setItem("corevia_employees_list_v2", JSON.stringify(currentLocal));
+        } catch (storageErr) {}
+
+        onAuthSuccess(authenticatedSession);
+        onTriggerNotification(
+          isRtl 
+            ? "✅ تم تحديث كلمة المرور وتسجيل الدخول بنجاح!" 
+            : "✅ Password updated and logged in successfully!",
+          "success"
+        );
+
+      } catch (err: any) {
+        onTriggerNotification(
+          isRtl ? `خطأ أثناء تحديث كلمة المرور: ${err.message || err}` : `Error updating password: ${err.message || err}`,
+          "info"
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -1030,7 +1117,7 @@ export default function Auth({
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="owner@corevia.dz"
+                    placeholder="owner@gmail.com"
                     className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
                       isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
                     }`}
@@ -1410,6 +1497,97 @@ export default function Auth({
                 <button
                   type="button"
                   onClick={() => setAuthMode("login")}
+                  className="text-slate-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto"
+                >
+                  {isRtl ? <ArrowRight className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
+                  <span>{t.backToLogin}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* FIRST LOGIN PASSWORD CHANGE FORM */}
+          {authMode === "first_login_change" && (
+            <form onSubmit={handleSubmit} className="space-y-4" id="first_login_change_form">
+              <div className="p-3 bg-indigo-500/5 border border-indigo-550/10 rounded-2xl mb-4 text-center">
+                <p className="text-[11px] text-indigo-400 font-bold leading-relaxed">
+                  {isRtl 
+                    ? "🔒 هذا هو تسجيل دخولك الأول؛ يرجى تعيين كلمة مرور جديدة لحسابك للمتابعة والولوج الآمن."
+                    : "🔒 First login detected. Please choose a new secure password for your account to continue."}
+                </p>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">{isRtl ? "كلمة المرور الجديدة" : "New Password"}</label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
+                  >
+                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">{isRtl ? "تأكيد كلمة المرور الجديدة" : "Confirm New Password"}</label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-550 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Submit button */}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group overflow-hidden bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg hover:shadow-indigo-500/20 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-indigo-500/10"
+              >
+                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isRtl ? "جاري تحديث كلمة المرور..." : "Updating password..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{isRtl ? "تعديل وحفظ كلمة المرور" : "Apply Password Reset"}</span>
+                  </>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordInput("");
+                    setConfirmPasswordInput("");
+                    setAuthMode("login");
+                  }}
                   className="text-slate-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 mx-auto"
                 >
                   {isRtl ? <ArrowRight className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}

@@ -18,6 +18,7 @@ export interface Employee {
   invitation_token?: string;
   invitation_expires?: string;
   invitation_used?: boolean;
+  is_first_login?: boolean;
 }
 
 // Local Storage helper for holding offline/cached copies
@@ -177,7 +178,8 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       job_title: employee.jobTitle,
       password: employee.password || "",
       assigned_responsibilities: employee.assignedResponsibilities || null,
-      last_activity: employee.lastActivity || null
+      last_activity: employee.lastActivity || null,
+      is_first_login: employee.is_first_login ?? null
     };
 
     const dbPayload: any = {
@@ -189,6 +191,7 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       role: employee.password ? `employee:${employee.password.trim()}` : "employee",
       allowed_pages: richAllowedPages,
       status: employee.status,
+      auth_user_id: employee.auth_user_id || null,
       invitation_token: employee.invitation_token || null,
       invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null
     };

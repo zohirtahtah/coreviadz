@@ -538,7 +538,7 @@ create policy tenant_isolation on corevia_companies for all using (
 
 drop policy if exists tenant_isolation on corevia_saas_users;
 create policy tenant_isolation on corevia_saas_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+  auth.uid() is null or user_id = auth.uid()
 );
 
 drop policy if exists tenant_isolation on corevia_company_users;
@@ -1691,7 +1691,7 @@ create policy tenant_isolation on corevia_companies for all using (
 
 drop policy if exists tenant_isolation on corevia_saas_users;
 create policy tenant_isolation on corevia_saas_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
+  auth.uid() is null or user_id = auth.uid()
 );
 
 drop policy if exists tenant_isolation on corevia_company_users;

@@ -1159,7 +1159,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
           companyId,
           fullName: (formName || "").trim(),
           phone: (formPhone || "").trim(),
-          email: matchingEmp?.email || `${slug}@corevia.dz`,
+          email: matchingEmp?.email || `${slug}@gmail.com`,
           username: matchingEmp?.username || slug,
           jobTitle: formRole || "موظف",
           password: matchingEmp?.password || Math.floor(100000 + Math.random() * 900000).toString(),
