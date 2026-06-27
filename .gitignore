@@ -6,9 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-.vercel
-
-# Test evidence files
-invite-response.json
-resend-response.json
-test-invite-evidence.cjs

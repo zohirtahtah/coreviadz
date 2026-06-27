@@ -12,25 +12,6 @@ import {
   BasicInventoryItem, SubInventoryItem, ReturnInventoryItem, StockMovement
 } from "./types";
 
-/**
- * Merges cloud items with local-only items to prevent race conditions
- * where recently-added local items get overwritten by stale cloud data.
- * Uses a key function (defaults to "id" field) to identify duplicates.
- */
-function mergeWithLocal<T>(
-  cloudItems: T[],
-  localItems: any[],
-  keyFn?: (item: any) => string
-): T[] {
-  const getKey = keyFn || ((item: any) => item.id);
-  const cloudKeys = new Set(cloudItems.map(getKey));
-  const localOnly = localItems.filter(item => !cloudKeys.has(getKey(item)));
-  if (localOnly.length > 0) {
-    console.log(`[pullMultiTenantData] Preserving ${localOnly.length} local items not yet in cloud`);
-  }
-  return [...cloudItems, ...localOnly];
-}
-
 export interface SaasUserMeta {
   userId: string;
   companyId: string;
@@ -594,7 +575,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: p.updated_date || undefined,
         updatedTime: p.updated_time || undefined
       }));
-      saveProducts(mergeWithLocal(formatted, getProducts()));
+      saveProducts(formatted);
     }
 
     // 3. Fetch Orders
@@ -675,7 +656,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           updatedTime: o.updated_time || undefined
         };
       });
-      saveOrders(mergeWithLocal(formatted, getOrders()));
+      saveOrders(formatted);
     }
 
     // 4. Fetch Suppliers
@@ -699,7 +680,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: s.updated_date || undefined,
         updatedTime: s.updated_time || undefined
       }));
-      saveSuppliers(mergeWithLocal(formatted, getSuppliers()));
+      saveSuppliers(formatted);
     }
 
     // 5. Fetch Expenses
@@ -775,6 +756,12 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       .select("*")
       .eq("company_id", companyId);
 
+    // Fetch Invited/Registered Employees for worker linking
+    const { data: dbCompanyUsers } = await supabase
+      .from("corevia_company_users")
+      .select("*")
+      .eq("company_id", companyId);
+
     let formatted: any[] = [];
     if (dbWorkers) {
       formatted = dbWorkers.map(w => ({
@@ -798,11 +785,76 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
       }));
     }
 
-    // Workers and Employees are completely separate entities.
-    // NEVER auto-create workers from employee records or vice versa.
-    // ONLY load workers from corevia_workers, nothing else.
+    if (dbCompanyUsers && dbCompanyUsers.length > 0) {
+      const extraWorkersToPersist: any[] = [];
+      dbCompanyUsers.forEach(emp => {
+        let employeeName = emp.username || emp.id || "Employee";
+        let jobTitle = "Employee";
+        let phone = emp.phone || "";
+        
+        // Parse nested fields from JSONB allowed_pages if available
+        if (emp.allowed_pages) {
+          try {
+            const parsed = typeof emp.allowed_pages === "string" ? JSON.parse(emp.allowed_pages) : emp.allowed_pages;
+            if (parsed && typeof parsed === "object") {
+              if (parsed.full_name) employeeName = parsed.full_name;
+              if (parsed.job_title) jobTitle = parsed.job_title;
+            }
+          } catch (e) {}
+        }
 
-    saveWorkers(mergeWithLocal(formatted, getWorkers()));
+        // Check if there is already a matching worker in formatted list
+        const exists = formatted.some(w => 
+          w.id === emp.id || 
+          (emp.phone && w.phone && emp.phone.trim() === w.phone.trim()) ||
+          (employeeName && w.name && employeeName.toLowerCase().trim() === w.name.toLowerCase().trim())
+        );
+
+        if (!exists) {
+          // Provision in corevia_workers automatically
+          const newWorkerId = emp.id || `worker_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
+          const freshWorker = {
+            id: newWorkerId,
+            name: employeeName,
+            code: "W-" + newWorkerId.substring(0, 4),
+            phone: phone,
+            baseSalary: 45000, // standard default fallback salary
+            dailyHours: 8,
+            overtimeRate: 2,
+            role: jobTitle,
+            monthlySalary: 45000,
+            payrolls: [],
+            createdAt: emp.created_at || new Date().toISOString()
+          };
+          formatted.push(freshWorker);
+          extraWorkersToPersist.push({
+            id: newWorkerId,
+            company_id: companyId,
+            name: employeeName,
+            code: "W-" + newWorkerId.substring(0, 4),
+            phone: phone,
+            base_salary: 45000,
+            daily_hours: 8,
+            overtime_rate: 2,
+            role: jobTitle,
+            monthly_salary: 45000,
+            payrolls: [],
+            created_at: emp.created_at || new Date().toISOString()
+          });
+        }
+      });
+
+      // Insert missing workers in background asynchronously to prevent any main thread blocking
+      if (extraWorkersToPersist.length > 0) {
+        supabase.from("corevia_workers").upsert(extraWorkersToPersist)
+          .then(({ error }) => {
+            if (error) console.error("Auto-provisioning workers from employees failed:", error);
+            else console.log(`Auto-provisioned ${extraWorkersToPersist.length} worker profiles dynamically.`);
+          });
+      }
+    }
+
+    saveWorkers(formatted);
 
     // 7. Fetch Salary Sheets
     const { data: dbSheets } = await supabase
@@ -841,7 +893,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         updatedDate: sh.updated_date || undefined,
         updatedTime: sh.updated_time || undefined
       }));
-      saveSalarySheets(mergeWithLocal(formatted, getSalarySheets()));
+      saveSalarySheets(formatted);
     }
 
     // 8. Fetch Basic Inventory
@@ -854,7 +906,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           color: bi.color || "",
           quantity: safeNum(bi.quantity)
         }));
-        saveBasicInventory(mergeWithLocal(formatted, getBasicInventory(), item => `${item.productId}_${item.color}`));
+        saveBasicInventory(formatted);
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_basic remote database:", e);
@@ -871,7 +923,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           size: si.size || "",
           quantity: safeNum(si.quantity)
         }));
-        saveSubInventory(mergeWithLocal(formatted, getSubInventory(), item => `${item.productId}_${item.color}_${item.size}`));
+        saveSubInventory(formatted);
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_sub remote database:", e);
@@ -888,7 +940,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           size: ri.size || "",
           quantity: safeNum(ri.quantity)
         }));
-        saveReturnInventory(mergeWithLocal(formatted, getReturnInventory(), item => `${item.orderId}_${item.productName}_${item.color}_${item.size}`));
+        saveReturnInventory(formatted);
       }
     } catch (e) {
       console.warn("Could not sync corevia_inventory_return remote database:", e);
@@ -914,7 +966,7 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
           movementType: (m.movement_type || "Manual Adjustment") as any,
           source: m.source || "Database"
         }));
-        saveStockMovements(mergeWithLocal(formatted, getStockMovements()));
+        saveStockMovements(formatted);
       }
     } catch (e) {
       console.warn("Could not sync corevia_stock_movements remote database:", e);

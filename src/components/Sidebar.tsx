@@ -8,12 +8,11 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, Unlock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History, Menu, X, MessageSquare, UserCheck, MessageCircle, HardDrive
+  Shield, History, Menu, X, MessageSquare, UserCheck
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
 import { Flag } from "./Flag";
-import TrialBadge from "./TrialBadge";
 
 interface SidebarProps {
   activeTab: string;
@@ -33,9 +32,6 @@ interface SidebarProps {
   clearNotifications: () => void;
   session?: any;
   isServerSuperAdmin?: boolean | null;
-  accountStatus?: string;
-  trialStartAt?: string;
-  onRequestLockedPage?: (tabId: string) => void;
 }
 
 export default function Sidebar({
@@ -55,9 +51,7 @@ export default function Sidebar({
   notifications,
   clearNotifications,
   session,
-  isServerSuperAdmin,
-  accountStatus,
-  trialStartAt
+  isServerSuperAdmin
 }: SidebarProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -146,14 +140,23 @@ export default function Sidebar({
   if (isServerSuperAdmin !== undefined && isServerSuperAdmin !== null) {
     isSuperAdmin = isServerSuperAdmin === true;
   } else {
-    if (session?.role === "super_admin") {
+    const currentEmail = session?.email || "";
+    if (
+      session?.role === "super_admin" || 
+      currentEmail.toLowerCase().trim() === "coreviadz@gmail.com" || 
+      currentEmail.toLowerCase().trim() === "admin@corevia.com"
+    ) {
       isSuperAdmin = true;
     } else {
       try {
         const sessionStored = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
         if (sessionStored) {
           const parsed = JSON.parse(sessionStored);
-          if (parsed.role === "super_admin") {
+          if (
+            parsed.role === "super_admin" || 
+            parsed.email?.toLowerCase().trim() === "coreviadz@gmail.com" || 
+            parsed.email?.toLowerCase().trim() === "admin@corevia.com"
+          ) {
             isSuperAdmin = true;
           }
         }
@@ -176,8 +179,6 @@ export default function Sidebar({
     { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: false },
     { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
     { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
-    { id: "support", label: lang === "ar" ? "مركز الدعم" : lang === "fr" ? "Centre d'Aide" : "Support", icon: MessageCircle, isRestricted: false },
-    { id: "backup", label: lang === "ar" ? "النسخ الاحتياطي" : lang === "fr" ? "Sauvegarde" : "Backup", icon: HardDrive, isRestricted: false },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
     { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
   ];
@@ -230,15 +231,13 @@ export default function Sidebar({
       return;
     }
 
-    // If page is restricted and locked, request unlock via parent modal (no tab switch)
     if (isRestricted && isLocked && !unlockedTabs.includes(tabId)) {
-      if (onRequestLockedPage) {
-        onRequestLockedPage(tabId);
-      }
-      return;
+      setShowLockScreen(tabId);
+      setEnteredCode("");
+      setErrorMsg("");
+    } else {
+      setActiveTab(tabId);
     }
-    
-    setActiveTab(tabId);
   };
 
   const verifyPasscode = () => {
@@ -449,9 +448,6 @@ export default function Sidebar({
         {/* Right side options: language switchers, alerts and visuals */}
         <div className="flex items-center gap-2 sm:gap-2.5" id="topbar_right_instruments">
           
-          {/* Trial Countdown Badge */}
-          <TrialBadge status={accountStatus || ""} trialStartAt={trialStartAt || ""} lang={lang} />
-
           {/* Quick Config Pills Deck (Side-by-side theme + language selector) */}
           <div className="flex items-center bg-[#18181b] dark:bg-[#121214] border border-[#27272a] rounded-xl p-0.5 gap-1.2" id="header_control_dock">
             

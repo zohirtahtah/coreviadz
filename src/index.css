@@ -339,27 +339,6 @@ html:not(.dark) {
 
   #lang_dropdown_menu div button:hover {
     background-color: #f1f5f9 !important;
-    color: #334155 !important;
+    color: #0f172a !important;
   }
-}
-
-/* ============================================================
-   READ-ONLY MODE: blocks all mutations visually
-   Applied by CompanyGuard when account status is 'read-only' or 'suspended'
-   ============================================================ */
-.read-only-mode input,
-.read-only-mode textarea,
-.read-only-mode select,
-.read-only-mode button,
-.read-only-mode [type="button"],
-.read-only-mode [type="submit"],
-.read-only-mode [type="reset"] {
-  pointer-events: none !important;
-  opacity: 0.5 !important;
-}
-
-/* Allow links (support email in banner) to remain clickable */
-.read-only-mode a {
-  pointer-events: auto !important;
-  opacity: 1 !important;
 }

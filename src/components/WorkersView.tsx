@@ -7,11 +7,9 @@ import {
   XCircle
 } from "lucide-react";
 import { EmployeeSubmission, getSubmissions, saveSubmission } from "../employeeSubmissionsService";
-import { supabase } from "../supabaseClient";
-
+import { getEmployees, saveEmployee } from "../employeeService";
 import { cleanArabicName, cleanPhoneDigits } from "./UsersPermissionsView";
 import { calculateWorkerPayroll } from "../supabaseSync";
-import { Employee, getLocalEmployees, saveLocalEmployees } from "../employeeService";
 
 interface WorkersViewProps {
   workers: Worker[];
@@ -357,37 +355,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   const [formPaid, setFormPaid] = useState(false);
   const [formPaymentAmount, setFormPaymentAmount] = useState<number>(0);
   const [formPaymentDate, setFormPaymentDate] = useState("");
-  // Company name for auto-generating login email
-  const [companyName, setCompanyName] = useState("");
-
-  // Fetch company name on mount
-  useEffect(() => {
-    if (session?.company_id && supabase) {
-      supabase.from("corevia_companies")
-        .select("name")
-        .eq("id", session.company_id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data?.name) setCompanyName(data.name);
-        })
-        .catch(() => {});
-    }
-  }, [session?.company_id]);
-
-  // Normalize name for email generation (Arabic→Latin)
-  const normalizeForEmail = (s: string) =>
-    s.toLowerCase().trim()
-      .replace(/[أإآا]/g, "a").replace(/[ب]/g, "b").replace(/[ت]/g, "t")
-      .replace(/[ث]/g, "th").replace(/[ج]/g, "j").replace(/[ح]/g, "h")
-      .replace(/[خ]/g, "kh").replace(/[د]/g, "d").replace(/[ذ]/g, "th")
-      .replace(/[ر]/g, "r").replace(/[ز]/g, "z").replace(/[س]/g, "s")
-      .replace(/[ش]/g, "sh").replace(/[ص]/g, "s").replace(/[ض]/g, "d")
-      .replace(/[ط]/g, "t").replace(/[ظ]/g, "z").replace(/[ع]/g, "a")
-      .replace(/[غ]/g, "gh").replace(/[ف]/g, "f").replace(/[ق]/g, "q")
-      .replace(/[ك]/g, "k").replace(/[ل]/g, "l").replace(/[م]/g, "m")
-      .replace(/[ن]/g, "n").replace(/[ه]/g, "h").replace(/[و]/g, "w")
-      .replace(/[يى]/g, "y").replace(/[ئء]/g, "e").replace(/[ؤ]/g, "o")
-      .replace(/[ة]/g, "t").replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
 
   // Labels helper
   const getsLabel = (lblAr: string, lblFr: string, lblEn: string) => {
@@ -1161,7 +1128,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
   };
 
   // Form Submission
-  const handleSubmitForm = async (e: React.FormEvent) => {
+  const handleSubmitForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       onTriggerNotification(isRtl ? "يلزم إدخال اسم العامل للمتابعة" : "Employee name is required", "warning");
@@ -1170,6 +1137,42 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
 
     const targetDates = fillDates(formMonth, yearFilter);
     const listCopy = [...workers];
+
+    // Automatically sync to Users & Permissions (Employee accounts)
+    const syncToEmployeeAccounts = async (workerIdToUse: string) => {
+      try {
+        const companyId = session?.company_id || "cop_default";
+        const emps = await getEmployees(companyId);
+        
+        let matchingEmp = emps.find(e => 
+          e.id === workerIdToUse || 
+          (e.phone && formPhone && cleanPhoneDigits(e.phone) === cleanPhoneDigits(formPhone)) || 
+          (e.fullName && formName && cleanArabicName(e.fullName) === cleanArabicName(formName))
+        );
+
+        const slug = (formName || "").toLowerCase().trim()
+          .replace(/\s+/g, ".")
+          .replace(/[^a-z0-9.]/g, "");
+
+        const employeePayload: any = {
+          id: matchingEmp ? matchingEmp.id : workerIdToUse,
+          companyId,
+          fullName: (formName || "").trim(),
+          phone: (formPhone || "").trim(),
+          email: matchingEmp?.email || `${slug}@corevia.dz`,
+          username: matchingEmp?.username || slug,
+          jobTitle: formRole || "موظف",
+          password: matchingEmp?.password || Math.floor(100000 + Math.random() * 900000).toString(),
+          allowedPages: matchingEmp?.allowedPages || ["my-profile"], // only personal info view
+          status: matchingEmp?.status || "Active",
+          createdAt: matchingEmp?.createdAt || new Date().toISOString()
+        };
+
+        await saveEmployee(employeePayload);
+      } catch (err) {
+        console.error("Auto sync to employees from workers view error:", err);
+      }
+    };
 
     const parsedOvertimeHours = Number(formOvertimeHours) || 0;
     const parsedOvertimeRate = Number(formOvertimeRate) || 250;
@@ -1279,6 +1282,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
         onSaveWorkers(listCopy);
+        syncToEmployeeAccounts(editId);
         onTriggerNotification(isRtl ? "تم تعديل ملف العامل وحساباته الشهرية بنجاح" : "Payroll files adjusted successfully", "success");
       }
     } else {
@@ -1391,71 +1395,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
       onSaveWorkers(listCopy);
-
-      // Auto-generate login credentials
-      const companySlug = companyName || session?.company_id || "company";
-      const cleanName = normalizeForEmail(formName.trim());
-      const cleanCompany = normalizeForEmail(companySlug);
-      const generatedEmail = `${cleanName}+${cleanCompany}@gmail.com`;
-      const generatedPassword = formPhone.trim() || `${cleanName}1234`;
-      const username = formName.trim().replace(/\s+/g, "_").toLowerCase();
-      const allowedPages = ["dashboard", "orders", "products", "inventory", "workers", "expenses", "reports", "yearly", "profit", "activity_log"];
-
-      // 1. Save to Supabase corevia_company_users
-      if (supabase) {
-        try {
-          const { error: userErr } = await supabase.from("corevia_company_users").upsert({
-            id: freshId,
-            company_id: session?.company_id || "",
-            email: generatedEmail,
-            username,
-            phone: formPhone.trim(),
-            password: generatedPassword,
-            full_name: formName.trim(),
-            job_title: formRole,
-            status: "Active",
-            allowed_pages: allowedPages,
-            created_at: new Date().toISOString(),
-          });
-          if (userErr) console.warn("WorkersView: Failed to create login account", userErr);
-        } catch (loginErr) {
-          console.warn("WorkersView: Login account creation error", loginErr);
-        }
-      }
-
-      // 2. Save to localStorage corevia_employees_list_v2 (offline fallback)
-      try {
-        const localEmps = getLocalEmployees();
-        const newEmp: Employee = {
-          id: freshId,
-          companyId: session?.company_id || "",
-          fullName: formName.trim(),
-          phone: formPhone.trim(),
-          email: generatedEmail,
-          username,
-          jobTitle: formRole,
-          password: generatedPassword,
-          allowedPages,
-          status: "Active",
-          createdAt: new Date().toISOString()
-        };
-        const idx = localEmps.findIndex(e => e.id === freshId);
-        if (idx !== -1) {
-          localEmps[idx] = newEmp;
-        } else {
-          localEmps.push(newEmp);
-        }
-        saveLocalEmployees(localEmps);
-      } catch (localErr) {
-        console.warn("WorkersView: Failed to save employee to localStorage", localErr);
-      }
-
-      onTriggerNotification(
-        isRtl
-          ? `✅ تم توظيف العامل بنجاح! 📧 ${generatedEmail} 🔑 ${generatedPassword}`
-          : `✅ Staff onboarded! 📧 ${generatedEmail} 🔑 ${generatedPassword}`,
-        "success"
-      );
+      syncToEmployeeAccounts(freshId);
+      onTriggerNotification(isRtl ? "تم تفصيل وتوظيف العامل الجديد بنجاح" : "Staff onboarded successfully!", "success");
     }
 
     setShowForm(false);

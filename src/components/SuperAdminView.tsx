@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { 
   Building2, Users, Ban, ShieldAlert, BookOpen, ShieldCheck, Smartphone, 
   Search, Filter, LogOut, Plus, Minus, KeyRound, Globe, RefreshCcw, 
-  Activity, Landmark, UserCheck, Calendar, Phone, Mail, Shield, AlertTriangle, Eye, ShieldX, Settings
+  Activity, Landmark, UserCheck, Calendar, Phone, Mail, Shield, AlertTriangle, Eye, ShieldX
 } from "lucide-react";
 import { SaaSCompany, SaaSActivityLog, SuperAdminConfig, LanguageType } from "../types";
 import { supabase } from "../supabaseClient";
@@ -58,22 +58,7 @@ export default function SuperAdminView({
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug" | "tickets" | "settings">("directory");
-
-  // Support ticket states
-  const [supportTickets, setSupportTickets] = useState<any[]>([]);
-  const [unreadTicketCount, setUnreadTicketCount] = useState(0);
-  const [ticketReplyMap, setTicketReplyMap] = useState<Record<string, string>>({});
-
-  // General settings state
-  const [adminPhone, setAdminPhone] = useState("");
-  const [adminEmail, setAdminEmail] = useState("");
-  const [supportWhatsapp, setSupportWhatsapp] = useState("");
-  const [supportTelegram, setSupportTelegram] = useState("");
-  const [supportWebsite, setSupportWebsite] = useState("");
-  const [supportMessage, setSupportMessage] = useState("");
-  const [businessHours, setBusinessHours] = useState("");
-  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<"directory" | "logs" | "security" | "debug">("directory");
 
   // Selection state for drill-down action of device list or editing
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
@@ -194,43 +179,25 @@ export default function SuperAdminView({
   const [newPlan, setNewPlan] = useState<"Free" | "Basic" | "Pro" | "Enterprise">("Basic");
 
   const loadSaaSRealData = async () => {
-    if (!supabase) {
-      // No Supabase client — cannot fetch real data
-      setCompanies([]);
-      return;
-    }
+    if (!supabase) return;
 
     setIsLoadingSaaS(true);
     try {
-      // Try RPC functions first (bypasses RLS), fall back to direct queries
-      let users: any[] | null = null;
-      let realCompanies: any[] | null = null;
-      let profiles: any[] | null = null;
+      const { data: users, error: reErr } = await supabase
+        .from("corevia_saas_users")
+        .select("*");
 
-      try {
-        const { data } = await supabase.rpc("get_all_companies");
-        realCompanies = data as any[];
-      } catch {
-        const { data } = await supabase.from("corevia_companies").select("*");
-        realCompanies = data;
-      }
+      if (reErr) throw reErr;
 
-      try {
-        const { data } = await supabase.rpc("get_all_saas_users");
-        users = data as any[];
-      } catch {
-        const { data, error: reErr } = await supabase.from("corevia_saas_users").select("*");
-        if (reErr) throw reErr;
-        users = data;
-      }
+      // Fetch companies from 'corevia_companies' (SOLE Authoritative Source of truth for companies)
+      const { data: realCompanies } = await supabase
+        .from("corevia_companies")
+        .select("*");
 
-      try {
-        const { data } = await supabase.rpc("get_all_profiles");
-        profiles = data as any[];
-      } catch {
-        const { data } = await supabase.from("corevia_profile").select("*");
-        profiles = data;
-      }
+      // Fetch profile data from 'corevia_profile' (Secondary Extension Table)
+      const { data: profiles } = await supabase
+        .from("corevia_profile")
+        .select("*");
 
       const saasCompanies: SaaSCompany[] = (realCompanies || []).map(rc => {
         const companyId = rc.id;
@@ -274,7 +241,6 @@ export default function SuperAdminView({
         };
       });
 
-      // Only show real DB companies — no localStorage fallback for fake data
       setCompanies(saasCompanies);
 
       const saasLogs: SaaSActivityLog[] = (users || []).map((u, i) => {
@@ -302,8 +268,11 @@ export default function SuperAdminView({
     }
   };
 
-  // Keep Sync — note: companies are no longer synced to localStorage;
-  // Supabase is the sole source of truth.
+  // Keep Sync
+  useEffect(() => {
+    localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(companies));
+  }, [companies]);
+
   useEffect(() => {
     localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logs));
   }, [logs]);
@@ -315,57 +284,6 @@ export default function SuperAdminView({
   useEffect(() => {
     loadSaaSRealData();
   }, [activeSubTab]);
-
-  // Poll for new support tickets every 10 seconds
-  useEffect(() => {
-    if (!supabase) return;
-    const fetchTickets = async () => {
-      try {
-        const { data } = await supabase
-          .from("corevia_support_tickets")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(50);
-        if (data) {
-          setSupportTickets(data);
-          setUnreadTicketCount(data.filter(t => t.has_new_admin_alert).length);
-        }
-      } catch (e) {
-        // silent
-      }
-    };
-    fetchTickets();
-    const interval = setInterval(fetchTickets, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Load general settings from corevia_system_settings (singleton row)
-  useEffect(() => {
-    if (!supabase) return;
-    (async () => {
-      const { data } = await supabase
-        .from("corevia_system_settings")
-        .select("*")
-        .limit(1)
-        .maybeSingle();
-      if (data) {
-        setAdminPhone(data.admin_phone || "");
-        setAdminEmail(data.admin_email || "");
-      }
-      // Load extended support info from localStorage
-      try {
-        const saved = localStorage.getItem("corevia_support_info");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          setSupportWhatsapp(parsed.whatsapp || "");
-          setSupportTelegram(parsed.telegram || "");
-          setSupportWebsite(parsed.website || "");
-          setSupportMessage(parsed.message || "");
-          setBusinessHours(parsed.hours || "");
-        }
-      } catch {} 
-    })();
-  }, []);
 
   // Filter computation
   const filteredCompanies = useMemo(() => {
@@ -700,9 +618,6 @@ export default function SuperAdminView({
     setCompanies(prev => [newCompany, ...prev]);
     setShowAddCompanyModal(false);
 
-    // Refresh from Supabase to ensure consistency
-    loadSaaSRealData();
-
     onTriggerNotification(
       isRtl ? "تم تسجيل الحساب الجديد وبانتظار تفعيل كود OTP" : "SaaS client registered, pending verification",
       "success"
@@ -915,32 +830,6 @@ export default function SuperAdminView({
               <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
               <span>{isRtl ? "فحص المشاكل (Debug)" : "Debug Panel"}</span>
             </button>
-            <button
-              onClick={() => setActiveSubTab("tickets")}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-                activeSubTab === "tickets" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <span className="relative">
-                <span>
-                  {isRtl ? "تذاكر الدعم" : "Support Tickets"}
-                </span>
-                {unreadTicketCount > 0 && (
-                  <span className="absolute -top-2 -right-3 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                    {unreadTicketCount}
-                  </span>
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveSubTab("settings")}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-                activeSubTab === "settings" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>{isRtl ? "الإعدادات العامة" : "Settings"}</span>
-            </button>
           </div>
 
           {activeSubTab === "directory" && (
@@ -999,14 +888,8 @@ export default function SuperAdminView({
               </span>
             </div>
 
-            {companies.length === 0 ? (
+            {filteredCompanies.length === 0 ? (
               <div className="p-12 text-center" id="empty_directory_log">
-                <Building2 className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                <p className="text-slate-400 text-xs font-bold mb-1">{isRtl ? "لا توجد شركات مسجلة بعد" : "No registered companies yet"}</p>
-                <p className="text-slate-500 text-[10px]">{isRtl ? "البيانات تُجلب مباشرة من Supabase — لا توجد بيانات وهمية" : "Data is fetched directly from Supabase — no placeholder data"}</p>
-              </div>
-            ) : filteredCompanies.length === 0 ? (
-              <div className="p-12 text-center" id="filtered_empty_directory_log">
                 <AlertTriangle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                 <p className="text-slate-400 text-xs">{isRtl ? "لم يتم العثور على أي مؤسسات مسجلة تطابق محددات البحث." : "No accounts match lookup criteria."}</p>
               </div>
@@ -1697,268 +1580,6 @@ export default function SuperAdminView({
             </div>
 
           </div>
-        </div>
-      )}
-
-      {/* TAB V: SUPPORT TICKETS */}
-      {activeSubTab === "tickets" && (
-        <div className="space-y-6" id="super_admin_tab_tickets">
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>
-                  {isRtl ? "تذاكر الدعم الفني" : "Support Tickets"}
-                </span>
-                {unreadTicketCount > 0 && (
-                  <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    {unreadTicketCount} {isRtl ? "جديد" : "New"}
-                  </span>
-                )}
-              </h3>
-              <span className="text-[11px] text-slate-500">{supportTickets.length} {isRtl ? "تذكرة" : "tickets"}</span>
-            </div>
-
-            {supportTickets.length === 0 ? (
-              <div className="p-12 text-center text-slate-500 text-xs">
-                {isRtl ? "لا توجد تذاكر دعم حتى الآن." : "No support tickets yet."}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {supportTickets.map((ticket) => (
-                  <div key={ticket.id} className={`p-4 bg-slate-900 border rounded-xl space-y-3 ${ticket.has_new_admin_alert ? "border-rose-500/30" : "border-slate-800"}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">{ticket.user_name || "Anonymous"}</span>
-                          {ticket.has_new_admin_alert && (
-                            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                          )}
-                          {ticket.is_resolved && (
-                            <span className="text-[10px] text-emerald-400 font-bold">
-                              {isRtl ? "تم الحل" : "Resolved"}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-400">{ticket.user_email}</p>
-                        <p className="text-xs text-slate-200 mt-2 whitespace-pre-wrap">{ticket.message_content}</p>
-                        {ticket.company_id && (
-                          <p className="text-[10px] text-slate-500 font-mono">Company: {ticket.company_id}</p>
-                        )}
-                        <p className="text-[10px] text-slate-600 font-mono">
-                          {new Date(ticket.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    {ticket.admin_response && (
-                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
-                        <p className="text-[10px] font-bold text-indigo-400 mb-1">
-                          {isRtl ? "رد الإدارة:" : "Admin Response:"}
-                        </p>
-                        <p className="text-xs text-slate-200">{ticket.admin_response}</p>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2 pt-1">
-                      <textarea
-                        placeholder={isRtl ? "اكتب رد الإدارة..." : "Write admin response..."}
-                        value={ticketReplyMap[ticket.id] || ""}
-                        onChange={(e) => setTicketReplyMap(prev => ({ ...prev, [ticket.id]: e.target.value }))}
-                        className="flex-1 p-2 bg-slate-800 border border-slate-700 text-xs text-white rounded-lg outline-none focus:border-indigo-600 resize-none"
-                        rows={2}
-                      />
-                      <div className="flex flex-col gap-1">
-                        <button
-                          onClick={async () => {
-                            const reply = ticketReplyMap[ticket.id]?.trim();
-                            if (!reply || !supabase) return;
-                            try {
-                              await supabase
-                                .from("corevia_support_tickets")
-                                .update({ admin_response: reply, has_new_admin_alert: false, is_resolved: true })
-                                .eq("id", ticket.id);
-                              setTicketReplyMap(prev => { const next = { ...prev }; delete next[ticket.id]; return next; });
-                              setSupportTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, admin_response: reply, has_new_admin_alert: false, is_resolved: true } : t));
-                              setUnreadTicketCount(prev => Math.max(0, prev - (ticket.has_new_admin_alert ? 1 : 0)));
-                              onTriggerNotification(isRtl ? "تم إرسال الرد بنجاح" : "Reply sent successfully", "success");
-                            } catch (e) {
-                              onTriggerNotification("Error sending reply", "info");
-                            }
-                          }}
-                          disabled={!ticketReplyMap[ticket.id]?.trim()}
-                          className="p-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold cursor-pointer"
-                        >
-                          {isRtl ? "إرسال" : "Reply"}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!supabase) return;
-                            try {
-                              await supabase
-                                .from("corevia_support_tickets")
-                                .update({ has_new_admin_alert: false })
-                                .eq("id", ticket.id);
-                              setSupportTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, has_new_admin_alert: false } : t));
-                              setUnreadTicketCount(prev => Math.max(0, prev - (ticket.has_new_admin_alert ? 1 : 0)));
-                            } catch (e) {}
-                          }}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold cursor-pointer"
-                          title={isRtl ? "تحديد كمقروء" : "Mark as read"}
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TAB VI: GENERAL SETTINGS */}
-      {activeSubTab === "settings" && (
-        <div className="space-y-6" id="super_admin_tab_settings">
-          
-          {/* Support Information */}
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <Settings className="w-4 h-4 text-indigo-400" />
-                <span>{isRtl ? "معلومات الدعم الفني" : "Support Information"}</span>
-              </h3>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "بريد الدعم الإلكتروني" : "Support Email"}
-                </label>
-                <input
-                  type="email"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "رقم هاتف الدعم" : "Support Phone"}
-                </label>
-                <input
-                  type="text"
-                  value={adminPhone}
-                  onChange={(e) => setAdminPhone(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "رقم واتساب" : "WhatsApp Number"}
-                </label>
-                <input
-                  type="text"
-                  value={supportWhatsapp}
-                  onChange={(e) => setSupportWhatsapp(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "تيليغرام" : "Telegram"}
-                </label>
-                <input
-                  type="text"
-                  value={supportTelegram}
-                  onChange={(e) => setSupportTelegram(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "الموقع الإلكتروني" : "Website"}
-                </label>
-                <input
-                  type="text"
-                  value={supportWebsite}
-                  onChange={(e) => setSupportWebsite(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  {isRtl ? "ساعات العمل" : "Business Hours"}
-                </label>
-                <input
-                  type="text"
-                  value={businessHours}
-                  onChange={(e) => setBusinessHours(e.target.value)}
-                  placeholder={isRtl ? "مثال: 09:00 - 18:00 (السبت - الخميس)" : "e.g. 09:00 - 18:00 (Sat - Thu)"}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">
-                {isRtl ? "رسالة الدعم (تظهر في صفحة الدعم)" : "Support Message (shown on support page)"}
-              </label>
-              <textarea
-                value={supportMessage}
-                onChange={(e) => setSupportMessage(e.target.value)}
-                rows={3}
-                className="w-full p-2.5 bg-slate-900 border border-slate-800 text-xs text-white rounded-xl outline-none focus:border-indigo-600 resize-none"
-              />
-            </div>
-            <button
-              onClick={async () => {
-                if (!supabase) return;
-                setLoadingSettings(true);
-                try {
-                  // Get existing row id (singleton) then UPDATE (no INSERT policy)
-                  const { data: existing } = await supabase
-                    .from("corevia_system_settings")
-                    .select("id")
-                    .limit(1)
-                    .maybeSingle();
-                  if (!existing) {
-                    onTriggerNotification(isRtl ? "❌ لا يوجد صف إعدادات بعد. اتصل بالمسؤول." : "❌ No settings row exists yet.", "info");
-                    setLoadingSettings(false);
-                    return;
-                  }
-                  const { error } = await supabase
-                    .from("corevia_system_settings")
-                    .update({
-                      admin_phone: adminPhone,
-                      admin_email: adminEmail,
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq("id", existing.id);
-                  if (error) throw error;
-                  // Save extended fields to localStorage (table has no columns for them)
-                  const extra = { whatsapp: supportWhatsapp, telegram: supportTelegram, website: supportWebsite, message: supportMessage, hours: businessHours };
-                  localStorage.setItem("corevia_support_info", JSON.stringify(extra));
-                  onTriggerNotification(
-                    isRtl ? "✅ تم حفظ معلومات الدعم" : "✅ Support information saved",
-                    "success"
-                  );
-                } catch (err: any) {
-                  onTriggerNotification(
-                    isRtl ? "❌ فشل في الحفظ: " + err.message : "❌ Save failed: " + err.message,
-                    "info"
-                  );
-                } finally {
-                  setLoadingSettings(false);
-                }
-              }}
-              disabled={loadingSettings}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer"
-            >
-              {loadingSettings
-                ? (isRtl ? "جاري الحفظ..." : "Saving...")
-                : (isRtl ? "حفظ معلومات الدعم" : "Save Support Info")}
-            </button>
-          </div>
-
         </div>
       )}
 

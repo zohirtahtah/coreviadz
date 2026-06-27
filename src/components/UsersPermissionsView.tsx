@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from "react";
-import {
-  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X,
-  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck, LogOut
+import { 
+  Users, UserPlus, Shield, Eye, EyeOff, Lock, Edit3, Trash2, Check, X, 
+  HelpCircle, AlertTriangle, KeyRound, Key, RefreshCw, FileText, CheckCircle2, UserCheck
 } from "lucide-react";
 import { LanguageType } from "../types";
 import { translations } from "../translations";
-import { Employee, getEmployees, saveEmployee, deleteEmployee, generateEmployeeLoginEmail } from "../employeeService";
+import { Employee, getEmployees, saveEmployee, deleteEmployee } from "../employeeService";
 import { logActivity } from "../activityLogService";
-import { getWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
+import { getWorkers, saveWorkers, getOrders, saveOrders, deleteEntireWorkerProfileSoft } from "../storageUtils";
 import { pushSingleDatasetToCloud } from "../supabaseSync";
 import { supabase, createSecondaryClient } from "../supabaseClient";
-import { forceTerminateEmployeeSessions } from "../lib/forceLogout";
 
 // Name & Phone smart normalizations for bulletproof Algerian/Arabic de-duplication
 export function cleanArabicName(name: string): string {
@@ -38,7 +37,6 @@ interface UsersPermissionsViewProps {
   seatsLimit?: number;
   onDeleteEntireWorkerProfile?: (code: string) => void;
   workers?: any[];
-  companyName?: string;
 }
 
 export default function UsersPermissionsView({
@@ -47,8 +45,7 @@ export default function UsersPermissionsView({
   onTriggerNotification,
   seatsLimit = 5,
   onDeleteEntireWorkerProfile,
-  workers = [],
-  companyName = ""
+  workers = []
 }: UsersPermissionsViewProps) {
   const isRtl = lang === "ar";
   const companyId = session?.company_id || "cop_default";
@@ -93,9 +90,9 @@ export default function UsersPermissionsView({
 
   useEffect(() => {
     if (!editingEmployee && fullName) {
-      const toSlug = (name: string) => {
+      const cleanArabicName = (name: string) => {
         return name.toLowerCase().trim()
-          .replace(/\s+/g, "")
+          .replace(/\s+/g, ".")
           .replace(/[أإآا]/g, "a")
           .replace(/[ب]/g, "b")
           .replace(/[ت]/g, "t")
@@ -115,17 +112,13 @@ export default function UsersPermissionsView({
           .replace(/[من]/g, "n")
           .replace(/[ه]/g, "h")
           .replace(/[وي]/g, "y")
-          .replace(/[^a-z0-9]/g, "");
+          .replace(/[^a-z0-9.]/g, "");
       };
 
-      let employeeSlug = toSlug(fullName);
-      if (!employeeSlug) employeeSlug = "user";
-
-      let companySlug = toSlug(companyName);
-      if (!companySlug) companySlug = "";
-
-      let baseSlug = employeeSlug + companySlug;
-      if (!baseSlug) baseSlug = "user";
+      let baseSlug = cleanArabicName(fullName);
+      if (!baseSlug || baseSlug === ".") {
+        baseSlug = "user";
+      }
 
       let counter = 1;
       let uniqueSlug = `${baseSlug}.${String(counter).padStart(3, "0")}`;
@@ -135,9 +128,9 @@ export default function UsersPermissionsView({
       }
 
       setUsername(uniqueSlug);
-      setEmail(`${employeeSlug}+${companySlug}@corevia.local`);
+      setEmail(`${uniqueSlug}@corevia.dz`);
     }
-  }, [fullName, editingEmployee, employees, companyName]);
+  }, [fullName, editingEmployee, employees]);
 
   // UI States
   const [showPasswordRaw, setShowPasswordRaw] = useState(false);
@@ -333,51 +326,6 @@ export default function UsersPermissionsView({
     }
   };
 
-  const handleResendInvite = async (emp: Employee) => {
-    if (!emp.email) {
-      onTriggerNotification(isRtl ? "⚠️ لا يوجد بريد إلكتروني لإرسال الدعوة إليه." : "⚠️ No email address to send invitation to.");
-      return;
-    }
-    try {
-      const res = await fetch("/api/auth/resend-invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email: emp.email, employeeId: emp.id })
-      });
-      const data = await res.json();
-      if (res.ok && data.success !== false) {
-        if (data.inviteQueued) {
-          onTriggerNotification(
-            isRtl
-              ? `⏳ لا يزال نظام البريد محدود الإرسال. سيتم إرسال دعوة (${emp.fullName}) لاحقاً.`
-              : `⏳ Email system still rate limited. Invitation for (${emp.fullName}) will be sent later.`
-          );
-        } else {
-          await saveEmployee({ ...emp, invitation_status: "sent", invitation_sent: true, last_invite_error: undefined, auth_user_id: data.auth_user_id || emp.auth_user_id });
-          loadEmployeesData();
-          onTriggerNotification(
-            isRtl
-              ? `✅ تم إرسال دعوة البريد الإلكتروني لـ (${emp.fullName}) بنجاح.`
-              : `✅ Invitation email re-sent to (${emp.fullName}) successfully.`
-          );
-        }
-      } else {
-        onTriggerNotification(
-          isRtl
-            ? `⚠️ خدمة إرسال الدعوات غير متوفرة حالياً. سيتم إعادة المحاولة لاحقاً.`
-            : `⚠️ Invitation service unavailable. Will retry later.`
-        );
-      }
-    } catch (err: any) {
-      onTriggerNotification(
-        isRtl
-          ? `⚠️ خدمة إرسال الدعوات غير متوفرة حالياً. سيتم إعادة المحاولة لاحقاً.`
-          : `⚠️ Invitation service unavailable. Will retry later.`
-      );
-    }
-  };
-
   const handleDeleteEmployeeItem = (emp: Employee) => {
     const match = allWorkers.find(
       w => w.id === emp.id || 
@@ -386,34 +334,6 @@ export default function UsersPermissionsView({
     );
     setUserToDeleteRecord(emp);
     setLinkedWorkerFound(match || null);
-  };
-
-  const handleForceTerminateSessions = async (emp: Employee) => {
-    if (!emp.auth_user_id) {
-      onTriggerNotification(
-        isRtl ? "⚠️ هذا الموظف ليس لديه حساب Auth مرتبط لإنهاء جلساته." : "⚠️ This employee has no linked auth account."
-      );
-      return;
-    }
-    const confirmed = window.confirm(
-      isRtl
-        ? `هل أنت متأكد من إنهاء جميع جلسات "${emp.fullName}" النشطة؟ سيتم طرده من جميع الأجهزة فوراً.`
-        : `Force terminate all active sessions for "${emp.fullName}"? They will be logged out from all devices.`
-    );
-    if (!confirmed) return;
-
-    setIsLoading(true);
-    const ok = await forceTerminateEmployeeSessions(emp.auth_user_id, emp.fullName, companyId);
-    if (ok) {
-      onTriggerNotification(
-        isRtl ? `✅ تم إنهاء جميع جلسات "${emp.fullName}" وتحرير مقعده.` : `✅ All sessions terminated for "${emp.fullName}".`
-      );
-    } else {
-      onTriggerNotification(
-        isRtl ? "❌ فشلت عملية إنهاء الجلسات." : "❌ Failed to terminate sessions."
-      );
-    }
-    setIsLoading(false);
   };
 
   const handleExecuteDelete = async (deleteWorkerProfile: boolean) => {
@@ -456,6 +376,11 @@ export default function UsersPermissionsView({
           onDeleteEntireWorkerProfile(linkedWorkerFound.code);
         } else {
           deleteEntireWorkerProfileSoft(linkedWorkerFound.code);
+          if (companyId) {
+            pushSingleDatasetToCloud(companyId, "workers", getWorkers()).catch(err => {
+              console.error("[AutoSync] Error syncing workers database delete:", err);
+            });
+          }
         }
         onTriggerNotification(
           isRtl
@@ -540,69 +465,48 @@ export default function UsersPermissionsView({
     let invitationToken = editingEmployee?.invitation_token;
     let invitationExpires = editingEmployee?.invitation_expires;
     let invitationUsed = editingEmployee?.invitation_used ?? false;
-    let invitationStatus: "sent" | "pending" | undefined;
-    let invitationSent: boolean | undefined;
-    let inviteError: string | undefined;
-    let inviteQueued = false;
 
-    // Create a real Supabase Auth account for the new employee via server-side invite endpoint
+    // Create a real Supabase Auth account for the new employee
     if (isNew) {
-      const companySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-      const employeeSlug = (fullName || "").toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-      const userEmail = email.trim() || `${employeeSlug}+${companySlug}@corevia.local`;
-
-      try {
-        const inviteRes = await fetch("/api/auth/invite", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            email: userEmail,
-            fullName: fullName.trim(),
-            username: username.trim().toLowerCase(),
-            employeeId: employeeId,
-            allowedPages: selectedPages
-          })
+      const signUpSecondary = createSecondaryClient();
+      if (signUpSecondary) {
+        const userEmail = email.trim() || `${username.trim().toLowerCase()}@corevia.dz`;
+        const { data: authData, error: authError } = await signUpSecondary.auth.signUp({
+          email: userEmail,
+          password: password.trim(),
+          options: {
+            data: {
+              company_id: companyId,
+              employee_id: employeeId,
+              role: "employee",
+              username: username.trim().toLowerCase(),
+              full_name: fullName.trim()
+            }
+          }
         });
 
-        const inviteData = await inviteRes.json();
-
-        if (inviteRes.ok && inviteData.success !== false) {
-          authUserId = inviteData.auth_user_id || undefined;
-          inviteQueued = inviteData.inviteQueued || false;
-          inviteError = inviteData.last_invite_error;
-
-          if (inviteQueued) {
-            onTriggerNotification(
-              isRtl
-                ? `⏳ تم حفظ حساب الموظف (${fullName}) بنجاح. سيتم إرسال دعوة البريد الإلكتروني لاحقاً بسبب قيود الإرسال.`
-                : `⏳ Employee (${fullName}) saved. Email invitation queued due to rate limits — will be sent later.`
-            );
-          }
-          invitationStatus = inviteQueued ? "pending" : "sent";
-          invitationSent = !inviteQueued;
-        } else {
-          inviteQueued = true;
-          inviteError = "api_unavailable";
-          console.warn("Invite API returned non-OK — saving employee as pending");
+        if (authError) {
+          console.error("Supabase Auth SignUp error:", authError);
+          onTriggerNotification(
+            isRtl 
+              ? `❌ خطأ في نظام هويات Supabase: ${authError.message}`
+              : `❌ Supabase Auth system sign-up failed: ${authError.message}`
+          );
+          setIsLoading(false);
+          return;
         }
-      } catch (fetchErr: any) {
-        inviteQueued = true;
-        inviteError = "api_unavailable";
-        console.warn("Invite API unavailable — saving employee locally with pending status:", fetchErr.message);
-      }
 
-      invitationStatus = inviteQueued ? "pending" : "sent";
-      invitationSent = !inviteQueued;
+        authUserId = authData.user?.id;
+      }
 
       // Generate expiring (7 days) secure invitation link
       invitationToken = "inv-" + Math.floor(10000000 + Math.random() * 90000000).toString() + "-" + Date.now().toString(36);
       invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       invitationUsed = false;
-
+    } else {
       // If editing employee and password changed, sync password back to Supabase Auth
       if (editingEmployee && editingEmployee.password !== password.trim()) {
-        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.local`;
+        const userEmail = email.trim() || editingEmployee.email || `${editingEmployee.username?.trim().toLowerCase()}@corevia.dz`;
         const signUpSecondary = createSecondaryClient();
         if (signUpSecondary) {
           try {
@@ -621,21 +525,12 @@ export default function UsersPermissionsView({
       }
     }
 
-    const finalEmail = email.trim() || generateEmployeeLoginEmail(fullName.trim(), companyName);
-    if (!finalEmail || !finalEmail.includes("@")) {
-      onTriggerNotification(
-        isRtl ? "❌ تعذر إنشاء البريد الإلكتروني للموظف. يرجى التحقق من البيانات." : "❌ Unable to generate employee login email."
-      );
-      setIsLoading(false);
-      return;
-    }
-
     const payload: Employee = {
       id: employeeId,
       companyId,
       fullName: fullName.trim(),
       phone: phone.trim(),
-      email: finalEmail,
+      email: email.trim() || undefined,
       username: username.trim().toLowerCase(),
       jobTitle: jobTitle.trim() || "موظف",
       password: password.trim(),
@@ -647,10 +542,7 @@ export default function UsersPermissionsView({
       auth_user_id: authUserId,
       invitation_token: invitationToken,
       invitation_expires: invitationExpires,
-      invitation_used: invitationUsed,
-      invitation_status: isNew ? invitationStatus : editingEmployee?.invitation_status,
-      invitation_sent: isNew ? invitationSent : editingEmployee?.invitation_sent,
-      last_invite_error: isNew ? inviteError : editingEmployee?.last_invite_error
+      invitation_used: invitationUsed
     };
 
     const success = await saveEmployee(payload);
@@ -661,9 +553,45 @@ export default function UsersPermissionsView({
           : `✅ Successfully ${isNew ? "created" : "updated"} employee account (${fullName})`
       );
 
-      // Workers and Login Accounts are completely separate entities.
-      // NEVER auto-create/update worker profiles when creating employee accounts.
-      // Workers are managed exclusively from the Workers page.
+      // Automatically create/update Worker Profile
+      try {
+        const currentWorkers = getWorkers();
+        let workerIndex = currentWorkers.findIndex(
+          w => w.id === employeeId || 
+               (w.phone && phone && cleanPhoneDigits(w.phone) === cleanPhoneDigits(phone)) ||
+               (w.name && fullName && cleanArabicName(w.name) === cleanArabicName(fullName))
+        );
+
+        const updatedWorker = {
+          id: workerIndex !== -1 ? currentWorkers[workerIndex].id : employeeId,
+          name: fullName.trim(),
+          code: workerIndex !== -1 ? currentWorkers[workerIndex].code : `W-${Date.now().toString().slice(-4)}`,
+          phone: phone.trim(),
+          baseSalary: baseSalary,
+          monthlySalary: monthlySalary,
+          dailyHours: workingHoursPerDay,
+          workingDaysPerMonth: workingDaysPerMonth,
+          overtimeRate: overtimeHourRate,
+          absenceDeductionRate: absenceDeductionRate,
+          notes: notes.trim(),
+          role: jobTitle.trim() || "موظف",
+          payrolls: workerIndex !== -1 ? currentWorkers[workerIndex].payrolls || [] : [],
+          createdAt: workerIndex !== -1 ? currentWorkers[workerIndex].createdAt || new Date().toISOString() : new Date().toISOString()
+        };
+
+        if (workerIndex !== -1) {
+          currentWorkers[workerIndex] = updatedWorker;
+        } else {
+          currentWorkers.push(updatedWorker);
+        }
+
+        saveWorkers(currentWorkers);
+        if (companyId) {
+          await pushSingleDatasetToCloud(companyId, "workers", currentWorkers);
+        }
+      } catch (err) {
+        console.error("Worker Profile auto-sync error:", err);
+      }
 
       // Log specific activities
       const actionType = isNew ? "Create User" : "Update User";
@@ -687,11 +615,9 @@ export default function UsersPermissionsView({
       });
 
       if (isNew) {
-        const credCompanySlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-        const credEmployeeSlug = fullName.trim().toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
         setCreatedCredentials({
           fullName: fullName.trim(),
-          email: email.trim() || `${credEmployeeSlug}+${credCompanySlug}@corevia.local`,
+          email: email.trim() || `${username.trim().toLowerCase()}@corevia.dz`,
           username: username.trim().toLowerCase(),
           password: password.trim(),
           loginUrl: `${window.location.origin}/?invite_token=${invitationToken}`
@@ -893,32 +819,6 @@ export default function UsersPermissionsView({
                             </button>
                           </div>
 
-                          {/* Invitation Status Badge */}
-                          {emp.invitation_status === "pending" && (
-                            <div className="pt-1 flex items-center justify-center gap-1.5">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-950/60 border border-amber-500/30 text-amber-400 rounded-full text-[9px] font-bold">
-                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                                <span>{isRtl ? "دعوة معلقة" : "Pending Invitation"}</span>
-                              </span>
-                              <button
-                                onClick={() => handleResendInvite(emp)}
-                                className="px-1.5 py-0.5 bg-[#1c1c1e] hover:bg-amber-950/40 border border-[#27272a] hover:border-amber-500/40 text-amber-400 hover:text-amber-300 rounded text-[9px] font-bold transition-all cursor-pointer"
-                                title={isRtl ? "إعادة إرسال الدعوة" : "Resend invitation email"}
-                              >
-                                <RefreshCw className="w-2.5 h-2.5 inline-block" />
-                                <span className="mr-0.5">{isRtl ? "إعادة إرسال" : "Resend"}</span>
-                              </button>
-                            </div>
-                          )}
-                          {emp.invitation_status === "sent" && (
-                            <div className="pt-1 flex items-center justify-center gap-1">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-950/40 border border-emerald-500/20 text-emerald-400/70 rounded-full text-[9px] font-bold">
-                                <CheckCircle2 className="w-2.5 h-2.5" />
-                                <span>{isRtl ? "تم إرسال الدعوة" : "Invitation Sent"}</span>
-                              </span>
-                            </div>
-                          )}
-
                           {/* Direct shareable login link button */}
                           <div className="pt-1 select-none">
                             <button
@@ -981,15 +881,7 @@ export default function UsersPermissionsView({
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
-
-                            <button
-                              onClick={() => handleForceTerminateSessions(emp)}
-                              className="p-1.5 bg-[#141416] hover:bg-orange-950/40 border border-[#27272a] text-orange-500 hover:text-orange-400 rounded-lg transition-colors cursor-pointer"
-                              title={isRtl ? "إنهاء جميع الجلسات النشطة وطرد الموظف" : "Force terminate all active sessions"}
-                            >
-                              <LogOut className="w-3.5 h-3.5" />
-                            </button>
-
+                            
                             <button
                               onClick={() => handleDeleteEmployeeItem(emp)}
                               className="p-1.5 bg-[#141416] hover:bg-rose-950/40 border border-[#27272a] text-rose-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
@@ -1307,14 +1199,11 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                           setAbsenceDeductionRate(chosen.absenceDeductionRate || 1.0);
                           setNotes(chosen.notes || "");
                           
-                          const workerSlug = chosen.name.toLowerCase().trim()
-                            .replace(/\s+/g, "")
-                            .replace(/[^a-z0-9]/g, "");
-                          const compSlug = companyName.toLowerCase().trim()
-                            .replace(/\s+/g, "")
-                            .replace(/[^a-z0-9]/g, "");
-                          setUsername(workerSlug);
-                          setEmail(`${workerSlug}+${compSlug}@corevia.local`);
+                          const slug = chosen.name.toLowerCase().trim()
+                            .replace(/\s+/g, ".")
+                            .replace(/[^a-z0-9.]/g, "");
+                          setUsername(slug);
+                          setEmail(`${slug}@corevia.dz`);
                         }
                       } else {
                         setFullName("");
@@ -1412,8 +1301,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                       const val = e.target.value.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
                       setUsername(val);
                       if (!editingEmployee && val) {
-                        const compSlug = companyName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-                        setEmail(`${val}+${compSlug}@corevia.local`);
+                        setEmail(`${val}@corevia.dz`);
                       }
                     }}
                     placeholder="mohamed.orders"
@@ -1428,7 +1316,7 @@ ${createdCredentials.email ? `البريد الإلكتروني: ${createdCreden
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name+company@corevia.local"
+                    placeholder="name@corevia.dz"
                     className="w-full p-2 bg-[#09090b] border border-[#27272a] text-white font-mono rounded-lg focus:outline-none focus:border-rose-500 text-xs text-right placeholder-slate-650"
                   />
                 </div>

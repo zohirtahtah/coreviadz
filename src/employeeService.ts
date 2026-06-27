@@ -1,53 +1,5 @@
 import { supabase } from "./supabaseClient";
 
-/**
- * Generate employee login email using the required format:
- * employeeName + "+" + companySlug + "@corevia.local"
- * 
- * Rules: lowercase, remove spaces, remove accents/special characters.
- * Example: "Omar" + "rcoreviadz" => "omar+rcoreviadz@corevia.local"
- */
-export function generateEmployeeLoginEmail(employeeName: string, companySlug: string): string {
-  const normalize = (s: string) =>
-    s.toLowerCase().trim()
-      .replace(/[أإآا]/g, "a")
-      .replace(/[ب]/g, "b")
-      .replace(/[ت]/g, "t")
-      .replace(/[ث]/g, "th")
-      .replace(/[ج]/g, "j")
-      .replace(/[ح]/g, "h")
-      .replace(/[خ]/g, "kh")
-      .replace(/[د]/g, "d")
-      .replace(/[ذ]/g, "th")
-      .replace(/[ر]/g, "r")
-      .replace(/[ز]/g, "z")
-      .replace(/[س]/g, "s")
-      .replace(/[ش]/g, "sh")
-      .replace(/[ص]/g, "s")
-      .replace(/[ض]/g, "d")
-      .replace(/[ط]/g, "t")
-      .replace(/[ظ]/g, "z")
-      .replace(/[ع]/g, "a")
-      .replace(/[غ]/g, "gh")
-      .replace(/[ف]/g, "f")
-      .replace(/[ق]/g, "q")
-      .replace(/[ك]/g, "k")
-      .replace(/[ل]/g, "l")
-      .replace(/[م]/g, "m")
-      .replace(/[ن]/g, "n")
-      .replace(/[ه]/g, "h")
-      .replace(/[و]/g, "w")
-      .replace(/[يى]/g, "y")
-      .replace(/[ئء]/g, "e")
-      .replace(/[ؤ]/g, "o")
-      .replace(/[ة]/g, "t")
-      .replace(/\s+/g, "")
-      .replace(/[^a-z0-9]/g, "");
-  const normalizedName = normalize(employeeName) || "employee";
-  const normalizedCompany = normalize(companySlug) || "company";
-  return `${normalizedName}+${normalizedCompany}@corevia.local`;
-}
-
 export interface Employee {
   id: string;
   companyId: string;
@@ -66,9 +18,6 @@ export interface Employee {
   invitation_token?: string;
   invitation_expires?: string;
   invitation_used?: boolean;
-  invitation_status?: "sent" | "pending" | "failed";
-  invitation_sent?: boolean;
-  last_invite_error?: string;
 }
 
 // Local Storage helper for holding offline/cached copies
@@ -124,9 +73,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
         let expires: string | undefined = undefined;
         let used: boolean | undefined = undefined;
         let authId: string | undefined = undefined;
-        let invStatus: string | undefined = undefined;
-        let invSent: boolean | undefined = undefined;
-        let invError: string | undefined = undefined;
 
         let extraFullName = item.full_name;
         let extraJobTitle = item.job_title;
@@ -151,9 +97,6 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
               if (parsed.password) extraPassword = parsed.password;
               if (parsed.assigned_responsibilities) extraAssigned = parsed.assigned_responsibilities;
               if (parsed.last_activity) extraLastActive = parsed.last_activity;
-              invStatus = parsed.invitation_status || undefined;
-              invSent = typeof parsed.invitation_sent === "boolean" ? parsed.invitation_sent : undefined;
-              invError = parsed.last_invite_error || undefined;
             }
           } catch (e) {
             console.warn("Parse allowed_pages failed:", e);
@@ -177,10 +120,7 @@ export async function getEmployees(companyId: string): Promise<Employee[]> {
           auth_user_id: authId,
           invitation_token: token,
           invitation_expires: expires,
-          invitation_used: used,
-          invitation_status: invStatus as "sent" | "pending" | "failed" | undefined,
-          invitation_sent: invSent,
-          last_invite_error: invError
+          invitation_used: used
         };
       });
 
@@ -237,10 +177,7 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       job_title: employee.jobTitle,
       password: employee.password || "",
       assigned_responsibilities: employee.assignedResponsibilities || null,
-      last_activity: employee.lastActivity || null,
-      invitation_status: employee.invitation_status || null,
-      invitation_sent: typeof employee.invitation_sent === "boolean" ? employee.invitation_sent : null,
-      last_invite_error: employee.last_invite_error || null
+      last_activity: employee.lastActivity || null
     };
 
     const dbPayload: any = {
@@ -253,10 +190,7 @@ export async function saveEmployee(employee: Employee): Promise<boolean> {
       allowed_pages: richAllowedPages,
       status: employee.status,
       invitation_token: employee.invitation_token || null,
-      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null,
-      invitation_status: employee.invitation_status || null,
-      invitation_sent: typeof employee.invitation_sent === "boolean" ? employee.invitation_sent : null,
-      last_invite_error: employee.last_invite_error || null
+      invitation_used: typeof employee.invitation_used === "boolean" ? employee.invitation_used : null
     };
 
     const { error } = await supabase

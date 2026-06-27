@@ -9,52 +9,6 @@ import {
   AdExpense, TrashItem, AppSettings, BusinessProfile, UserSession, StockMovement
 } from "./types";
 import { defaultWilayas } from "./translations";
-import { supabase } from "./supabaseClient";
-
-// ============================================================================
-// SUPABASE AUTO-SYNC: makes Supabase the source of truth for all business data
-// ============================================================================
-function companyIdFromSession(): string | null {
-  try {
-    const s = localStorage.getItem("corevia_session_v1");
-    if (s) {
-      const p = JSON.parse(s);
-      return (p as any).company_id || (p as any).companyId || null;
-    }
-  } catch {}
-  return null;
-}
-
-function camelToSnake(obj: any): any {
-  if (obj === null || obj === undefined || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj;
-  const result: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const snakeKey = key.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-                        .replace(/([a-z\d])([A-Z])/g, "$1_$2")
-                        .toLowerCase();
-    result[snakeKey] = value;
-  }
-  return result;
-}
-
-async function autoPushToSupabase(
-  tableName: string,
-  items: any[],
-  formatFn?: (item: any, companyId: string) => any
-): Promise<void> {
-  if (!supabase || !items.length) return;
-  const companyId = companyIdFromSession();
-  if (!companyId) return;
-  const formatted = items.map(item => {
-    const base = formatFn ? formatFn(item, companyId) : { company_id: companyId, ...camelToSnake(item) };
-    return base;
-  });
-  const { error } = await supabase.from(tableName).upsert(formatted);
-  if (error) {
-    console.warn(`[AutoSupabase] ${tableName} upsert failed for ${items.length} items:`, error.message);
-  }
-}
 
 // ============================================================================
 // HARD DATA ISOLATION: BULLETPROOF AUTOMATIC MULTI-TENANT LOCALSTORAGE ROUTER
@@ -172,9 +126,9 @@ const demoOwnerProfile: BusinessProfile = {
   country: "Algeria",
   ownerName: "Abderrahmane Benali",
   phone: "0770 12 34 56",
-  email: "contact@corevia.local",
+  email: "contact@corevia.dz",
   address: "Didouche Mourad, Alger",
-  website: "www.corevia.local",
+  website: "www.corevia.dz",
   commercialRegistry: "16/00-0982736B20",
   taxNumber: "192837465009121"
 };
@@ -591,7 +545,6 @@ export function getOrders(): Order[] {
 
 export function saveOrders(arr: Order[]): void {
   localStorage.setItem(KEYS.ORDERS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_orders", arr);
 }
 
 // Products Operations
@@ -601,7 +554,6 @@ export function getProducts(): Product[] {
 
 export function saveProducts(arr: Product[]): void {
   localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_products", arr);
 }
 
 // Inventory Operations
@@ -611,15 +563,6 @@ export function getBasicInventory(): BasicInventoryItem[] {
 
 export function saveBasicInventory(arr: BasicInventoryItem[]): void {
   localStorage.setItem(KEYS.INVENTORY_BASIC, JSON.stringify(arr));
-  autoPushToSupabase("corevia_inventory_basic", arr, (item, cId) => ({
-    id: `${item.productId}_${item.color}`,
-    company_id: cId,
-    product_id: item.productId,
-    product_name: item.productName,
-    color: item.color,
-    quantity: item.quantity,
-    updated_at: new Date().toISOString()
-  }));
 }
 
 export function getSubInventory(): SubInventoryItem[] {
@@ -628,16 +571,6 @@ export function getSubInventory(): SubInventoryItem[] {
 
 export function saveSubInventory(arr: SubInventoryItem[]): void {
   localStorage.setItem(KEYS.INVENTORY_SUB, JSON.stringify(arr));
-  autoPushToSupabase("corevia_inventory_sub", arr, (item, cId) => ({
-    id: `${item.productId}_${item.color}_${item.size}`,
-    company_id: cId,
-    product_id: item.productId,
-    product_name: item.productName,
-    color: item.color,
-    size: item.size,
-    quantity: item.quantity,
-    updated_at: new Date().toISOString()
-  }));
 }
 
 export function getReturnInventory(): ReturnInventoryItem[] {
@@ -646,16 +579,6 @@ export function getReturnInventory(): ReturnInventoryItem[] {
 
 export function saveReturnInventory(arr: ReturnInventoryItem[]): void {
   localStorage.setItem(KEYS.INVENTORY_RETURN, JSON.stringify(arr));
-  autoPushToSupabase("corevia_inventory_return", arr, (item, cId) => ({
-    id: `${item.orderId}_${item.productName}_${item.color}_${item.size}`,
-    company_id: cId,
-    order_id: item.orderId,
-    product_name: item.productName,
-    color: item.color,
-    size: item.size,
-    quantity: item.quantity,
-    updated_at: new Date().toISOString()
-  }));
 }
 
 export function getStockMovements(): StockMovement[] {
@@ -664,7 +587,6 @@ export function getStockMovements(): StockMovement[] {
 
 export function saveStockMovements(arr: StockMovement[]): void {
   localStorage.setItem(KEYS.STOCK_MOVEMENTS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_stock_movements", arr);
 }
 
 export function logStockMovement(
@@ -703,7 +625,6 @@ export function getSuppliers(): Supplier[] {
 
 export function saveSuppliers(arr: Supplier[]): void {
   localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_suppliers", arr);
 }
 
 export function getSupplierInvoices(): SupplierInvoice[] {
@@ -725,32 +646,6 @@ export function getWorkers(): Worker[] {
 
 export function saveWorkers(arr: Worker[]): void {
   localStorage.setItem(KEYS.WORKERS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_workers", arr, (item, cId) => ({
-    id: item.id,
-    company_id: cId,
-    name: item.name,
-    full_name: item.name,
-    code: item.code,
-    phone: item.phone,
-    base_salary: item.baseSalary,
-    salary: item.baseSalary,
-    daily_hours: item.dailyHours,
-    overtime_rate: item.overtimeRate,
-    role: item.role,
-    position: item.role,
-    monthly_salary: item.monthlySalary,
-    payrolls: item.payrolls || [],
-    working_days_per_month: (item as any).workingDaysPerMonth || null,
-    absence_deduction_rate: (item as any).absenceDeductionRate || null,
-    notes: (item as any).notes || null,
-    created_at: item.createdAt,
-    created_by: (item as any).createdBy || null,
-    updated_by: (item as any).updatedBy || null,
-    created_date: (item as any).createdDate || null,
-    created_time: (item as any).createdTime || null,
-    updated_date: (item as any).updatedDate || null,
-    updated_time: (item as any).updatedTime || null
-  }));
 }
 
 export function getSalarySheets(): WorkerSalarySheet[] {
@@ -759,29 +654,6 @@ export function getSalarySheets(): WorkerSalarySheet[] {
 
 export function saveSalarySheets(arr: WorkerSalarySheet[]): void {
   localStorage.setItem(KEYS.SALARY_SHEETS, JSON.stringify(arr));
-  autoPushToSupabase("corevia_salary_sheets", arr, (item, cId) => ({
-    id: item.id,
-    company_id: cId,
-    worker_id: item.workerId,
-    worker_name: item.workerName,
-    month_year: item.monthYear,
-    date_from: item.dateFrom,
-    date_to: item.dateTo,
-    overtime_hours: item.overtimeHours,
-    absence_days: item.absenceDays,
-    missing_hours: item.missingHours,
-    paid_vacation_days: item.paidVacationDays,
-    expenses: item.expenses || [],
-    pay_status: item.payStatus,
-    calculated_salary: item.calculatedSalary,
-    updated_at: item.updatedAt,
-    created_by: (item as any).createdBy || null,
-    updated_by: (item as any).updatedBy || null,
-    created_date: (item as any).createdDate || null,
-    created_time: (item as any).createdTime || null,
-    updated_date: (item as any).updatedDate || null,
-    updated_time: (item as any).updatedTime || null
-  }));
 }
 
 // Expenses Operations
