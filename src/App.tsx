@@ -57,6 +57,8 @@ import {
   pushFullTenantData,
   cleanSlateResetSandbox
 } from "./supabaseSync";
+import { fetchPlatformConfig, PlatformConfig } from "./platformConfigService";
+
 
 // =========================================================================
 // AUTOMATIC SaaS TENANCY BINDING & SIGNUP ROUTING AGENT
@@ -136,6 +138,17 @@ export const registerSaaSCompanyOnLoginAndSignUp = (email: string, fullName: str
 };
 
 export default function App() {
+  // Global platform configuration (from Supabase)
+  const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
+
+  useEffect(() => {
+    fetchPlatformConfig().then(config => {
+      setPlatformConfig(config);
+    }).catch(err => {
+      console.warn("Could not load global platform config", err);
+    });
+  }, []);
+
   // Core Business Configurations
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [session, setSession] = useState<UserSession | null>(null);
@@ -1753,6 +1766,56 @@ export default function App() {
     );
   }
 
+  // Global Maintenance Mode Gate
+  if (platformConfig?.maintenanceMode && !isServerSuperAdmin && session?.role !== "super_admin") {
+    const isRtl = lang === "ar";
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-right font-sans animate-fade-in" id="saas_gate_maintenance">
+        <div className="w-full max-w-lg bg-[#121214] border border-indigo-500/20 rounded-2xl p-6 space-y-5 shadow-xl">
+          <div className="flex justify-center">
+            <div className="p-3 bg-[#1e1b4b] rounded-full animate-pulse">
+              <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
+            </div>
+          </div>
+          <h2 className="text-xl font-black text-white">{isRtl ? "تحديث المنصة قيد التنفيذ" : "Platform Upgrade in Progress"}</h2>
+          <p className="text-xs text-slate-400 leading-relaxed text-center">
+            {isRtl 
+              ? `قام المشرف العام ببدء ترقية نظام سحابية مستمرة للإصدار ${platformConfig.currentVersion}. جميع قواعد البيانات الخاصة بشركتك معزولة ومحمية بالكامل بنسبة 100٪. ستستأنف العمليات فوراً عند اكتمال عملية التحديث والتحقق.`
+              : `Super Admin has initiated an additive, zero-downtime platform upgrade to version ${platformConfig.currentVersion}. All tenant databases are isolated and 100% safe. Operations will resume shortly.`}
+          </p>
+
+          {/* Release Notes */}
+          <div className="p-3.5 bg-zinc-950 border border-zinc-850 rounded-xl space-y-1.5 text-right">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase block">{isRtl ? "ملاحظات التحديث والمميزات الجديدة" : "Release Notes & Enhancements"}</span>
+            <p className="text-xs text-zinc-350 font-mono leading-normal text-right">{platformConfig.releaseNotes}</p>
+            <div className="flex justify-between items-center text-[10px] text-zinc-500 pt-1.5 border-t border-zinc-900">
+              <span>{isRtl ? `تاريخ الإصدار: ${platformConfig.releaseDate}` : `Released: ${platformConfig.releaseDate}`}</span>
+              <span>{isRtl ? `حالة الترحيل: مكتملة` : `Migration: ${platformConfig.migrationStatus}`}</span>
+            </div>
+          </div>
+
+          <div className="pt-4 flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={() => {
+                setSession(null);
+                saveUserSession(null as any);
+              }}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-750 text-xs font-bold text-slate-200 rounded-xl cursor-pointer"
+            >
+              {isRtl ? "خروج وحساب آخر" : "Switch Account"}
+            </button>
+            <a
+              href={`mailto:${platformConfig.supportEmail}`}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
+            >
+              {isRtl ? "الدعم الفني المباشر" : "Contact Support"}
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // If user is logged in but company subscription/license is suspended/expired, block access with beautiful Paywall
   if (session && isSuspended && !isServerSuperAdmin && session.role !== "super_admin") {
     return (
@@ -1764,6 +1827,8 @@ export default function App() {
         onPaymentSuccess={handlePaymentSuccess}
         onTriggerNotification={triggerToast}
         onLogout={handleLogout}
+        supportEmail={platformConfig?.supportEmail}
+        phone={platformConfig?.phone}
       />
     );
   }
@@ -1930,8 +1995,8 @@ export default function App() {
             >
               {isRtl ? "خروج وحساب آخر" : "Switch Account"}
             </button>
-            <a
-              href="mailto:support@corevia.dz"
+             <a
+              href={`mailto:${platformConfig?.supportEmail || "support@corevia.dz"}`}
               className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white rounded-xl block cursor-pointer text-center"
             >
               {isRtl ? "مراسلة الدعم" : "Contact Support"}
@@ -2138,6 +2203,7 @@ export default function App() {
         clearNotifications={handleClearNotifications}
         session={session}
         isServerSuperAdmin={isServerSuperAdmin}
+        currentVersion={platformConfig?.currentVersion}
       />
 
       {/* CORE WORKSPACE VIEWPORT */}

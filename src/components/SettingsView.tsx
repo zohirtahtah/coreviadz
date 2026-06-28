@@ -215,7 +215,7 @@ export default function SettingsView({
     const rawSql = `-- Corevia Enterprise Database SQL Schema & Security Hardening
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
--- 0. Tenant Companies and Users
+-- 0. Tenant Companies and Users (Clipboard Copy)
 create table if not exists corevia_companies (
   id text primary key,
   name text not null,
@@ -229,6 +229,7 @@ create table if not exists corevia_companies (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+-- Saas Users (Clipboard Copy)
 create table if not exists corevia_saas_users (
   user_id text primary key,
   company_id text references corevia_companies(id) on delete set null,
@@ -1368,7 +1369,7 @@ $$;`;
 {`-- Corevia Enterprise Database SQL Schema & Security Hardening
 -- Paste this script into your Supabase SQL Editor and run it in 1 click!
 
--- 0. Tenant Companies and Users
+-- 0. Tenant Companies and Users (Visual View)
 create table if not exists corevia_companies (
   id text primary key,
   name text not null,
@@ -1382,6 +1383,7 @@ create table if not exists corevia_companies (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+-- Saas Users (Visual View)
 create table if not exists corevia_saas_users (
   user_id text primary key,
   company_id text references corevia_companies(id) on delete set null,

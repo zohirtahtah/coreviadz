@@ -32,6 +32,7 @@ interface SidebarProps {
   clearNotifications: () => void;
   session?: any;
   isServerSuperAdmin?: boolean | null;
+  currentVersion?: string;
 }
 
 export default function Sidebar({
@@ -51,7 +52,8 @@ export default function Sidebar({
   notifications,
   clearNotifications,
   session,
-  isServerSuperAdmin
+  isServerSuperAdmin,
+  currentVersion
 }: SidebarProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
@@ -397,7 +399,7 @@ export default function Sidebar({
           
           <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono px-2" id="sidebar_metainfo">
             <span>Corevia Pro</span>
-            <span>2026 UTC</span>
+            <span className="text-indigo-400 font-bold">{currentVersion || "v2.5.0"}</span>
           </div>
 
           <button 

@@ -23,6 +23,8 @@ interface SubscriptionPaywallProps {
   onPaymentSuccess: (plan: string, durationMonths: number) => Promise<void>;
   onTriggerNotification: (msg: string, type: "success" | "info" | "warning") => void;
   onLogout: () => void;
+  supportEmail?: string;
+  phone?: string;
 }
 
 export function SubscriptionPaywall({
@@ -32,7 +34,9 @@ export function SubscriptionPaywall({
   ownerEmail,
   onPaymentSuccess,
   onTriggerNotification,
-  onLogout
+  onLogout,
+  supportEmail,
+  phone
 }: SubscriptionPaywallProps) {
   const [selectedPlan, setSelectedPlan] = useState<"Starter" | "Professional" | "Enterprise">("Professional");
   const [duration, setDuration] = useState<"monthly" | "annual">("monthly");
@@ -530,11 +534,11 @@ export function SubscriptionPaywall({
           <div className="text-[10px] text-zinc-500 space-y-1 px-2">
             <div className="flex items-center gap-1.5">
               <Mail className="w-3 h-3 text-zinc-600" />
-              <span>support@corevia-erp.com</span>
+              <span>{supportEmail || "support@corevia-erp.com"}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Phone className="w-3 h-3 text-zinc-600" />
-              <span>+213 (0) 550 00 00 10</span>
+              <span>{phone || "+213 (0) 550 00 00 10"}</span>
             </div>
           </div>
 
