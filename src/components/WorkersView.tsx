@@ -1138,42 +1138,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
     const targetDates = fillDates(formMonth, yearFilter);
     const listCopy = [...workers];
 
-    // Automatically sync to Users & Permissions (Employee accounts)
-    const syncToEmployeeAccounts = async (workerIdToUse: string) => {
-      try {
-        const companyId = session?.company_id || "cop_default";
-        const emps = await getEmployees(companyId);
-        
-        let matchingEmp = emps.find(e => 
-          e.id === workerIdToUse || 
-          (e.phone && formPhone && cleanPhoneDigits(e.phone) === cleanPhoneDigits(formPhone)) || 
-          (e.fullName && formName && cleanArabicName(e.fullName) === cleanArabicName(formName))
-        );
-
-        const slug = (formName || "").toLowerCase().trim()
-          .replace(/\s+/g, ".")
-          .replace(/[^a-z0-9.]/g, "");
-
-        const employeePayload: any = {
-          id: matchingEmp ? matchingEmp.id : workerIdToUse,
-          companyId,
-          fullName: (formName || "").trim(),
-          phone: (formPhone || "").trim(),
-          email: matchingEmp?.email || `${slug}@gmail.com`,
-          username: matchingEmp?.username || slug,
-          jobTitle: formRole || "موظف",
-          password: matchingEmp?.password || Math.floor(100000 + Math.random() * 900000).toString(),
-          allowedPages: matchingEmp?.allowedPages || ["my-profile"], // only personal info view
-          status: matchingEmp?.status || "Active",
-          createdAt: matchingEmp?.createdAt || new Date().toISOString()
-        };
-
-        await saveEmployee(employeePayload);
-      } catch (err) {
-        console.error("Auto sync to employees from workers view error:", err);
-      }
-    };
-
     const parsedOvertimeHours = Number(formOvertimeHours) || 0;
     const parsedOvertimeRate = Number(formOvertimeRate) || 250;
     const parsedAbsenceDays = Number(formAbsenceDays) || 0;
@@ -1282,7 +1246,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
         syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
         onSaveWorkers(listCopy);
-        syncToEmployeeAccounts(editId);
         onTriggerNotification(isRtl ? "تم تعديل ملف العامل وحساباته الشهرية بنجاح" : "Payroll files adjusted successfully", "success");
       }
     } else {
@@ -1395,7 +1358,6 @@ export const WorkersView: React.FC<WorkersViewProps> = ({
       syncExpensesWithGeneralLedger(formCode, formName.trim(), formExpenses, formMonth, yearFilter);
 
       onSaveWorkers(listCopy);
-      syncToEmployeeAccounts(freshId);
       onTriggerNotification(isRtl ? "تم تفصيل وتوظيف العامل الجديد بنجاح" : "Staff onboarded successfully!", "success");
     }
 
