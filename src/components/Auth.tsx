@@ -540,6 +540,9 @@ export default function Auth({
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
         // 1. Save company to corevia_companies (SOLE Authoritative Source)
+        const todayStr = new Date().toISOString().split("T")[0];
+        const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+        
         const { error: compErr } = await resilientUpsert("corevia_companies", [{
           id: companyId,
           name: companyNameInput.trim(),
@@ -549,10 +552,22 @@ export default function Auth({
           email: emailInput.trim().toLowerCase(),
           seatsLimit: 5,
           seats_limit: 5, // compatibility
-          accountStatus: "Pending Verification",
-          status: "Pending Verification", // compatibility
+          accountStatus: "Active", // verified immediately or on activation
+          status: "active", // compatibility
           subscriptionPlan: "Trial",
-          created_at: new Date().toISOString() // Seed current time for 10-min OTP comparison & 7 days trial countdown
+          created_at: new Date().toISOString(),
+          
+          // Strict 15-Day Free Trial Requirements
+          registration_date: todayStr,
+          trial_start_date: todayStr,
+          trial_end_date: trialEndStr,
+          subscription_status: "Active",
+          subscription_plan: "Trial",
+          
+          // Pre-existing DB Columns Compatibility Mapping
+          trial_start_at: todayStr,
+          subscription_end_at: trialEndStr,
+          subscription_end_date: trialEndStr
         }]);
         if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
@@ -575,14 +590,14 @@ export default function Auth({
           email: emailInput.trim().toLowerCase(),
           phone: phoneInput.trim(),
           country: countryInput,
-          registrationDate: new Date().toISOString().split("T")[0],
+          registrationDate: todayStr,
           lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
-          emailVerified: false,
-          subscriptionPlan: "Basic",
+          emailVerified: true,
+          subscriptionPlan: "Trial",
           seatsLimit: 5,
           seatsUsed: 1,
-          accountStatus: "Pending Verification",
-          expirationDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Trial end Date (7 days)
+          accountStatus: "Active",
+          expirationDate: trialEndStr, // Trial end Date (15 days)
           activeDevices: [],
           otpCode
         };

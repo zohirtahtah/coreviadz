@@ -23,6 +23,7 @@ import { LanguageType, ThemeType, UserSession } from "./types";
 import Auth from "./components/Auth";
 import Onboarding from "./components/Onboarding";
 import Sidebar from "./components/Sidebar";
+import { SubscriptionPaywall } from "./components/SubscriptionPaywall";
 import { Flag } from "./components/Flag";
 import DashboardView from "./components/DashboardView";
 import OrdersView from "./components/OrdersView";
@@ -467,6 +468,61 @@ export default function App() {
         }
       });
   }, []);
+
+  const handlePaymentSuccess = async (plan: string, durationMonths: number) => {
+    if (!supabase || !session?.company_id) return;
+    const companyId = session.company_id;
+    const expiryStr = new Date(Date.now() + durationMonths * 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+    const payload: any = {
+      subscription_plan: plan,
+      subscriptionPlan: plan,
+      subscription_status: "Active",
+      accountStatus: "Active",
+      status: "active",
+      trial_end_date: null,
+      subscription_end_at: expiryStr,
+      subscription_end_date: expiryStr,
+      expirationDate: expiryStr
+    };
+
+    // Defensive stripping update
+    let activePayload = { ...payload };
+    let success = false;
+    let attempts = 0;
+    while (attempts < 20 && !success) {
+      const { error } = await supabase
+        .from("corevia_companies")
+        .update(activePayload)
+        .eq("id", companyId);
+
+      if (!error) {
+        success = true;
+      } else {
+        const errMsg = error.message || "";
+        const match = errMsg.match(/Could not find the '([^']+)' column/);
+        if (match && match[1]) {
+          const badColumn = match[1];
+          delete activePayload[badColumn];
+          attempts++;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // Immediately trigger a metadata refetch to unlock the application
+    const userMeta = await fetchUserSaaSMeta(
+      session.user_id || "",
+      session.email || "",
+      session.username || ""
+    );
+
+    // Refresh layout state immediately
+    const updatedSess = { ...session };
+    saveUserSession(updatedSess);
+    setSession(updatedSess);
+  };
 
   // Helper to load localized database and configuration records from local cache
   const loadStateFromLocal = () => {
@@ -1675,8 +1731,8 @@ export default function App() {
     );
   }
 
-  // If user is not logged in / approved / or is suspended, render the Auth gateway
-  if (!session || !session.isRegistered || !session.isApproved || session.isSuspended) {
+  // If user is not logged in / approved, render the Auth gateway
+  if (!session || !session.isRegistered || !session.isApproved) {
     return (
       <Auth
         lang={lang}
@@ -1693,6 +1749,21 @@ export default function App() {
           }
         }}
         onTriggerNotification={triggerToast}
+      />
+    );
+  }
+
+  // If user is logged in but company subscription/license is suspended/expired, block access with beautiful Paywall
+  if (session && isSuspended && !isServerSuperAdmin && session.role !== "super_admin") {
+    return (
+      <SubscriptionPaywall
+        isRtl={lang === "ar"}
+        companyId={session.company_id || ""}
+        companyName={saasAccount?.companyName || "Your Company"}
+        ownerEmail={session.email || ""}
+        onPaymentSuccess={handlePaymentSuccess}
+        onTriggerNotification={triggerToast}
+        onLogout={handleLogout}
       />
     );
   }

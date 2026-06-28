@@ -136,9 +136,73 @@ export async function fetchUserSaaSMeta(
           let list: any[] = [];
           try { if (stored) list = JSON.parse(stored); } catch (e) {}
 
-          const seatsLimitVal = dbCompany.seatsLimit !== undefined ? dbCompany.seatsLimit : (dbCompany.seatslimit !== undefined ? dbCompany.seatslimit : 5);
-          const accountStatusVal = dbCompany.accountStatus !== undefined ? dbCompany.accountStatus : (dbCompany.accountstatus !== undefined ? dbCompany.accountstatus : (userMeta.has_completed_onboarding ? "Active" : "Pending Verification"));
-          const subscriptionPlanVal = dbCompany.subscriptionPlan !== undefined ? dbCompany.subscriptionPlan : (dbCompany.subscriptionplan !== undefined ? dbCompany.subscriptionplan : "Basic");
+          // Universal schema-agnostic field normalization
+          const seatsLimitVal = dbCompany.seats_limit !== undefined 
+            ? dbCompany.seats_limit 
+            : (dbCompany.seatsLimit !== undefined 
+                ? dbCompany.seatsLimit 
+                : (dbCompany.seatslimit !== undefined ? dbCompany.seatslimit : 5));
+
+          // Map trial_start_date, registration_date or fallback to created_at
+          const regDateVal = dbCompany.registration_date 
+            || dbCompany.trial_start_date 
+            || dbCompany.trial_start_at 
+            || (dbCompany.created_at ? dbCompany.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+
+          // Expiration date priority
+          let expirationDateVal = dbCompany.subscription_end_at 
+            || dbCompany.subscription_end_date 
+            || dbCompany.trial_end_date 
+            || dbCompany.expirationDate 
+            || dbCompany.expirationdate 
+            || "";
+
+          // If expirationDateVal is missing and subscription_plan is Trial, compute it as regDateVal + 15 days
+          if (!expirationDateVal) {
+            const parsedReg = new Date(regDateVal);
+            if (!isNaN(parsedReg.getTime())) {
+              expirationDateVal = new Date(parsedReg.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+            } else {
+              expirationDateVal = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+            }
+          }
+
+          // Subscription status normalization
+          let accountStatusVal = "Active";
+          const rawStatus = dbCompany.subscription_status 
+            || dbCompany.status 
+            || dbCompany.accountStatus 
+            || dbCompany.accountstatus 
+            || "Active";
+          
+          const rawStatusLower = String(rawStatus).toLowerCase();
+          if (rawStatusLower === "active") {
+            accountStatusVal = "Active";
+          } else if (rawStatusLower === "suspended" || rawStatusLower === "trial expired" || rawStatusLower === "expired") {
+            accountStatusVal = "Suspended";
+          } else if (rawStatusLower === "disabled") {
+            accountStatusVal = "Disabled";
+          } else if (rawStatusLower === "pending verification") {
+            accountStatusVal = "Pending Verification";
+          } else if (rawStatusLower === "read only") {
+            accountStatusVal = "Read Only";
+          } else {
+            // Capitalize first letter
+            accountStatusVal = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+          }
+
+          // Check for trial or subscription expiration
+          if (expirationDateVal) {
+            const expTime = new Date(expirationDateVal).getTime();
+            if (expTime < Date.now()) {
+              accountStatusVal = "Suspended"; // Lock protected ERP modules
+            }
+          }
+
+          const subscriptionPlanVal = dbCompany.subscription_plan 
+            || dbCompany.subscriptionPlan 
+            || dbCompany.subscriptionplan 
+            || "Trial";
 
           const matchedIdx = list.findIndex(c => c.id === compId || c.email.toLowerCase() === cleanEmail);
           const companyObj = {
@@ -148,14 +212,14 @@ export async function fetchUserSaaSMeta(
             email: cleanEmail,
             phone: dbCompany.phone || "+213 550 00 00 00",
             country: dbCompany.country || "Algeria",
-            registrationDate: dbCompany.created_at ? dbCompany.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
+            registrationDate: regDateVal,
             lastLogin: new Date().toISOString().replace("T", " ").substr(0, 16),
             emailVerified: true,
             subscriptionPlan: subscriptionPlanVal,
             seatsLimit: seatsLimitVal,
             seatsUsed: 1,
             accountStatus: accountStatusVal,
-            expirationDate: "",
+            expirationDate: expirationDateVal,
             activeDevices: [],
             otpCode: "123456"
           };

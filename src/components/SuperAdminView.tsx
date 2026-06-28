@@ -90,7 +90,69 @@ export default function SuperAdminView({
           const ownerName = rc.owner_name || u?.username || prof?.owner_name || "System Owner";
           const email = rc.owner_email || rc.email || u?.email || "no-owner@corevia.com";
           const phone = rc.phone || prof?.phone || "";
-          const registrationDate = rc.created_at ? rc.created_at.split("T")[0] : new Date().toISOString().split("T")[0];
+          
+          // Universal schema-agnostic normalization for Super Admin side
+          const seatsLimitVal = rc.seats_limit !== undefined 
+            ? rc.seats_limit 
+            : (rc.seatsLimit !== undefined 
+                ? rc.seatsLimit 
+                : (rc.seatslimit !== undefined ? rc.seatslimit : 5));
+
+          const regDateVal = rc.registration_date 
+            || rc.trial_start_date 
+            || rc.trial_start_at 
+            || (rc.created_at ? rc.created_at.split("T")[0] : new Date().toISOString().split("T")[0]);
+
+          let expirationDateVal = rc.subscription_end_at 
+            || rc.subscription_end_date 
+            || rc.trial_end_date 
+            || rc.expirationDate 
+            || rc.expirationdate 
+            || "";
+
+          if (!expirationDateVal) {
+            const parsedReg = new Date(regDateVal);
+            if (!isNaN(parsedReg.getTime())) {
+              expirationDateVal = new Date(parsedReg.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+            } else {
+              expirationDateVal = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+            }
+          }
+
+          let accountStatusVal = "Active";
+          const rawStatus = rc.subscription_status 
+            || rc.status 
+            || rc.accountStatus 
+            || rc.accountstatus 
+            || "Active";
+          
+          const rawStatusLower = String(rawStatus).toLowerCase();
+          if (rawStatusLower === "active") {
+            accountStatusVal = "Active";
+          } else if (rawStatusLower === "suspended" || rawStatusLower === "trial expired" || rawStatusLower === "expired") {
+            accountStatusVal = "Suspended";
+          } else if (rawStatusLower === "disabled") {
+            accountStatusVal = "Disabled";
+          } else if (rawStatusLower === "pending verification") {
+            accountStatusVal = "Pending Verification";
+          } else if (rawStatusLower === "read only") {
+            accountStatusVal = "Read Only";
+          } else {
+            accountStatusVal = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+          }
+
+          // Force expiration status check
+          if (expirationDateVal) {
+            const expTime = new Date(expirationDateVal).getTime();
+            if (expTime < Date.now()) {
+              accountStatusVal = "Suspended";
+            }
+          }
+
+          const subscriptionPlanVal = rc.subscription_plan 
+            || rc.subscriptionPlan 
+            || rc.subscriptionplan 
+            || "Trial";
 
           return {
             id: companyId,
@@ -99,14 +161,14 @@ export default function SuperAdminView({
             email,
             phone,
             country: rc.country || "Algeria",
-            registrationDate,
+            registrationDate: regDateVal,
             lastLogin: rc.updated_at ? rc.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
-            emailVerified: rc.accountStatus !== "Pending Verification",
-            subscriptionPlan: rc.subscriptionPlan || "Basic",
-            seatsLimit: rc.seatsLimit || 5,
+            emailVerified: accountStatusVal !== "Pending Verification",
+            subscriptionPlan: subscriptionPlanVal,
+            seatsLimit: seatsLimitVal,
             seatsUsed: companyUsers.length > 0 ? companyUsers.length : 1,
-            accountStatus: rc.accountStatus || "Active",
-            expirationDate: rc.expirationDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+            accountStatus: accountStatusVal,
+            expirationDate: expirationDateVal,
             activeDevices: [],
             otpCode: rc.otpCode || "123456"
           };
@@ -134,17 +196,58 @@ export default function SuperAdminView({
       if (updatedFields.ownerName !== undefined) payload.owner_name = updatedFields.ownerName;
       if (updatedFields.email !== undefined) payload.owner_email = updatedFields.email;
       if (updatedFields.phone !== undefined) payload.phone = updatedFields.phone;
-      if (updatedFields.subscriptionPlan !== undefined) payload.subscriptionPlan = updatedFields.subscriptionPlan;
-      if (updatedFields.seatsLimit !== undefined) payload.seatsLimit = updatedFields.seatsLimit;
-      if (updatedFields.accountStatus !== undefined) payload.accountStatus = updatedFields.accountStatus;
-      if (updatedFields.expirationDate !== undefined) payload.expirationDate = updatedFields.expirationDate;
+      
+      if (updatedFields.subscriptionPlan !== undefined) {
+        payload.subscriptionPlan = updatedFields.subscriptionPlan;
+        payload.subscription_plan = updatedFields.subscriptionPlan;
+      }
+      if (updatedFields.seatsLimit !== undefined) {
+        payload.seatsLimit = updatedFields.seatsLimit;
+        payload.seats_limit = updatedFields.seatsLimit;
+      }
+      if (updatedFields.accountStatus !== undefined) {
+        payload.accountStatus = updatedFields.accountStatus;
+        payload.subscription_status = updatedFields.accountStatus;
+        payload.status = updatedFields.accountStatus.toLowerCase() === "active" ? "active" : "suspended";
+      }
+      if (updatedFields.expirationDate !== undefined) {
+        payload.expirationDate = updatedFields.expirationDate;
+        payload.subscription_end_at = updatedFields.expirationDate;
+        payload.subscription_end_date = updatedFields.expirationDate;
+        payload.trial_end_date = updatedFields.expirationDate;
+      }
 
-      const { error } = await supabase
-        .from("corevia_companies")
-        .update(payload)
-        .eq("id", companyId);
+      // Defensive stripping update to support any schema combinations without throwing errors
+      let activePayload = { ...payload };
+      let success = false;
+      let attempts = 0;
+      let lastError: any = null;
 
-      if (error) throw error;
+      while (attempts < 20 && !success) {
+        const { error } = await supabase
+          .from("corevia_companies")
+          .update(activePayload)
+          .eq("id", companyId);
+
+        if (!error) {
+          success = true;
+        } else {
+          lastError = error;
+          const errMsg = error.message || "";
+          const match = errMsg.match(/Could not find the '([^']+)' column/);
+          if (match && match[1]) {
+            const badColumn = match[1];
+            delete activePayload[badColumn];
+            attempts++;
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!success && lastError) {
+        throw lastError;
+      }
 
       // Add to audit trail
       await supabase.from("corevia_admin_activity").insert({
