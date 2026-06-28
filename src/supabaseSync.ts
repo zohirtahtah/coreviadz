@@ -60,7 +60,12 @@ export async function resilientUpsert(tableName: string, items: any[]): Promise<
       attempts++;
     } else {
       // Return other errors directly (constraint, network, etc.)
-      console.error(`[ResilientUpsert] Table "${tableName}" failed with an unrecoverable error:`, error);
+      const isRlsError = error?.code === "42501" || errMsg.toLowerCase().includes("row-level security") || errMsg.toLowerCase().includes("policy");
+      if (isRlsError) {
+        console.warn(`[ResilientUpsert] Table "${tableName}" write blocked by RLS policy. This is expected if using simulated, demo, or offline accounts:`, error);
+      } else {
+        console.error(`[ResilientUpsert] Table "${tableName}" failed with an unrecoverable error:`, error);
+      }
       return { data: null, error };
     }
   }
