@@ -629,7 +629,36 @@ export default function App() {
             setHasCompletedOnboarding(false);
           }
         } else {
-          setHasCompletedOnboarding(false);
+          // Check Supabase Auth session (e.g. Google OAuth callback)
+          supabase.auth.getSession().then(({ data: { session: supabaseSession } }) => {
+            if (supabaseSession?.user) {
+              if (sessionStorage.getItem("app_gcb")) return;
+              sessionStorage.setItem("app_gcb", "1");
+              let companyId = `cop_${supabaseSession.user.id.substring(0, 15)}`;
+              let role = "admin";
+              let username = supabaseSession.user.email?.split("@")[0] || "User";
+              supabase.from("corevia_saas_users").select("*")
+                .eq("email", (supabaseSession.user.email || "").toLowerCase().trim())
+                .maybeSingle().then(({ data: userData }) => {
+                  if (userData) {
+                    companyId = userData.company_id || companyId;
+                    role = userData.role || role;
+                    username = userData.username || username;
+                  }
+                  const oauthSess = {
+                    username, email: supabaseSession.user.email || "",
+                    isRegistered: true, isApproved: true, isSuspended: false,
+                    userId: supabaseSession.user.id, user_id: supabaseSession.user.id,
+                    company_id: companyId, role, jobTitle: "Admin"
+                  };
+                  setSession(oauthSess);
+                  saveUserSession(oauthSess);
+                  setHasCompletedOnboarding(true);
+                });
+            } else {
+              setHasCompletedOnboarding(false);
+            }
+          }).catch(() => setHasCompletedOnboarding(false));
         }
       });
   }, []);
