@@ -275,7 +275,7 @@ export default function Auth({
     }
   };
 
-  // Detect OAuth callback on mount
+  // Detect OAuth callback on mount (Google, etc.)
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(async ({ data: { session: supabaseSession } }) => {
@@ -285,6 +285,7 @@ export default function Auth({
       let companyId = `cop_${supabaseSession.user.id.substring(0, 15)}`;
       let role = "admin";
       let username = supabaseSession.user.email?.split("@")[0] || "User";
+      let isNewUser = false;
       try {
         const { data: userData } = await supabase
           .from("corevia_saas_users")
@@ -295,8 +296,38 @@ export default function Auth({
           companyId = userData.company_id || companyId;
           role = userData.role || role;
           username = userData.username || username;
+        } else {
+          isNewUser = true;
         }
-      } catch {}
+      } catch { isNewUser = true; }
+      if (isNewUser) {
+        const email = (supabaseSession.user.email || "").toLowerCase().trim();
+        username = email.split("@")[0];
+        const fullName = supabaseSession.user.user_metadata?.full_name || username;
+        await resilientUpsert("corevia_companies", [{
+          id: companyId,
+          name: fullName + "'s Company",
+          owner_name: fullName,
+          phone: "",
+          owner_email: email,
+          email: email,
+          seatsLimit: 5,
+          seats_limit: 5,
+          accountStatus: "Active",
+          status: "Active",
+          subscriptionPlan: "Trial",
+          created_at: new Date().toISOString()
+        }]);
+        await resilientUpsert("corevia_saas_users", [{
+          user_id: supabaseSession.user.id,
+          company_id: companyId,
+          email: email,
+          username: username,
+          role: "admin",
+          is_onboarding_complete: false,
+          created_at: new Date().toISOString()
+        }]);
+      }
       const oauthSession: UserSession = {
         username,
         email: supabaseSession.user.email || "",
