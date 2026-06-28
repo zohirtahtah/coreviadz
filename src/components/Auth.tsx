@@ -552,8 +552,8 @@ export default function Auth({
           email: emailInput.trim().toLowerCase(),
           seatsLimit: 5,
           seats_limit: 5, // compatibility
-          accountStatus: "Active", // verified immediately or on activation
-          status: "active", // compatibility
+          accountStatus: "Pending Verification", // Verified immediately or on activation
+          status: "pending_verification", // compatibility
           subscriptionPlan: "Trial",
           created_at: new Date().toISOString(),
           
@@ -561,13 +561,17 @@ export default function Auth({
           registration_date: todayStr,
           trial_start_date: todayStr,
           trial_end_date: trialEndStr,
-          subscription_status: "Active",
+          subscription_status: "trial",
           subscription_plan: "Trial",
+          trial_days: 15,
+          trial_start: new Date().toISOString(),
+          trial_end: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
           
           // Pre-existing DB Columns Compatibility Mapping
           trial_start_at: todayStr,
           subscription_end_at: trialEndStr,
-          subscription_end_date: trialEndStr
+          subscription_end_date: trialEndStr,
+          email_verified: false
         }]);
         if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
@@ -592,11 +596,11 @@ export default function Auth({
           country: countryInput,
           registrationDate: todayStr,
           lastLogin: new Date().toISOString().replace("T", " ").substring(0, 16),
-          emailVerified: true,
-          subscriptionPlan: "Trial",
+          emailVerified: false,
+          subscriptionPlan: "Free",
           seatsLimit: 5,
           seatsUsed: 1,
-          accountStatus: "Active",
+          accountStatus: "Pending Verification",
           expirationDate: trialEndStr, // Trial end Date (15 days)
           activeDevices: [],
           otpCode
@@ -629,6 +633,15 @@ export default function Auth({
           },
           ip_address: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
         }).then(() => console.log("New registration logged to Supabase logs"));
+
+        // Trigger automatic verification email immediately after registration
+        fetch("/api/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: emailInput.trim().toLowerCase() })
+        }).then(res => res.json())
+          .then(data => console.log("[Auto-Verification] Sent email on registration:", data))
+          .catch(err => console.error("[Auto-Verification] Failed to send email:", err));
 
         const sessionRecord: UserSession = {
           username: nameInput.trim(),

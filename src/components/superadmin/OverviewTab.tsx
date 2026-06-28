@@ -45,6 +45,13 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
         .select("*");
       if (coErr) throw coErr;
 
+      // 1b. Fetch SaaS Users (Issue 1) to verify user accounts actually exist
+      const { data: saasUsers } = await supabase
+        .from("corevia_saas_users")
+        .select("company_id");
+
+      const validCompanyIds = new Set((saasUsers || []).map(u => u.company_id));
+
       // 2. Fetch Employees
       const { data: employees, error: empErr } = await supabase
         .from("corevia_company_users")
@@ -60,7 +67,8 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
         .from("corevia_products")
         .select("id");
 
-      const companyList = companies || [];
+      // Only display metrics for companies that actually have registered users in Supabase (Issue 1)
+      const companyList = (companies || []).filter(c => validCompanyIds.has(c.id));
       const employeeList = employees || [];
       const orderList = orders || [];
       const productList = products || [];
@@ -180,6 +188,36 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
 
   useEffect(() => {
     loadDashboardStats();
+
+    // Live synchronization (Issue 7): Automatically refresh when any company or user changes
+    const companiesChannel = supabase
+      .channel("overview_realtime_companies")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "corevia_companies" },
+        () => {
+          console.log("Realtime overview sync: corevia_companies updated, reloading...");
+          loadDashboardStats();
+        }
+      )
+      .subscribe();
+
+    const usersChannel = supabase
+      .channel("overview_realtime_users")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "corevia_saas_users" },
+        () => {
+          console.log("Realtime overview sync: corevia_saas_users updated, reloading...");
+          loadDashboardStats();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      companiesChannel.unsubscribe();
+      usersChannel.unsubscribe();
+    };
   }, []);
 
   const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#a855f7"];

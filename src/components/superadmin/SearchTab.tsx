@@ -41,17 +41,22 @@ export default function SearchTab({ isRtl, onTriggerNotification, onSelectCompan
         { data: emps },
         { data: prods },
         { data: ords },
-        { data: tix }
+        { data: tix },
+        { data: saasUsers }
       ] = await Promise.all([
         supabase.from("corevia_companies").select("*").or(`name.ilike.${q},owner_name.ilike.${q},email.ilike.${q},id.ilike.${q}`),
         supabase.from("corevia_company_users").select("*").or(`username.ilike.${q},email.ilike.${q}`),
         supabase.from("corevia_products").select("*").ilike("name", q),
         supabase.from("corevia_orders").select("*").or(`customer_name.ilike.${q},phone.ilike.${q}`),
-        supabase.from("corevia_support_tickets").select("*").or(`subject.ilike.${q},message.ilike.${q}`).limit(20)
+        supabase.from("corevia_support_tickets").select("*").or(`subject.ilike.${q},message.ilike.${q}`).limit(20),
+        supabase.from("corevia_saas_users").select("company_id")
       ]);
 
+      const validCompanyIds = new Set((saasUsers || []).map(u => u.company_id));
+      const filteredCompanies = (cos || []).filter(c => validCompanyIds.has(c.id));
+
       setResults({
-        companies: cos || [],
+        companies: filteredCompanies,
         employees: emps || [],
         products: prods || [],
         orders: ords || [],

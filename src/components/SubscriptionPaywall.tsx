@@ -261,7 +261,7 @@ export function SubscriptionPaywall({
                       : "bg-zinc-950 border-zinc-850 hover:border-zinc-700"
                   }`}
                 >
-                  {p.popular && (
+                  {(p as any).popular && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[10px] font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-md uppercase">
                       <Sparkles className="w-3 h-3" />
                       {isRtl ? "الأكثر طلباً" : "Most Popular"}

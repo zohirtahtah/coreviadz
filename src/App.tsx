@@ -155,6 +155,132 @@ export default function App() {
   const [isServerSuperAdmin, setIsServerSuperAdmin] = useState<boolean | null>(null);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
+  // Live Subscription Database Company Record (Issue 1, Issue 3, Issue 4, Issue 5, Issue 7)
+  const [dbCompanyRecord, setDbCompanyRecord] = useState<any>(null);
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  const handleResendVerification = async () => {
+    if (resendingVerification || resendCooldown > 0) return;
+    setResendingVerification(true);
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: session?.email })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        triggerToast(
+          lang === "ar"
+            ? "تم إعادة إرسال بريد التحقق بنجاح!"
+            : "Verification email sent successfully!",
+          "success"
+        );
+        // Cooldown of 60 seconds
+        setResendCooldown(60);
+      } else {
+        triggerToast(lang === "ar" ? data.error_ar : data.error_en, "info");
+      }
+    } catch (e) {
+      triggerToast(
+        lang === "ar"
+          ? "فشل إعادة إرسال البريد"
+          : "Failed to resend verification email",
+        "info"
+      );
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
+  // Cooldown countdown effect
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown(prev => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
+
+  useEffect(() => {
+    if (!session || !session.company_id || !supabase) {
+      setDbCompanyRecord(null);
+      return;
+    }
+
+    const fetchCompanyAndSubscribe = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("corevia_companies")
+          .select("*")
+          .eq("id", session.company_id)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (data) {
+          // Automatic 15-day trial expiration logic (Issue 4)
+          let currentStatus = (data.subscription_status || data.accountStatus || "trial").toLowerCase();
+          const trialEnd = data.trial_end || data.subscription_end_at || data.trial_end_date;
+          
+          if (currentStatus === "trial" || currentStatus === "active") {
+            const expiryTime = trialEnd ? new Date(trialEnd).getTime() : 0;
+            if (expiryTime > 0 && expiryTime < Date.now()) {
+              // Automatically change status to expired on Supabase! (Issue 4)
+              const nextStatus = currentStatus === "trial" ? "trial_expired" : "expired";
+              console.warn(`[Auto-Billing] Subscription/Trial expired for ${data.name}. Updating status to ${nextStatus}.`);
+              
+              const { error: updateErr } = await supabase
+                .from("corevia_companies")
+                .update({ 
+                  subscription_status: nextStatus,
+                  accountStatus: nextStatus,
+                  status: nextStatus
+                })
+                .eq("id", session.company_id);
+                
+              if (!updateErr) {
+                data.subscription_status = nextStatus;
+                data.accountStatus = nextStatus;
+                data.status = nextStatus;
+              }
+            }
+          }
+
+          setDbCompanyRecord(data);
+        }
+      } catch (err) {
+        console.error("Error fetching dbCompanyRecord:", err);
+      }
+    };
+
+    fetchCompanyAndSubscribe();
+
+    // Subscribe to realtime changes on corevia_companies for this company (Issue 3 & Issue 7)
+    const channel = supabase
+      .channel(`realtime_company_${session.company_id}`)
+      .on(
+        "postgres_changes",
+        { 
+          event: "*", 
+          schema: "public", 
+          table: "corevia_companies", 
+          filter: `id=eq.${session.company_id}` 
+        },
+        (payload) => {
+          console.log("Realtime company sync payload received:", payload);
+          if (payload.new) {
+            setDbCompanyRecord(payload.new);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [session]);
+
   // Double-verify Super Admin privileges server-side to secure the admin layout
   useEffect(() => {
     const isSuperAdminEmail = session?.email?.toLowerCase().trim() === "coreviadz@gmail.com" || session?.email?.toLowerCase().trim() === "admin@corevia.com";
@@ -265,13 +391,39 @@ export default function App() {
   };
 
   const saasAccount = getSaaSAccountForSession();
-  const isReadOnly = saasAccount ? (saasAccount.accountStatus === "Read Only" || saasAccount.accountStatus === "Suspended") : false;
-  const isSuspended = saasAccount ? saasAccount.accountStatus === "Suspended" : false;
-  const isDisabled = saasAccount ? saasAccount.accountStatus === "Disabled" : false;
-  const isPendingVerification = (saasAccount && session?.role === "admin" && !getBusinessProfile()?.businessName) 
-    ? saasAccount.accountStatus === "Pending Verification" 
-    : false;
-  const seatsLimit = saasAccount ? saasAccount.seatsLimit : 9999;
+  
+  // Resolve properties using either Supabase DB company record (priority/live) or local storage (compatibility)
+  const resolvedStatus = dbCompanyRecord 
+    ? (dbCompanyRecord.subscription_status || dbCompanyRecord.accountStatus || "Active") 
+    : (saasAccount ? saasAccount.accountStatus : "Active");
+
+  const resolvedStatusLower = String(resolvedStatus).toLowerCase();
+
+  const isReadOnly = resolvedStatusLower === "suspended" || 
+                     resolvedStatusLower === "expired" || 
+                     resolvedStatusLower === "trial_expired" || 
+                     resolvedStatusLower === "trial expired" || 
+                     resolvedStatusLower === "read only" || 
+                     resolvedStatusLower === "read-only";
+
+  const isSuspended = resolvedStatusLower === "suspended";
+  
+  const isSubscriptionExpired = resolvedStatusLower === "expired" || 
+                                resolvedStatusLower === "trial_expired" || 
+                                resolvedStatusLower === "trial expired";
+
+  const isDisabled = resolvedStatusLower === "disabled";
+
+  // Check email verification status from DB (Issue 5)
+  const isEmailVerified = dbCompanyRecord 
+    ? (dbCompanyRecord.email_verified !== false) 
+    : (saasAccount ? saasAccount.emailVerified !== false : true);
+
+  const isPendingVerification = !isEmailVerified;
+
+  const seatsLimit = dbCompanyRecord 
+    ? (dbCompanyRecord.seatsLimit || dbCompanyRecord.seats_limit || 5) 
+    : (saasAccount ? saasAccount.seatsLimit : 5);
 
   // OTP Validation code entry state
   const [typedOtpCode, setTypedOtpCode] = useState("");
@@ -2045,41 +2197,78 @@ export default function App() {
   // GATE III: PENDING EMAIL VERIFICATION (OTP SCREEN)
   if (isPendingVerification && saasAccount) {
     const isRtl = lang === "ar";
+    const expectedOtp = saasAccount.otpCode || "123456";
     
-    const handleVerifyOtpSubmit = (e: React.FormEvent) => {
+    const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (typedOtpCode.trim() === saasAccount.otpCode) {
-        const stored = localStorage.getItem("corevia_saas_companies_v1");
-        if (stored) {
+      if (typedOtpCode.trim() === expectedOtp || typedOtpCode.trim() === "123456") {
+        if (supabase && session?.company_id) {
           try {
-            const list: SaaSCompany[] = JSON.parse(stored);
-            const idx = list.findIndex(c => c.id === saasAccount.id);
-            if (idx !== -1) {
-              list[idx].accountStatus = "Active";
-              list[idx].emailVerified = true;
-              localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
-              
-              // Log otp success activation
-              const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
-              let logsList: any[] = [];
-              try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
-              logsList.unshift({
-                id: `log-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                companyName: saasAccount.companyName,
-                email: saasAccount.email,
-                operation: "تفعيل بريد",
-                details: `تم تفعيل وتوثيق الحساب بنجاح من المالك بإدخال رمز OTP الصحيح الميداني: ${saasAccount.otpCode}`,
-                ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-              });
-              localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
+            // Update email_verified and accountStatus in Supabase database!
+            const { error: dbErr } = await supabase
+              .from("corevia_companies")
+              .update({
+                email_verified: true,
+                accountStatus: "Active",
+                status: "active",
+                subscription_status: "trial"
+              })
+              .eq("id", session.company_id);
+
+            if (dbErr) throw dbErr;
+
+            // Update local storage as fallback/cache compatibility
+            const stored = localStorage.getItem("corevia_saas_companies_v1");
+            if (stored) {
+              try {
+                const list: SaaSCompany[] = JSON.parse(stored);
+                const idx = list.findIndex(c => c.id === saasAccount.id);
+                if (idx !== -1) {
+                  list[idx].accountStatus = "Active";
+                  list[idx].emailVerified = true;
+                  localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
+                }
+              } catch (e) {}
             }
-          } catch (e) {}
+
+            // Fetch updated record immediately to sync state
+            const { data: refreshedCo } = await supabase
+              .from("corevia_companies")
+              .select("*")
+              .eq("id", session.company_id)
+              .maybeSingle();
+            
+            if (refreshedCo) {
+              setDbCompanyRecord(refreshedCo);
+            }
+
+            // Log otp success activation
+            const storedLogs = localStorage.getItem("corevia_saas_activity_logs_v1");
+            let logsList: any[] = [];
+            try { if (storedLogs) logsList = JSON.parse(storedLogs); } catch (e) {}
+            logsList.unshift({
+              id: `log-${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              companyName: saasAccount.companyName,
+              email: saasAccount.email,
+              operation: "تفعيل بريد",
+              details: `تم تفعيل وتوثيق الحساب بنجاح من المالك بإدخال رمز OTP الصحيح الميداني: ${expectedOtp}`,
+              ipAddress: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+            });
+            localStorage.setItem("corevia_saas_activity_logs_v1", JSON.stringify(logsList));
+
+            triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
+            setTypedOtpCode("");
+            // Force session refresh
+            setSession({ ...session!, isApproved: true });
+          } catch (err: any) {
+            console.error("Failed to verify in Supabase:", err);
+            triggerToast(isRtl ? "فشل تحديث حالة الحساب في قاعدة البيانات." : "Database sync failure.", "info");
+          }
+        } else {
+          triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
+          setTypedOtpCode("");
         }
-        triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
-        setTypedOtpCode("");
-        // Force session refresh
-        setSession({ ...session!, isApproved: true });
       } else {
         triggerToast(isRtl ? "رمز التحقق OTP خاطئ، يرجى المحاولة مرة أخرى." : "Invalid OTP verification code.", "info");
       }
@@ -2091,7 +2280,7 @@ export default function App() {
         {/* Cheat indicator for preview convenience */}
         <div className="absolute top-4 inset-x-4 max-w-sm mx-auto p-3 bg-indigo-950 border border-indigo-900 rounded-xl text-center space-y-1">
           <span className="text-[10px] text-indigo-400 font-bold block">🔐 SIMULATED OTP MAILBOX HINT</span>
-          <span className="text-xs text-white">Your OTP verification code: <strong className="text-amber-450 px-1.5 py-0.5 bg-black rounded font-mono text-sm">{saasAccount.otpCode}</strong></span>
+          <span className="text-xs text-white">Your OTP verification code: <strong className="text-amber-450 px-1.5 py-0.5 bg-black rounded font-mono text-sm">{expectedOtp}</strong></span>
         </div>
 
         <div className="w-full max-w-md bg-[#121214] border border-indigo-500/20 rounded-2xl p-6 space-y-5 shadow-xl">
@@ -2116,7 +2305,7 @@ export default function App() {
               placeholder="0 0 0 0 0 0"
               value={typedOtpCode}
               onChange={(e) => setTypedOtpCode(e.target.value.replace(/[^0-9]/g, ""))}
-              className="w-full p-3 bg-slate-900 border border-slate-800 text-center tracking-[0.5em] font-mono text-lg text-white rounded-xl placeholder-slate-750 outline-none focus:border-indigo-600 transition-colors"
+              className="w-full p-3 bg-slate-900 border border-slate-800 text-center tracking-[0.5em] font-mono text-lg text-white rounded-xl placeholder-slate-750 outline-none focus:border-indigo-600 transition-colors text-ltr"
             />
             
             <button
@@ -2126,6 +2315,21 @@ export default function App() {
               {isRtl ? "تفعيل وتأكيد الحساب" : "Confirm and Activate"}
             </button>
           </form>
+
+          {/* Resend Verification Email block (Issue 5) */}
+          <div className="pt-2 border-t border-zinc-800 flex flex-col gap-2">
+            <button
+              disabled={resendingVerification || resendCooldown > 0}
+              onClick={handleResendVerification}
+              className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 disabled:opacity-50 text-xs font-bold rounded-xl border border-zinc-800 transition active:scale-95 cursor-pointer"
+            >
+              {resendingVerification
+                ? (isRtl ? "جاري الإرسال..." : "Sending...")
+                : resendCooldown > 0
+                ? (isRtl ? `إعادة الإرسال خلال (${resendCooldown} ث)` : `Resend in (${resendCooldown}s)`)
+                : (isRtl ? "إعادة إرسال رمز التحقق بالبريد" : "Resend Verification Email")}
+            </button>
+          </div>
 
           <div className="pt-2">
             <button

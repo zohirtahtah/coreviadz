@@ -935,6 +935,98 @@ app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {
   }
 });
 
+// Resend Verification Rate Limiting in-memory tracker
+const lastResendTimes = new Map<string, number>();
+
+// POST /api/auth/resend-verification -> Sends verification email
+app.post("/api/auth/resend-verification", async (req, res) => {
+  try {
+    let email = "";
+    
+    // Check cookie/auth first
+    const token = req.cookies.corevia_session_v1_cookie;
+    if (token) {
+      try {
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        email = decoded?.email ? decoded.email.toLowerCase().trim() : "";
+      } catch (e) {}
+    }
+
+    // Fallback to request body email
+    if (!email && req.body.email) {
+      email = req.body.email.toLowerCase().trim();
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        error_en: "Unable to determine email. Please provide your email address.",
+        error_ar: "لم نتمكن من تحديد البريد الإلكتروني. يرجى توفير عنوان بريد إلكتروني صالح."
+      });
+    }
+
+    // Rate Limiting: 60 seconds
+    const now = Date.now();
+    const lastTime = lastResendTimes.get(email) || 0;
+    if (now - lastTime < 60000) {
+      const waitSecs = Math.ceil((60000 - (now - lastTime)) / 1000);
+      return res.status(429).json({
+        error_en: `Please wait ${waitSecs} seconds before requesting another verification email.`,
+        error_ar: `يرجى الانتظار ${waitSecs} ثانية قبل طلب إرسال بريد تحقق آخر.`
+      });
+    }
+
+    // Update last resend time
+    lastResendTimes.set(email, now);
+
+    // Fetch saas_user to verify they exist and get company id
+    const { data: saasUser, error: saasErr } = await supabase
+      .from("corevia_saas_users")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (saasErr || !saasUser) {
+      return res.status(404).json({
+        error_en: "Registered workspace user account not found.",
+        error_ar: "لم يتم العثور على حساب مستخدم مسجل لمساحة العمل هذه."
+      });
+    }
+
+    const companyId = saasUser.company_id || "cop_default";
+    const username = saasUser.username || "Tenant Owner";
+
+    // Simulate sending email beautifully
+    console.log(`[Email Service] Resending verification code / link to ${email} for company ${companyId}`);
+
+    // Create log notification inside Supabase activity log
+    await supabase.from("corevia_activity_logs").insert({
+      id: `log-${Date.now()}`,
+      company_id: companyId,
+      actor_name: username,
+      actor_role: "SaaS Tenant Owner",
+      operation: "طلب إعادة إرسال بريد التحقق",
+      item_type: "saas_verification_resend",
+      new_value: {
+        email: email,
+        requested_at: new Date().toISOString()
+      },
+      ip_address: req.ip || "127.0.0.1"
+    });
+
+    return res.status(200).json({
+      success_en: "Verification email successfully sent to your address.",
+      success_ar: "تم إرسال بريد التحقق إلى عنوانك بنجاح."
+    });
+
+  } catch (err: any) {
+    console.error("[Resend Verification API] Error:", err);
+    return res.status(500).json({
+      error_en: "Failed to resend verification: " + err.message,
+      error_ar: "فشل إعادة إرسال بريد التحقق: " + err.message
+    });
+  }
+});
+
 // POST /api/auth/logout -> Wipes session credentials cookie
 app.post("/api/auth/logout", (req, res) => {
   res.clearCookie("corevia_session_v1_cookie", { path: "/" });

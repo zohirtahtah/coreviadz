@@ -76,6 +76,10 @@ export default function SuperAdminView({
 
       const saasCompanies: SaaSCompany[] = (realCompanies || [])
         .filter(rc => {
+          // Check that there is at least one associated user in corevia_saas_users (Issue 1)
+          const hasUser = (users || []).some(u => u.company_id === rc.id);
+          if (!hasUser) return false;
+
           const name = (rc.name || "").toLowerCase();
           const email = (rc.owner_email || rc.email || "").toLowerCase();
           return !(name.includes("test") || name.includes("proof corp") || email.includes("test.com"));
@@ -163,11 +167,11 @@ export default function SuperAdminView({
             country: rc.country || "Algeria",
             registrationDate: regDateVal,
             lastLogin: rc.updated_at ? rc.updated_at.replace("T", " ").substring(0, 16) : "Never Logged",
-            emailVerified: accountStatusVal !== "Pending Verification",
-            subscriptionPlan: subscriptionPlanVal,
+            emailVerified: rc.email_verified !== false,
+            subscriptionPlan: subscriptionPlanVal as any,
             seatsLimit: seatsLimitVal,
             seatsUsed: companyUsers.length > 0 ? companyUsers.length : 1,
-            accountStatus: accountStatusVal,
+            accountStatus: accountStatusVal as any,
             expirationDate: expirationDateVal,
             activeDevices: [],
             otpCode: rc.otpCode || "123456"
@@ -185,6 +189,38 @@ export default function SuperAdminView({
 
   useEffect(() => {
     loadSaaSRealData();
+
+    if (!supabase) return;
+
+    // Live synchronization (Issue 7): Automatically refresh when any company or user changes
+    const companiesChannel = supabase
+      .channel("super_admin_realtime_companies")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "corevia_companies" },
+        () => {
+          console.log("Realtime sync: corevia_companies updated, reloading...");
+          loadSaaSRealData();
+        }
+      )
+      .subscribe();
+
+    const usersChannel = supabase
+      .channel("super_admin_realtime_users")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "corevia_saas_users" },
+        () => {
+          console.log("Realtime sync: corevia_saas_users updated, reloading...");
+          loadSaaSRealData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      companiesChannel.unsubscribe();
+      usersChannel.unsubscribe();
+    };
   }, [activeSubTab]);
 
   // Core handlers to pass down to child components
