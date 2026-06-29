@@ -323,7 +323,7 @@ export async function saveOnboardingCompletionInCloud(
     }]);
 
     // Upsert Business Profile bound to companyId (Extension table ONLY)
-    await supabase.from("corevia_profile").upsert({
+    const profilePayload: any = {
       id: companyId,
       company_id: companyId,
       business_name: "", // Empty to ensure zero duplication while preventing database NOT NULL constraints on older schemas
@@ -338,8 +338,15 @@ export async function saveOnboardingCompletionInCloud(
       passcode: profile.passcode || "",
       rc1: profile.rc1 || "",
       rc2: profile.rc2 || "",
-      nif: profile.nif || ""
-    });
+      nif: profile.nif || "",
+      locked_pages: profile.lockedPages || []
+    };
+
+    let { error: upsertErr } = await supabase.from("corevia_profile").upsert(profilePayload);
+    if (upsertErr && upsertErr.message && upsertErr.message.includes("column")) {
+      delete profilePayload.locked_pages;
+      await supabase.from("corevia_profile").upsert(profilePayload);
+    }
     console.log("Onboarding profile successfully persistent in standard database.");
   } catch (err) {
     console.error("Cloud onboarding save failed, local state active:", err);
@@ -613,7 +620,8 @@ export async function pullMultiTenantData(companyId: string): Promise<boolean> {
         rc1: profileData?.rc1 || "",
         rc2: profileData?.rc2 || "",
         nif: profileData?.nif || "",
-        logoUrl: profileData?.logo_url || profileData?.logoUrl || ""
+        logoUrl: profileData?.logo_url || profileData?.logoUrl || "",
+        lockedPages: Array.isArray(profileData?.locked_pages) ? profileData.locked_pages : []
       };
       saveBusinessProfile(activeProf);
     }

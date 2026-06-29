@@ -9,11 +9,14 @@ import { translations } from "../translations";
 import { 
   Settings, ShieldAlert, BadgeCheck, Plus, X, Paintbrush, Sliders, Upload, Image,
   Database, RefreshCw, CloudLightning, Copy, Check, CheckCircle2, Download, Terminal,
-  Server, Sparkles, Key, AlertCircle
+  Server, Sparkles, Key, AlertCircle, Lock, Unlock, Eye, EyeOff, Shield, ShieldCheck,
+  FileSpreadsheet, FileArchive, CheckSquare, Square
 } from "lucide-react";
 import SheetsSyncSettings from "./SheetsSyncSettings";
 import UsersPermissionsView from "./UsersPermissionsView";
 import { supabase, isSupabaseConfigured } from "../supabaseClient";
+import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import { pushFullTenantData, pullMultiTenantData } from "../supabaseSync";
 import {
   getOrders, saveOrders,
@@ -82,11 +85,22 @@ export default function SettingsView({
     setBNIF(profile.nif || "");
     setBLogoUrl(profile.logoUrl);
     setPasscode(profile.passcode || "1234");
+    setSelectedLockedPages(profile.lockedPages || ["workers", "expenses", "suppliers", "profit", "yearly"]);
   }, [profile]);
   
   // Security
   const [passcode, setPasscode] = useState(profile.passcode || "1234");
   const [showPasscodeVal, setShowPasscodeVal] = useState(false);
+
+  // Security Tab States
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
+  const [isAdminPasswordChanging, setIsAdminPasswordChanging] = useState(false);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [selectedLockedPages, setSelectedLockedPages] = useState<string[]>(
+    profile.lockedPages || ["workers", "expenses", "suppliers", "profit", "yearly"]
+  );
+  const [isImportingZIP, setIsImportingZIP] = useState(false);
 
   // New color adding block
   const [newColorEntry, setNewColorEntry] = useState("");
@@ -679,7 +693,7 @@ $$;`;
   };
 
   // Sub-tabs active page indicator
-  const [activePage, setActivePage] = useState<"company" | "control" | "integrations" | "users">("company");
+  const [activePage, setActivePage] = useState<"company" | "security" | "control" | "integrations">("company");
 
   // Logo file upload handler
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -813,20 +827,562 @@ $$;`;
     onSaveCustomColors(updated);
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAdminPassword) {
+      onTriggerNotification(lang === "ar" ? "الرجاء إدخال كلمة المرور الجديدة" : "Please fill in the new password");
+      return;
+    }
+    if (newAdminPassword.length < 6) {
+      onTriggerNotification(lang === "ar" ? "يجب أن تكون كلمة المرور 6 أحرف على الأقل" : "Password must be at least 6 characters long");
+      return;
+    }
+    if (newAdminPassword !== confirmAdminPassword) {
+      onTriggerNotification(lang === "ar" ? "كلمتا المرور غير متطابقتين" : "Passwords do not match");
+      return;
+    }
+
+    setIsAdminPasswordChanging(true);
+    try {
+      if (isSupabaseConfigured && supabase) {
+        // Update user auth password
+        const { error: authErr } = await supabase.auth.updateUser({ password: newAdminPassword });
+        if (authErr) throw authErr;
+
+        // Also update table corevia_company_users password column if email exists
+        if (session?.email) {
+          await supabase
+            .from("corevia_company_users")
+            .update({ password: newAdminPassword })
+            .eq("email", session.email);
+        }
+      } else {
+        // Sandbox mode password fallback
+        const existingSessionStr = localStorage.getItem("corevia_session_v1") || localStorage.getItem("corevia_user_session_v1");
+        if (existingSessionStr) {
+          try {
+            const sess = JSON.parse(existingSessionStr);
+            sess.password = newAdminPassword;
+            localStorage.setItem("corevia_session_v1", JSON.stringify(sess));
+            localStorage.setItem("corevia_user_session_v1", JSON.stringify(sess));
+          } catch(e){}
+        }
+      }
+
+      setNewAdminPassword("");
+      setConfirmAdminPassword("");
+      onTriggerNotification(
+        lang === "ar"
+          ? "🎉 تم تحديث كلمة مرور حساب المدير بنجاح في نظام الحماية والسرية الموحد!"
+          : "🎉 Administrator password updated successfully in the unified protection system!"
+      );
+    } catch (err: any) {
+      console.error("Password change failed:", err);
+      onTriggerNotification(
+        lang === "ar"
+          ? `❌ فشل تحديث كلمة المرور: ${err.message || err}`
+          : `❌ Password update failed: ${err.message || err}`
+      );
+    } finally {
+      setIsAdminPasswordChanging(false);
+    }
+  };
+
+  const handleTogglePageLock = (pageId: string) => {
+    let updated: string[];
+    if (selectedLockedPages.includes(pageId)) {
+      updated = selectedLockedPages.filter(p => p !== pageId);
+    } else {
+      updated = [...selectedLockedPages, pageId];
+    }
+    setSelectedLockedPages(updated);
+
+    const modified: BusinessProfile = {
+      ...profile,
+      lockedPages: updated
+    };
+    onSaveProfile(modified);
+    onTriggerNotification(
+      lang === "ar"
+        ? "تم تحديث قائمة الصفحات المؤمنة بكلمة مرور تلقائياً!"
+        : "Page locks and passcode permissions updated successfully!"
+    );
+  };
+
+  const handleExportExcelZIP = async () => {
+    try {
+      const zip = new JSZip();
+
+      // 1. Products
+      const products = getProducts();
+      const productsData = products.map(p => ({
+        "الرقم (ID)": p.id,
+        "الاسم (Name)": p.name,
+        "سعر تكلفة الجملة (Wholesale Cost)": p.wholesaleCostPrice,
+        "نسبة ربح الجملة (Wholesale Percentage)": p.wholesalePercentage,
+        "سعر بيع الجملة (Wholesale Price)": p.wholesalePrice,
+        "سعر تكلفة التجزئة (Retail Cost)": p.retailCostPrice,
+        "نسبة ربح التجزئة (Retail Percentage)": p.retailPercentage,
+        "سعر بيع التجزئة (Retail Price)": p.retailPrice,
+        "المقاسات (Sizes)": (p.sizes || []).join(", "),
+        "تاريخ الإنشاء (Created At)": p.createdAt
+      }));
+      const wsProducts = XLSX.utils.json_to_sheet(productsData);
+      const wbProducts = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbProducts, wsProducts, "المنتجات");
+      const bufProducts = XLSX.write(wbProducts, { bookType: "xlsx", type: "array" });
+      zip.file("Products.xlsx", bufProducts);
+
+      // 2. Workers
+      const workers = getWorkers();
+      const workersData = workers.map(w => ({
+        "الرقم (ID)": w.id,
+        "اسم العامل (Worker Name)": w.name,
+        "كود العامل (Worker Code)": w.code,
+        "الهاتف (Phone)": w.phone,
+        "الراتب الأساسي (Base Salary)": w.baseSalary,
+        "ساعات العمل اليومية (Daily Hours)": w.dailyHours,
+        "معدل العمل الإضافي (Overtime Rate)": w.overtimeRate,
+        "الوظيفة / الدور (Role)": w.role,
+        "الراتب الشهري (Monthly Salary)": w.monthlySalary,
+        "أيام العمل بالشهور (Working Days)": w.workingDaysPerMonth || 26,
+        "معدل خصم الغياب (Absence Deduction Rate)": w.absenceDeductionRate || 0,
+        "ملاحظات (Notes)": w.notes || "",
+        "تاريخ التسجيل (Created At)": w.createdAt
+      }));
+      const wsWorkers = XLSX.utils.json_to_sheet(workersData);
+      const wbWorkers = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbWorkers, wsWorkers, "العمال");
+      const bufWorkers = XLSX.write(wbWorkers, { bookType: "xlsx", type: "array" });
+      zip.file("Workers.xlsx", bufWorkers);
+
+      // 3. Customers
+      const orders = getOrders();
+      const customersMap = new Map<string, any>();
+      orders.forEach(o => {
+        const phone = o.phone ? o.phone.trim() : "";
+        const name = o.customerName ? o.customerName.trim() : "";
+        const key = phone || name;
+        if (!key) return;
+        if (!customersMap.has(key)) {
+          customersMap.set(key, {
+            "الاسم (Customer Name)": name,
+            "الهاتف (Phone)": phone,
+            "الولاية (Wilaya)": o.wilaya,
+            "البلدية (Commune)": o.commune,
+            "عنوان التوصيل (Delivery Address)": o.deliveryLocation || "",
+            "عدد الطلبيات (Orders Count)": 0,
+            "إجمالي المشتريات (Total Spent)": 0
+          });
+        }
+        const cust = customersMap.get(key);
+        cust["عدد الطلبيات (Orders Count)"] += 1;
+        cust["إجمالي المشتريات (Total Spent)"] += (o.paidAmount || 0);
+      });
+      const customersData = Array.from(customersMap.values());
+      const wsCustomers = XLSX.utils.json_to_sheet(customersData);
+      const wbCustomers = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbCustomers, wsCustomers, "العملاء");
+      const bufCustomers = XLSX.write(wbCustomers, { bookType: "xlsx", type: "array" });
+      zip.file("Customers.xlsx", bufCustomers);
+
+      // 4. Suppliers
+      const suppliers = getSuppliers();
+      const suppliersData = suppliers.map(s => ({
+        "الرقم (ID)": s.id,
+        "اسم المورد (Supplier Name)": s.name,
+        "الهاتف (Phone)": s.phone,
+        "العنوان (Address)": s.address || "",
+        "البريد الإلكتروني (Email)": s.email || "",
+        "تاريخ التسجيل (Created At)": s.createdAt
+      }));
+      const wsSuppliers = XLSX.utils.json_to_sheet(suppliersData);
+      const wbSuppliers = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbSuppliers, wsSuppliers, "الموردين");
+      const bufSuppliers = XLSX.write(wbSuppliers, { bookType: "xlsx", type: "array" });
+      zip.file("Suppliers.xlsx", bufSuppliers);
+
+      // 5. Orders
+      const ordersData = orders.map(o => ({
+        "الرقم (ID)": o.id,
+        "التاريخ (Date)": o.date,
+        "اسم العميل (Customer Name)": o.customerName,
+        "الهاتف (Phone)": o.phone,
+        "الولاية (Wilaya)": o.wilaya,
+        "البلدية (Commune)": o.commune,
+        "موقع التوصيل (Delivery Location)": o.deliveryLocation,
+        "شركة التوصيل (Delivery Company)": o.deliveryCompany,
+        "نوع التوصيل (Delivery Type)": o.deliveryType,
+        "سعر التوصيل (Delivery Price)": o.deliveryPrice,
+        "السعر الإجمالي (Total Price)": o.totalPrice,
+        "المبلغ المدفوع (Paid Amount)": o.paidAmount,
+        "الخصم (Discount)": o.discount,
+        "العميل يدفع التوصيل (Customer Pays Delivery)": o.customerPaysDelivery ? "نعم" : "لا",
+        "طلب استبدال (Is Exchange)": o.isExchange ? "نعم" : "لا",
+        "اسم الوكيل (Agent Name)": o.agentName,
+        "المصدر (Source)": o.source === "1" ? "أساسي" : o.source === "2" ? "فرعي" : "مرتجع",
+        "الحالة (Status)": o.status,
+        "ملاحظات (Notes)": o.notes || ""
+      }));
+      const wsOrders = XLSX.utils.json_to_sheet(ordersData);
+      const wbOrders = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbOrders, wsOrders, "الطلبيات");
+      const bufOrders = XLSX.write(wbOrders, { bookType: "xlsx", type: "array" });
+      zip.file("Orders.xlsx", bufOrders);
+
+      // 6. Inventory
+      const basicInvStr = localStorage.getItem("corevia_inventory_basic_v1");
+      const basicInv = basicInvStr ? JSON.parse(basicInvStr) : [];
+      const subInvStr = localStorage.getItem("corevia_inventory_sub_v1");
+      const subInv = subInvStr ? JSON.parse(subInvStr) : [];
+      const invData: any[] = [];
+      basicInv.forEach((b: any) => {
+        invData.push({
+          "رقم المنتج (Product ID)": b.productId || "",
+          "اسم المنتج (Product Name)": b.productName || "",
+          "اللون (Color)": b.color || "",
+          "المقاس (Size)": "-",
+          "الكمية (Quantity)": b.quantity || 0,
+          "النوع (Type)": "مخزن أساسي"
+        });
+      });
+      subInv.forEach((s: any) => {
+        invData.push({
+          "رقم المنتج (Product ID)": s.productId || "",
+          "اسم المنتج (Product Name)": s.productName || "",
+          "اللون (Color)": s.color || "",
+          "المقاس (Size)": s.size || "",
+          "الكمية (Quantity)": s.quantity || 0,
+          "النوع (Type)": "مخزن فرعي"
+        });
+      });
+      const wsInventory = XLSX.utils.json_to_sheet(invData);
+      const wbInventory = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbInventory, wsInventory, "المخزون");
+      const bufInventory = XLSX.write(wbInventory, { bookType: "xlsx", type: "array" });
+      zip.file("Inventory.xlsx", bufInventory);
+
+      // 7. Expenses
+      const expStr = localStorage.getItem("corevia_unified_expenses_v1");
+      let expensesList: any[] = [];
+      try { if (expStr) expensesList = JSON.parse(expStr); } catch(e){}
+      const expensesData = expensesList.map(e => ({
+        "الرقم (ID)": e.id,
+        "عنوان المصروف (Title)": e.title,
+        "النوع (Type)": e.type === "fixed" ? "ثابت" : e.type === "variable" ? "متغير" : "إعلانات",
+        "المبلغ (Amount)": e.amount,
+        "التاريخ (Date)": e.date,
+        "بالدولار (Is USD)": e.isUSD ? "نعم" : "لا",
+        "المبلغ بالدولار (USD Amount)": e.usdAmount || 0,
+        "سعر الصرف (Exchange Rate)": e.exchangeRate || 0,
+        "ملاحظات (Notes)": e.notes || "",
+        "تاريخ الإنشاء (Created At)": e.createdAt
+      }));
+      const wsExpenses = XLSX.utils.json_to_sheet(expensesData);
+      const wbExpenses = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbExpenses, wsExpenses, "المصاريف");
+      const bufExpenses = XLSX.write(wbExpenses, { bookType: "xlsx", type: "array" });
+      zip.file("Expenses.xlsx", bufExpenses);
+
+      // 8. Accounts
+      const salarySheets = getSalarySheets();
+      const accountsData = salarySheets.map(s => ({
+        "رقم الكشف (ID)": s.id,
+        "رقم العامل (Worker ID)": s.workerId,
+        "اسم العامل (Worker Name)": s.workerName,
+        "الشهر/السنة (Month)": s.monthYear,
+        "من تاريخ (Date From)": s.dateFrom,
+        "إلى تاريخ (Date To)": s.dateTo,
+        "ساعات العمل الإضافي (Overtime Hours)": s.overtimeHours,
+        "أيام الغياب (Absence Days)": s.absenceDays,
+        "الساعات الغائبة (Missing Hours)": s.missingHours,
+        "أيام الإجازة المدفوعة (Paid Vacation)": s.paidVacationDays,
+        "حالة الدفع (Status)": s.payStatus === "paid" ? "مدفوع" : "غير مدفوع",
+        "الراتب الأساسي (Base Salary)": s.calculatedSalary?.baseSalary || 0,
+        "صافي الراتب المستحق (Net Salary)": s.calculatedSalary?.netSalary || 0,
+        "تاريخ التحديث (Updated At)": s.updatedAt
+      }));
+      const wsAccounts = XLSX.utils.json_to_sheet(accountsData);
+      const wbAccounts = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wbAccounts, wsAccounts, "الحسابات");
+      const bufAccounts = XLSX.write(wbAccounts, { bookType: "xlsx", type: "array" });
+      zip.file("Accounts.xlsx", bufAccounts);
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Corevia_ERP_Backup_${new Date().toISOString().split("T")[0]}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      onTriggerNotification(
+        lang === "ar"
+          ? "🎉 تم بنجاح تصدير جميع البيانات إلى ملف ZIP يحتوي على جداول Excel منظمة!"
+          : "🎉 All ERP modules exported successfully as Excel tables within a ZIP archive!"
+      );
+    } catch (err: any) {
+      console.error("Export failed:", err);
+      onTriggerNotification(
+        lang === "ar"
+          ? `❌ فشل التصدير: ${err.message || err}`
+          : `❌ Export failed: ${err.message || err}`
+      );
+    }
+  };
+
+  const handleImportExcelZIP = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingZIP(true);
+    onTriggerNotification(
+      lang === "ar"
+        ? "⏳ جاري فك ضغط الأرشيف وقراءة جداول Excel لاستيراد البيانات..."
+        : "⏳ Decompressing ZIP and parsing Excel sheets..."
+    );
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+      
+      // Parse Products.xlsx
+      const productsFile = zip.file("Products.xlsx");
+      if (productsFile) {
+        const data = await productsFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedProducts = rows.map((r: any) => ({
+          id: String(r["الرقم (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          name: String(r["الاسم (Name)"] || r["name"] || ""),
+          wholesaleCostPrice: Number(r["سعر تكلفة الجملة (Wholesale Cost)"] || r["wholesaleCostPrice"] || 0),
+          wholesalePercentage: Number(r["نسبة ربح الجملة (Wholesale Percentage)"] || r["wholesalePercentage"] || 0),
+          wholesalePrice: Number(r["سعر بيع الجملة (Wholesale Price)"] || r["wholesalePrice"] || 0),
+          retailCostPrice: Number(r["سعر تكلفة التجزئة (Retail Cost)"] || r["retailCostPrice"] || 0),
+          retailPercentage: Number(r["نسبة ربح التجزئة (Retail Percentage)"] || r["retailPercentage"] || 0),
+          retailPrice: Number(r["سعر بيع التجزئة (Retail Price)"] || r["retailPrice"] || 0),
+          sizes: String(r["المقاسات (Sizes)"] || r["sizes"] || "").split(",").map(s => s.trim()).filter(Boolean),
+          colors: [],
+          createdAt: r["تاريخ الإنشاء (Created At)"] || r["createdAt"] || new Date().toISOString()
+        }));
+        if (mappedProducts.length > 0) {
+          saveProducts(mappedProducts);
+        }
+      }
+
+      // Parse Workers.xlsx
+      const workersFile = zip.file("Workers.xlsx");
+      if (workersFile) {
+        const data = await workersFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedWorkers = rows.map((r: any) => ({
+          id: String(r["الرقم (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          name: String(r["اسم العامل (Worker Name)"] || r["name"] || ""),
+          code: String(r["كود العامل (Worker Code)"] || r["code"] || ""),
+          phone: String(r["الهاتف (Phone)"] || r["phone"] || ""),
+          baseSalary: Number(r["الراتب الأساسي (Base Salary)"] || r["baseSalary"] || 0),
+          dailyHours: Number(r["ساعات العمل اليومية (Daily Hours)"] || r["dailyHours"] || 8),
+          overtimeRate: Number(r["معدل العمل الإضافي (Overtime Rate)"] || r["overtimeRate"] || 2),
+          role: String(r["الوظيفة / الدور (Role)"] || r["role"] || ""),
+          monthlySalary: Number(r["الراتب الشهري (Monthly Salary)"] || r["monthlySalary"] || 0),
+          workingDaysPerMonth: Number(r["أيام العمل بالشهور (Working Days)"] || r["workingDaysPerMonth"] || 26),
+          absenceDeductionRate: Number(r["معدل خصم الغياب (Absence Deduction Rate)"] || r["absenceDeductionRate"] || 0),
+          notes: String(r["ملاحظات (Notes)"] || r["notes"] || ""),
+          createdAt: r["تاريخ التسجيل (Created At)"] || r["createdAt"] || new Date().toISOString(),
+          payrolls: []
+        }));
+        if (mappedWorkers.length > 0) {
+          saveWorkers(mappedWorkers);
+        }
+      }
+
+      // Parse Suppliers.xlsx
+      const suppliersFile = zip.file("Suppliers.xlsx");
+      if (suppliersFile) {
+        const data = await suppliersFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedSuppliers = rows.map((r: any) => ({
+          id: String(r["الرقم (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          name: String(r["اسم المورد (Supplier Name)"] || r["name"] || ""),
+          phone: String(r["الهاتف (Phone)"] || r["phone"] || ""),
+          address: String(r["العنوان (Address)"] || r["address"] || ""),
+          email: String(r["البريد الإلكتروني (Email)"] || r["email"] || ""),
+          createdAt: r["تاريخ التسجيل (Created At)"] || r["createdAt"] || new Date().toISOString()
+        }));
+        if (mappedSuppliers.length > 0) {
+          saveSuppliers(mappedSuppliers);
+        }
+      }
+
+      // Parse Orders.xlsx
+      const ordersFile = zip.file("Orders.xlsx");
+      if (ordersFile) {
+        const data = await ordersFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedOrders = rows.map((r: any) => ({
+          id: String(r["الرقم (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          date: String(r["التاريخ (Date)"] || r["date"] || ""),
+          customerName: String(r["اسم العميل (Customer Name)"] || r["customerName"] || ""),
+          phone: String(r["الهاتف (Phone)"] || r["phone"] || ""),
+          wilaya: String(r["الولاية (Wilaya)"] || r["wilaya"] || ""),
+          commune: String(r["البلدية (Commune)"] || r["commune"] || ""),
+          deliveryLocation: String(r["موقع التوصيل (Delivery Location)"] || r["deliveryLocation"] || ""),
+          deliveryCompany: String(r["شركة التوصيل (Delivery Company)"] || r["deliveryCompany"] || ""),
+          deliveryType: String(r["نوع التوصيل (Delivery Type)"] || r["deliveryType"] || ""),
+          deliveryPrice: Number(r["سعر التوصيل (Delivery Price)"] || r["deliveryPrice"] || 0),
+          totalPrice: Number(r["السعر الإجمالي (Total Price)"] || r["totalPrice"] || 0),
+          paidAmount: Number(r["المبلغ المدفوع (Paid Amount)"] || r["paidAmount"] || 0),
+          discount: Number(r["الخصم (Discount)"] || r["discount"] || 0),
+          customerPaysDelivery: r["العميل يدفع التوصيل (Customer Pays Delivery)"] === "نعم" || r["customerPaysDelivery"] === true,
+          isExchange: r["طلب استبدال (Is Exchange)"] === "نعم" || r["isExchange"] === true,
+          agentName: String(r["اسم الوكيل (Agent Name)"] || r["agentName"] || ""),
+          source: (r["المصدر (Source)"] === "فرعي" ? "2" : r["المصدر (Source)"] === "مرتجع" ? "3" : "1") as "1" | "2" | "3",
+          status: r["الحالة (Status)"] || r["status"] || "pending",
+          notes: String(r["ملاحظات (Notes)"] || r["notes"] || ""),
+          items: []
+        }));
+        if (mappedOrders.length > 0) {
+          saveOrders(mappedOrders);
+        }
+      }
+
+      // Parse Inventory.xlsx
+      const inventoryFile = zip.file("Inventory.xlsx");
+      if (inventoryFile) {
+        const data = await inventoryFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const basicInv: any[] = [];
+        const subInv: any[] = [];
+        rows.forEach((r: any) => {
+          const item = {
+            productId: String(r["رقم المنتج (Product ID)"] || r["productId"] || ""),
+            productName: String(r["اسم المنتج (Product Name)"] || r["productName"] || ""),
+            color: String(r["اللون (Color)"] || r["color"] || ""),
+            size: String(r["المقاس (Size)"] || r["size"] || ""),
+            quantity: Number(r["الكمية (Quantity)"] || r["quantity"] || 0)
+          };
+          if (r["النوع (Type)"] === "مخزن فرعي" || r["type"] === "sub") {
+            subInv.push(item);
+          } else {
+            basicInv.push({
+              productId: item.productId,
+              productName: item.productName,
+              color: item.color,
+              quantity: item.quantity
+            });
+          }
+        });
+        localStorage.setItem("corevia_inventory_basic_v1", JSON.stringify(basicInv));
+        localStorage.setItem("corevia_inventory_sub_v1", JSON.stringify(subInv));
+      }
+
+      // Parse Expenses.xlsx
+      const expensesFile = zip.file("Expenses.xlsx");
+      if (expensesFile) {
+        const data = await expensesFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedExpenses = rows.map((r: any) => ({
+          id: String(r["الرقم (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          title: String(r["عنوان المصروف (Title)"] || r["title"] || ""),
+          type: r["النوع (Type)"] === "ثابت" ? "fixed" : r["النوع (Type)"] === "متغير" ? "variable" : "ads",
+          amount: Number(r["المبلغ (Amount)"] || r["amount"] || 0),
+          date: String(r["التاريخ (Date)"] || r["date"] || ""),
+          isUSD: r["بالدولار (Is USD)"] === "نعم" || r["isUSD"] === true,
+          usdAmount: Number(r["المبلغ بالدولار (USD Amount)"] || r["usdAmount"] || 0),
+          exchangeRate: Number(r["سعر الصرف (Exchange Rate)"] || r["exchangeRate"] || 0),
+          notes: String(r["ملاحظات (Notes)"] || r["notes"] || ""),
+          createdAt: r["تاريخ الإنشاء (Created At)"] || r["createdAt"] || new Date().toISOString()
+        }));
+        if (mappedExpenses.length > 0) {
+          localStorage.setItem("corevia_unified_expenses_v1", JSON.stringify(mappedExpenses));
+        }
+      }
+
+      // Parse Accounts.xlsx
+      const accountsFile = zip.file("Accounts.xlsx");
+      if (accountsFile) {
+        const data = await accountsFile.async("arraybuffer");
+        const wb = XLSX.read(data, { type: "array" });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        const mappedSheets = rows.map((r: any) => ({
+          id: String(r["رقم الكشف (ID)"] || r["id"] || Math.floor(Math.random()*1000000)),
+          workerId: String(r["رقم العامل (Worker ID)"] || r["workerId"] || ""),
+          workerName: String(r["اسم العامل (Worker Name)"] || r["workerName"] || ""),
+          monthYear: String(r["الشهر/السنة (Month)"] || r["monthYear"] || ""),
+          dateFrom: String(r["من تاريخ (Date From)"] || r["dateFrom"] || ""),
+          dateTo: String(r["إلى تاريخ (Date To)"] || r["dateTo"] || ""),
+          overtimeHours: Number(r["ساعات العمل الإضافي (Overtime Hours)"] || r["overtimeHours"] || 0),
+          absenceDays: Number(r["أيام الغياب (Absence Days)"] || r["absenceDays"] || 0),
+          missingHours: Number(r["الساعات الغائبة (Missing Hours)"] || r["missingHours"] || 0),
+          paidVacationDays: Number(r["أيام الإجازة المدفوعة (Paid Vacation)"] || r["paidVacationDays"] || 0),
+          payStatus: (r["حالة الدفع (Status)"] === "مدفوع" || r["payStatus"] === "paid" ? "paid" : "unpaid") as "paid" | "unpaid",
+          calculatedSalary: {
+            baseSalary: Number(r["الراتب الأساسي (Base Salary)"] || r["baseSalary"] || 0),
+            netSalary: Number(r["صافي الراتب المستحق (Net Salary)"] || r["netSalary"] || 0),
+            dailyRate: Number(r["اليومية"] || 0),
+            hourlyRate: Number(r["الأجر الساعي"] || 0),
+            overtimePay: Number(r["مستحقات الإضافي"] || 0),
+            absenceDeduction: Number(r["خصومات الغياب"] || 0),
+            expensesDeduction: Number(r["خصومات المصاريف"] || 0)
+          },
+          expenses: [],
+          updatedAt: r["تاريخ التحديث (Updated At)"] || r["updatedAt"] || new Date().toISOString()
+        }));
+        if (mappedSheets.length > 0) {
+          saveSalarySheets(mappedSheets);
+        }
+      }
+
+      // Re-push fully restored local cache database up to cloud if configured
+      if (isSupabaseConfigured && supabase && session?.company_id) {
+        await pushFullTenantData(session.company_id, session?.email || "");
+      }
+
+      // Instantly trigger full parent viewport reloading sequence
+      if (onReloadAllStates) {
+        onReloadAllStates();
+      }
+
+      onTriggerNotification(
+        lang === "ar"
+          ? "🎉 تم استيراد كافة البيانات وإعادة بنائها ومزامنتها بنجاح مع السحاب والمزامنة المحلية!"
+          : "🎉 All data imported, reconstructed and synced successfully with cloud and local workspace!"
+      );
+    } catch (err: any) {
+      console.error("Import failed:", err);
+      onTriggerNotification(
+        lang === "ar"
+          ? `❌ فشل الاستيراد: يرجى التحقق من صحة ملف الـ ZIP المرفق. (${err.message || err})`
+          : `❌ Import failed: Please verify your ZIP file. (${err.message || err})`
+      );
+    } finally {
+      setIsImportingZIP(false);
+      // Reset input value
+      e.target.value = "";
+    }
+  };
+
   const tabNames = {
     ar: {
       company: "💼 إعدادات الشركة",
-      control: "🎮 التحكم في المنصة",
+      control: "☁️ ربط السحاب",
+      security: "🔐 الأمن وحفظ البيانات",
       integrations: "🚀 التكاملات"
     },
     fr: {
       company: "💼 Établissement",
-      control: "🎮 Contrôle Plateforme",
+      control: "☁️ Base de données Cloud",
+      security: "🔐 Sécurité & Verrouillage",
       integrations: "🚀 Intégrations"
     },
     en: {
       company: "💼 Company Profile",
-      control: "🎮 Platform Control",
+      control: "☁️ Cloud & Database",
+      security: "🔐 Security & Page Lock",
       integrations: "🚀 Integrations"
     }
   };
@@ -863,6 +1419,16 @@ $$;`;
           {activeTabsText.company}
         </button>
         <button
+          onClick={() => setActivePage("security")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+            activePage === "security"
+              ? "border-rose-500 text-rose-400"
+              : "border-transparent text-slate-450 hover:text-slate-200"
+          }`}
+        >
+          {activeTabsText.security}
+        </button>
+        <button
           onClick={() => setActivePage("control")}
           className={`px-4 py-2 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
             activePage === "control"
@@ -881,16 +1447,6 @@ $$;`;
           }`}
         >
           {activeTabsText.integrations}
-        </button>
-        <button
-          onClick={() => setActivePage("users")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-            activePage === "users"
-              ? "border-rose-500 text-rose-400"
-              : "border-transparent text-slate-450 hover:text-slate-200"
-          }`}
-        >
-          {lang === "ar" ? "👥 المستخدمين والصلاحيات" : "👥 Users & Permissions"}
         </button>
       </div>
 
@@ -1328,508 +1884,6 @@ $$;`;
               </div>
             )}
           </div>
-
-          {/* COPY SCRIPT SQL ACCORDION CARD */}
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-3">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-emerald-500" />
-                <h4 className="text-xs font-bold text-white">
-                  {isRtl ? "سكريبت تهيئة وجداول SQL أولية للبث" : "Supabase PostgreSQL Provisioning SQL Script"}
-                </h4>
-              </div>
-              <button
-                onClick={() => setShowSqlSchema(!showSqlSchema)}
-                className="text-xs font-extrabold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-3 py-1 bg-zinc-900 rounded-lg cursor-pointer"
-              >
-                {showSqlSchema ? (isRtl ? "إخفاء الكود ✕" : "Hide Script ✕") : (isRtl ? "عرض السكريبت 📄" : "Show Script 📄")}
-              </button>
-            </div>
-
-            <p className="text-xs text-zinc-450 leading-relaxed">
-              💡 {isRtl 
-                ? "لتهيئة الجداول وتجنيب المشروع أخطاء الاتصال، فقط انسخ هذا الكريبت المجمع، واذهب إلى لوحة تحكم Supabase > SQL Editor > اضغط على New Query والصق السكريبت واضغط على RUN لتثبيته في ثانية واحدة!"
-                : "To easily initialize Postgres tables for Corevia ERP, copy this optimized structure, and navigate to your Supabase Dashboard > SQL Editor > Paste and click RUN!"}
-            </p>
-
-            {showSqlSchema && (
-              <div className="space-y-2">
-                <div className="flex justify-end">
-                  <button
-                    onClick={copySqlSchemaText}
-                    className="flex items-center gap-1 text-[10px] uppercase font-black tracking-wider bg-emerald-500/15 border border-emerald-500/25 hover:bg-emerald-550/20 text-emerald-400 px-3 py-1.5 rounded-lg active:scale-95 transition cursor-pointer"
-                  >
-                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedSql ? (isRtl ? "تم النسخ!" : "COPIED!") : (isRtl ? "نسخ الكود بالكامل" : "COPY SCRIPT")}</span>
-                  </button>
-                </div>
-                
-                <div className="relative rounded-xl overflow-hidden border border-zinc-850 bg-zinc-950 max-h-72 overflow-y-auto" dir="ltr">
-                  <pre className="p-4 text-[10px] text-zinc-300 font-mono text-left whitespace-pre select-all">
-{`-- Corevia Enterprise Database SQL Schema & Security Hardening
--- Paste this script into your Supabase SQL Editor and run it in 1 click!
-
--- 0. Tenant Companies and Users (Visual View)
-create table if not exists corevia_companies (
-  id text primary key,
-  name text not null,
-  business_type text,
-  owner_name text,
-  phone text,
-  email text,
-  seatsLimit integer default 5,
-  accountStatus text default 'Active',
-  subscriptionPlan text default 'Standard_Monthly',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- Saas Users (Visual View)
-create table if not exists corevia_saas_users (
-  user_id text primary key,
-  company_id text references corevia_companies(id) on delete set null,
-  email text not null,
-  username text,
-  has_completed_onboarding boolean default false,
-  role text default 'admin',
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_company_users (
-  id text primary key,
-  company_id text default 'cop_default',
-  full_name text not null,
-  phone text not null,
-  email text,
-  username text,
-  job_title text,
-  password text,
-  assigned_responsibilities text,
-  allowed_pages jsonb default '[]'::jsonb,
-  status text default 'Active',
-  last_activity text,
-  auth_user_id text,
-  invitation_token text,
-  invitation_expires text,
-  invitation_used boolean default false,
-  deleted_at timestamp with time zone default null,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 1. Business Profile
-create table if not exists corevia_profile (
-  id text primary key,
-  company_id text default null,
-  business_name text not null,
-  business_type text,
-  currency text default 'DZD',
-  country text default 'Algeria',
-  owner_name text,
-  phone text,
-  email text,
-  address text,
-  website text,
-  commercial_registry text,
-  tax_number text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 2. Products and Inventory
-create table if not exists corevia_products (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  wholesale_cost_price numeric not null,
-  wholesale_percentage numeric,
-  wholesale_price numeric not null,
-  retail_cost_price numeric not null,
-  retail_percentage numeric,
-  retail_price numeric not null,
-  colors jsonb default '[]'::jsonb,
-  sizes text[] default '{}'::text[],
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_inventory_basic (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_sub (
-  id text primary key,
-  company_id text default 'cop_default',
-  product_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_inventory_return (
-  id text primary key,
-  company_id text default 'cop_default',
-  order_id text not null,
-  product_name text not null,
-  color text,
-  size text,
-  quantity numeric not null default 0,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
-create table if not exists corevia_stock_movements (
-  id text primary key,
-  company_id text default 'cop_default',
-  date timestamp with time zone default timezone('utc'::text, now()),
-  order_id text,
-  product_name text,
-  color text,
-  size text,
-  quantity_change numeric,
-  movement_type text,
-  source text
-);
-
--- 3. Corevia Orders
-create table if not exists corevia_orders (
-  id text primary key,
-  company_id text default 'cop_default',
-  date text not null,
-  customer_name text not null,
-  phone text not null,
-  wilaya text,
-  commune text,
-  delivery_location text,
-  delivery_company text,
-  delivery_type text,
-  delivery_price numeric default 0,
-  items jsonb default '[]'::jsonb,
-  total_price numeric not null,
-  paid_amount numeric default 0,
-  discount numeric default 0,
-  customer_pays_delivery boolean default true,
-  is_exchange boolean default false,
-  exchange_order_ref text,
-  agent_name text,
-  source text,
-  status text default 'pending',
-  return_cost numeric,
-  return_date text,
-  notes text,
-  deleted_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 4. Supplier Pipeline
-create table if not exists corevia_suppliers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  phone text,
-  address text,
-  email text,
-  created_at text,
-  updated_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 5. Business Expenses
-create table if not exists corevia_expenses (
-  id text primary key,
-  company_id text default 'cop_default',
-  type text not null,
-  name text,
-  amount numeric,
-  date text,
-  month_year text,
-  platform text,
-  amount_usd numeric,
-  exchange_rate numeric,
-  amount_currency numeric,
-  start_date text,
-  end_date text,
-  notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now()),
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
--- 6. Payroll & Workers
-create table if not exists corevia_workers (
-  id text primary key,
-  company_id text default 'cop_default',
-  name text not null,
-  code text,
-  phone text,
-  base_salary numeric,
-  daily_hours numeric,
-  overtime_rate numeric,
-  role text,
-  monthly_salary numeric,
-  payrolls jsonb default '[]'::jsonb,
-  created_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_salary_sheets (
-  id text primary key,
-  company_id text default 'cop_default',
-  worker_id text not null,
-  worker_name text,
-  month_year text,
-  date_from text,
-  date_to text,
-  overtime_hours numeric,
-  absence_days numeric,
-  missing_hours numeric,
-  paid_vacation_days numeric,
-  expenses jsonb default '[]'::jsonb,
-  pay_status text,
-  calculated_salary jsonb,
-  updated_at text,
-  created_by text,
-  updated_by text,
-  created_date text,
-  created_time text,
-  updated_date text,
-  updated_time text
-);
-
-create table if not exists corevia_employee_submissions (
-  id text primary key,
-  company_id text default 'cop_default',
-  employee_id text not null,
-  employee_name text not null,
-  type text not null,
-  amount numeric not null,
-  description text,
-  date text not null,
-  status text default 'pending',
-  created_at text
-);
-
--- 7. Realtime Chat Messages
-create table if not exists corevia_chat_messages (
-  id text primary key,
-  company_id text default 'cop_default',
-  sender_id text not null,
-  sender_name text not null,
-  sender_job_title text,
-  content text,
-  voice_url text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 8. Enterprise Core Activity logs audit trail
-create table if not exists corevia_activity_logs (
-  id text primary key,
-  company_id text default 'cop_default',
-  actor_name text not null,
-  actor_role text,
-  operation text not null,
-  item_type text,
-  old_value jsonb,
-  new_value jsonb,
-  ip_address text,
-  browser_details text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- --- SAAS MULTI-TENANT ISOLATION POLICIES (RLS SECURITY) ---
-alter table corevia_companies enable row level security;
-alter table corevia_saas_users enable row level security;
-alter table corevia_company_users enable row level security;
-alter table corevia_profile enable row level security;
-alter table corevia_products enable row level security;
-alter table corevia_inventory_basic enable row level security;
-alter table corevia_inventory_sub enable row level security;
-alter table corevia_inventory_return enable row level security;
-alter table corevia_stock_movements enable row level security;
-alter table corevia_orders enable row level security;
-alter table corevia_suppliers enable row level security;
-alter table corevia_expenses enable row level security;
-alter table corevia_workers enable row level security;
-alter table corevia_salary_sheets enable row level security;
-alter table corevia_employee_submissions enable row level security;
-alter table corevia_chat_messages enable row level security;
-alter table corevia_activity_logs enable row level security;
-
--- Define a policy helper query concept (Secure claim lookup)
-drop policy if exists tenant_isolation on corevia_companies;
-create policy tenant_isolation on corevia_companies for all using (
-  id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), id)
-);
-
-drop policy if exists tenant_isolation on corevia_saas_users;
-create policy tenant_isolation on corevia_saas_users for all using (
-  auth.uid() is null or user_id = auth.uid()
-);
-
-drop policy if exists tenant_isolation on corevia_company_users;
-create policy tenant_isolation on corevia_company_users for all using (
-  company_id = coalesce((select company_id from corevia_saas_users where user_id = auth.uid() limit 1), company_id)
-);
-
--- Apply standard tenant filter policies to remaining framework tables
-do $$
-declare
-  t text;
-begin
-  for t in array['corevia_profile', 'corevia_products', 'corevia_inventory_basic', 'corevia_inventory_sub', 'corevia_inventory_return', 'corevia_stock_movements', 'corevia_orders', 'corevia_suppliers', 'corevia_expenses', 'corevia_workers', 'corevia_salary_sheets', 'corevia_employee_submissions', 'corevia_chat_messages', 'corevia_activity_logs']
-  loop
-    execute format('drop policy if exists tenant_isolation_policy on %I;', t);
-    execute format('create policy tenant_isolation_policy on %I for all using (
-      company_id = coalesce(
-        (select company_id from corevia_saas_users where user_id = auth.uid() limit 1),
-        (select company_id from corevia_company_users where id = auth.uid() limit 1),
-        company_id
-      )
-    );', t);
-  end loop;
-end;
-$$;
-
--- --- DATABASE-FIRST SECURITY-CRITICAL PROCEDURAL FUNCTIONS ---
-
--- 1. Database-First Payroll Calculator RPC Function
-create or replace function calculate_worker_payroll_v1(
-  p_base_salary numeric,
-  p_working_days_count numeric,
-  p_absence_days_count numeric,
-  p_overtime_hours_count numeric,
-  p_daily_working_hours numeric,
-  p_overtime_multiplier numeric,
-  p_deductions_amount numeric,
-  p_bonuses_amount numeric
-)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_daily_base_rate numeric;
-  v_hourly_overtime_rate numeric;
-  v_overtime_pay numeric;
-  v_absence_deduction numeric;
-  v_net_salary numeric;
-begin
-  v_daily_base_rate := round((p_base_salary / coalesce(p_working_days_count, 22)), 4);
-  v_hourly_overtime_rate := round(((p_base_salary / (coalesce(p_working_days_count, 22) * coalesce(p_daily_working_hours, 8))) * coalesce(p_overtime_multiplier, 1.5)), 4);
-  v_overtime_pay := round((coalesce(p_overtime_hours_count, 0) * v_hourly_overtime_rate), 2);
-  v_absence_deduction := round((coalesce(p_absence_days_count, 0) * v_daily_base_rate), 2);
-  v_net_salary := round((p_base_salary + v_overtime_pay - v_absence_deduction - coalesce(p_deductions_amount, 0) + coalesce(p_bonuses_amount, 0)), 2);
-  if v_net_salary < 0 then
-    v_net_salary := 0;
-  end if;
-  return json_build_object(
-    'daily_base_rate', v_daily_base_rate,
-    'hourly_overtime_rate', v_hourly_overtime_rate,
-    'overtime_pay', v_overtime_pay,
-    'absence_deduction', v_absence_deduction,
-    'net_salary', v_net_salary
-  );
-end;
-$$;
-
--- 2. Subscription User Seats Verification RPC Function
-create or replace function check_seat_limit_v1(p_company_id text)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_limit integer;
-  v_used integer;
-  v_allowed boolean;
-begin
-  select coalesce(seatsLimit, 5) into v_limit from corevia_companies where id = p_company_id;
-  if v_limit is null then
-    v_limit := 5;
-  end if;
-  select count(*)::integer into v_used from corevia_company_users where company_id = p_company_id and (deleted_at is null);
-  v_used := v_used + 1; -- 1 Owner seat allocation
-  if v_used >= v_limit then
-    v_allowed := false;
-  else
-    v_allowed := true;
-  end if;
-  return json_build_object(
-    'limit', v_limit,
-    'used', v_used,
-    'allowed', v_allowed
-  );
-end;
-$$;
-
--- 3. Transacted Atomic Inventory & Stock Movements Process triggers
-create or replace function process_inventory_and_logs_v1(
-  p_company_id text,
-  p_order_id text,
-  p_product_name text,
-  p_color text,
-  p_size text,
-  p_qty_change numeric,
-  p_movement_type text,
-  p_source text
-)
-returns void
-language plpgsql
-security definer
-as $$
-begin
-  -- Insert auditable movement record
-  insert into corevia_stock_movements(id, company_id, order_id, product_name, color, size, quantity_change, movement_type, source)
-  values ('mv-' || floor(random() * 10000000)::text, p_company_id, p_order_id, p_product_name, p_color, p_size, p_qty_change, p_movement_type, p_source);
-  
-  -- Update primary sub inventory
-  if p_size is not null and p_size <> '' then
-    insert into corevia_inventory_sub(id, company_id, product_id, product_name, color, size, quantity)
-    values ('sub-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_size, p_qty_change)
-    on conflict (id) do update set quantity = corevia_inventory_sub.quantity + p_qty_change;
-  end if;
-
-  -- Update basic inventory
-  insert into corevia_inventory_basic(id, company_id, product_id, product_name, color, quantity)
-  values ('bsc-' || floor(random() * 10000000)::text, p_company_id, 'p-' || p_product_name, p_product_name, p_color, p_qty_change)
-  on conflict (id) do update set quantity = corevia_inventory_basic.quantity + p_qty_change;
-end;
-$$;`}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -1889,14 +1943,269 @@ $$;`}
         </div>
       )}
 
-      {activePage === "users" && (
-        <div className="bounce-in">
-          <UsersPermissionsView
-            lang={lang}
-            session={session}
-            onTriggerNotification={onTriggerNotification}
-            seatsLimit={seatsLimit}
-          />
+      {activePage === "security" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bounce-in" id="security_and_backup_container">
+          
+          {/* LEFT PANEL: Password Change & Page Security (Col-span 2) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* 1. Password Change Form */}
+            <div className={`bg-[#0c0c0e] border border-[#27272a] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <div className="flex items-center gap-3 border-b border-zinc-850 pb-4 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-white">
+                    {isRtl ? "تغيير كلمة مرور المدير الرئيسي" : "Change Main Administrator Password"}
+                  </h3>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    {isRtl 
+                      ? "قم بتحديث كلمة مرور حسابك لتأمين الدخول السحابي وسرية بيانات المؤسسة."
+                      : "Keep your system secure by periodically updating your cloud access credentials."}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-zinc-400 block">
+                      {isRtl ? "كلمة المرور الجديدة" : "New Password"}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showAdminPassword ? "text" : "password"}
+                        value={newAdminPassword}
+                        onChange={(e) => setNewAdminPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-[#18181b] border border-zinc-800 focus:border-rose-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none placeholder-zinc-650"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        className={`absolute inset-y-0 ${isRtl ? "left-3" : "right-3"} flex items-center text-zinc-550 hover:text-zinc-350 cursor-pointer`}
+                      >
+                        {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-zinc-400 block">
+                      {isRtl ? "تأكيد كلمة المرور" : "Confirm New Password"}
+                    </label>
+                    <input
+                      type={showAdminPassword ? "text" : "password"}
+                      value={confirmAdminPassword}
+                      onChange={(e) => setConfirmAdminPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-[#18181b] border border-zinc-800 focus:border-rose-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none placeholder-zinc-650"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={isAdminPasswordChanging}
+                    className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isAdminPasswordChanging ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>{isRtl ? "جاري تحديث كلمة المرور..." : "Updating..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>{isRtl ? "حفظ وتأمين كلمة المرور 🔐" : "Save and Secure Password 🔐"}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* 2. Page Locking & Passcode Protection Checklist */}
+            <div className={`bg-[#0c0c0e] border border-[#27272a] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-850 pb-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black text-white">
+                      {isRtl ? "قفل وتأمين صفحات النظام" : "Page Restriction & Lock Panel"}
+                    </h3>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      {isRtl 
+                        ? "حدد الصفحات الحساسة التي ترغب في قفلها بـ رمز سري (PIN) لمنع الموظفين العاديين من الاطلاع عليها."
+                        : "Check the modules that require the passcode PIN screen to enter and view."}
+                    </p>
+                  </div>
+                </div>
+
+                {/* PIN Configuration Field */}
+                <div className="flex items-center gap-2 bg-[#18181b] border border-zinc-800 rounded-xl px-3 py-1.5 self-start sm:self-center">
+                  <span className="text-[11px] font-black text-amber-500 font-mono">PIN:</span>
+                  <input
+                    type={showPasscodeVal ? "text" : "password"}
+                    value={passcode}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPasscode(val);
+                      onSaveProfile({ ...profile, passcode: val });
+                    }}
+                    placeholder="1234"
+                    maxLength={10}
+                    className="w-16 bg-transparent text-xs text-white font-black text-center focus:outline-none font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasscodeVal(!showPasscodeVal)}
+                    className="text-zinc-550 hover:text-zinc-350 cursor-pointer"
+                  >
+                    {showPasscodeVal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Grid Checklist of Locked Pages */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {[
+                  { id: "dashboard", ar: "📊 لوحة التحكم الرئيسية", en: "📊 Dashboard Summary" },
+                  { id: "orders", ar: "📦 المبيعات والطلبات", en: "📦 Sales & Orders" },
+                  { id: "inventory", ar: "🏭 إدارة المخازن والمخزون", en: "🏭 Warehouse Inventory" },
+                  { id: "products", ar: "🏷️ دليل المنتجات والأسعار", en: "🏷️ Products catalog" },
+                  { id: "workers", ar: "👥 شؤون العمال والرواتب", en: "👥 Workers & Payroll" },
+                  { id: "expenses", ar: "💸 المصاريف والتكاليف", en: "💸 Expenses & Costing" },
+                  { id: "suppliers", ar: "🤝 الموردون والمشتريات", en: "🤝 Suppliers & Purchases" },
+                  { id: "profit", ar: "📈 الأرباح والخسائر والتقارير", en: "📈 Profit Analysis" },
+                  { id: "yearly", ar: "📅 التقرير الإحصائي السنوي", en: "📅 Yearly Statistics" },
+                  { id: "communication", ar: "💬 التواصل الداخلي والرسائل", en: "💬 Internal Chat Room" },
+                  { id: "activity-log", ar: "📋 سجل تتبع عمليات النظام", en: "📋 System Activity Log" },
+                  { id: "users-permissions", ar: "👤 المستخدمون وصلاحياتهم", en: "👤 Users & Permissions" },
+                  { id: "trash", ar: "🗑️ سلة المحذوفات والمسترجعات", en: "🗑️ Database Trash Bin" },
+                  { id: "settings", ar: "⚙️ الإعدادات العامة للنظام", en: "⚙️ Global System Settings" },
+                ].map((p) => {
+                  const isLocked = selectedLockedPages.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleTogglePageLock(p.id)}
+                      className={`flex items-center justify-between p-3 rounded-xl border text-right transition cursor-pointer active:scale-97 ${
+                        isLocked 
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-200" 
+                          : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold leading-relaxed">
+                        {isRtl ? p.ar : p.en}
+                      </span>
+                      <div>
+                        {isLocked ? (
+                          <CheckSquare className="w-4 h-4 text-amber-500" />
+                        ) : (
+                          <Square className="w-4 h-4 text-zinc-600" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT PANEL: Excel Data Backup & Re-import Engine (Col-span 1) */}
+          <div className="space-y-6">
+            
+            {/* 3. Export / Import Card */}
+            <div className={`bg-[#0c0c0e] border border-[#27272a] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <div className="flex items-center gap-3 border-b border-zinc-850 pb-4 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-white">
+                    {isRtl ? "مستودع النسخ الاحتياطي وإدارته" : "Unified Excel Backup Repository"}
+                  </h3>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    {isRtl 
+                      ? "احفظ بيانات عملك بأمان كجداول إكسل منظمة في أرشيف ZIP مضغوط وسهل التحرير."
+                      : "Export or restore entire ERP modules as human-readable Excel tables."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                
+                {/* Info Tip */}
+                <div className="p-4 bg-zinc-900/60 border border-zinc-850 rounded-xl space-y-1.5">
+                  <p className="text-[11px] font-black text-zinc-200">
+                    {isRtl ? "الملفات التي يتم تصديرها داخل الأرشيف:" : "Files included in the ZIP archive:"}
+                  </p>
+                  <ul className="text-[10px] text-zinc-450 list-disc list-inside space-y-1 font-mono text-left" dir="ltr">
+                    <li>Products.xlsx (قائمة المنتجات والتفاصيل والأسعار)</li>
+                    <li>Workers.xlsx (كشف بيانات العمال وأكوادهم)</li>
+                    <li>Customers.xlsx (سجل العملاء وإحصائيات شرائهم)</li>
+                    <li>Suppliers.xlsx (تفاصيل الموردين وعناوينهم)</li>
+                    <li>Orders.xlsx (كامل الطلبيات والمبيعات بالتفصيل)</li>
+                    <li>Inventory.xlsx (بيانات وحركات مخزنك الأساسي والفرعي)</li>
+                    <li>Expenses.xlsx (دفتر جميع المصاريف والتكاليف الموحدة)</li>
+                    <li>Accounts.xlsx (كشوفات الحسابات والرواتب الشهرية للعمال)</li>
+                  </ul>
+                </div>
+
+                {/* BUTTON 1: DOWNLOAD ZIP BACKUP */}
+                <button
+                  type="button"
+                  onClick={handleExportExcelZIP}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-3 rounded-xl text-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isRtl ? "تنزيل النسخة الاحتياطية المجمعة (Excel ZIP)" : "Download Combined Backup (Excel ZIP)"}</span>
+                </button>
+
+                {/* SECTION 2: IMPORT/RESTORE ZIP */}
+                <div className="border-t border-zinc-850 pt-4 mt-2">
+                  <p className="text-[11px] font-extrabold text-zinc-350 mb-2">
+                    {isRtl ? "استرجاع ورفع نسخة احتياطية (Import Backup ZIP):" : "Restore / Re-import Backup ZIP:"}
+                  </p>
+                  
+                  <label className="relative border-2 border-dashed border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition">
+                    <input
+                      type="file"
+                      accept=".zip"
+                      disabled={isImportingZIP}
+                      onChange={handleImportExcelZIP}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:pointer-events-none"
+                    />
+                    <div className="w-10 h-10 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
+                      {isImportingZIP ? (
+                        <RefreshCw className="w-5 h-5 animate-spin text-rose-500" />
+                      ) : (
+                        <FileArchive className="w-5 h-5 text-indigo-400" />
+                      )}
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[11px] font-black text-white">
+                        {isRtl ? "اختر أو اسحب ملف الـ ZIP الاحتياطي هنا" : "Choose or drag backup ZIP file here"}
+                      </p>
+                      <p className="text-[9.5px] text-zinc-500 mt-1">
+                        {isRtl ? "يجب أن يحتوي الملف على جداول Excel الأصلية" : "File must contain structured Excel books"}
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
         </div>
       )}
 

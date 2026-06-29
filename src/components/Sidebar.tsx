@@ -168,21 +168,23 @@ export default function Sidebar({
     }
   }
 
+  const lockedPagesList = profile?.lockedPages || ["workers", "expenses", "suppliers", "profit", "yearly"];
+
   const baseNavItems = [
-    { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: false },
-    { id: "orders", label: t.navOrders, icon: ShoppingCart, isRestricted: false },
-    { id: "inventory", label: t.navInventory, icon: Package, isRestricted: false },
-    { id: "products", label: t.navProducts, icon: ShoppingBag, isRestricted: false },
-    { id: "workers", label: t.navWorkers, icon: Users, isRestricted: true },
-    { id: "expenses", label: t.navExpenses, icon: Receipt, isRestricted: true },
-    { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: true },
-    { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: true },
-    { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: true },
-    { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: false },
-    { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: false },
-    { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: false },
-    { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: false },
-    { id: "settings", label: t.navSettings, icon: Settings, isRestricted: false },
+    { id: "dashboard", label: t.navDashboard, icon: LayoutDashboard, isRestricted: lockedPagesList.includes("dashboard") },
+    { id: "orders", label: t.navOrders, icon: ShoppingCart, isRestricted: lockedPagesList.includes("orders") },
+    { id: "inventory", label: t.navInventory, icon: Package, isRestricted: lockedPagesList.includes("inventory") },
+    { id: "products", label: t.navProducts, icon: ShoppingBag, isRestricted: lockedPagesList.includes("products") },
+    { id: "workers", label: t.navWorkers, icon: Users, isRestricted: lockedPagesList.includes("workers") },
+    { id: "expenses", label: t.navExpenses, icon: Receipt, isRestricted: lockedPagesList.includes("expenses") },
+    { id: "suppliers", label: t.navSuppliers, icon: Landmark, isRestricted: lockedPagesList.includes("suppliers") },
+    { id: "profit", label: t.navProfitSummary, icon: LandmarkIcon, isRestricted: lockedPagesList.includes("profit") },
+    { id: "yearly", label: t.navYearly, icon: TrendingUp, isRestricted: lockedPagesList.includes("yearly") },
+    { id: "communication", label: lang === "ar" ? "التواصل الداخلي" : lang === "fr" ? "Communication" : "Team Chat", icon: MessageSquare, isRestricted: lockedPagesList.includes("communication") },
+    { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: lockedPagesList.includes("activity-log") },
+    { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: lockedPagesList.includes("users-permissions") },
+    { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: lockedPagesList.includes("trash") },
+    { id: "settings", label: t.navSettings, icon: Settings, isRestricted: lockedPagesList.includes("settings") },
   ];
 
   // Dynamically insert Super Admin dashboard tab if logged-in user is platform manager

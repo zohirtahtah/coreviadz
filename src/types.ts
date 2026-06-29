@@ -30,6 +30,7 @@ export interface BusinessProfile {
   rc1?: string;
   rc2?: string;
   nif?: string;
+  lockedPages?: string[];
 }
 
 export interface UserSession {
