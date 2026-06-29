@@ -149,12 +149,13 @@ export function initializeDatabase(forceReset = false, customProfile?: BusinessP
   const CLEAN_SLATE_MARKER = "corevia_clean_slate_marker_v16";
   const hasCleaned = localStorage.getItem(CLEAN_SLATE_MARKER);
   if (!hasCleaned || forceReset) {
-    // Preserve critical employee, submission, and auth session keys before clear
+    // Preserve critical employee, submission, auth session keys, and SaaS company cache before clear
     const preservedEmployees = localStorage.getItem("corevia_employees_list_v2");
     const preservedSubmissions = localStorage.getItem("corevia_employee_submissions_v2");
     const preservedSession1 = localStorage.getItem("corevia_session_v1");
     const preservedSession2 = localStorage.getItem("corevia_user_session_v1");
     const preservedActiveTab = localStorage.getItem("corevia_active_tab_v1");
+    const preservedSaaSCompanies = localStorage.getItem("corevia_saas_companies_v1");
 
     // Purge ALL keys in localStorage so that everything is 100% empty and logged out
     localStorage.clear();
@@ -167,6 +168,7 @@ export function initializeDatabase(forceReset = false, customProfile?: BusinessP
     if (preservedSession1) localStorage.setItem("corevia_session_v1", preservedSession1);
     if (preservedSession2) localStorage.setItem("corevia_user_session_v1", preservedSession2);
     if (preservedActiveTab) localStorage.setItem("corevia_active_tab_v1", preservedActiveTab);
+    if (preservedSaaSCompanies) localStorage.setItem("corevia_saas_companies_v1", preservedSaaSCompanies);
   }
 
   const hasProfile = localStorage.getItem(KEYS.PROFILE);
