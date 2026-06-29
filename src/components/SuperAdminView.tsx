@@ -76,10 +76,6 @@ export default function SuperAdminView({
 
       const saasCompanies: SaaSCompany[] = (realCompanies || [])
         .filter(rc => {
-          // Check that there is at least one associated user in corevia_saas_users (Issue 1)
-          const hasUser = (users || []).some(u => u.company_id === rc.id);
-          if (!hasUser) return false;
-
           const name = (rc.name || "").toLowerCase();
           const email = (rc.owner_email || rc.email || "").toLowerCase();
           return !(name.includes("test") || name.includes("proof corp") || email.includes("test.com"));

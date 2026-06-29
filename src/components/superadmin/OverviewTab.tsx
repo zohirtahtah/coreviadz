@@ -67,8 +67,12 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
         .from("corevia_products")
         .select("id");
 
-      // Only display metrics for companies that actually have registered users in Supabase (Issue 1)
-      const companyList = (companies || []).filter(c => validCompanyIds.has(c.id));
+      // Only display metrics for companies (excluding test accounts)
+      const companyList = (companies || []).filter(rc => {
+        const name = (rc.name || "").toLowerCase();
+        const email = (rc.owner_email || rc.email || "").toLowerCase();
+        return !(name.includes("test") || name.includes("proof corp") || email.includes("test.com"));
+      });
       const employeeList = employees || [];
       const orderList = orders || [];
       const productList = products || [];

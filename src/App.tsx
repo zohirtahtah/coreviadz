@@ -41,6 +41,7 @@ import UsersPermissionsView from "./components/UsersPermissionsView";
 import ActivityLogView from "./components/ActivityLogView";
 import MyProfileView from "./components/MyProfileView";
 import { CommunicationView } from "./components/CommunicationView";
+import SupportView from "./components/SupportView";
 import { logActivity } from "./activityLogService";
 import { SaaSCompany } from "./types";
 import { 
@@ -451,6 +452,7 @@ export default function App() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
 
   // Custom visual colors choices
   const [customColorsList, setCustomColorsList] = useState<string[]>([]);
@@ -1013,14 +1015,10 @@ export default function App() {
 
   // Onboarding Complete Callback
   const handleOnboardingComplete = async (newProfile: BusinessProfile) => {
-    if (session && session.user_id && session.company_id) {
-      await saveOnboardingCompletionInCloud(session.user_id, session.company_id, session.email, newProfile);
-    }
-
+    // 1. Sync states locally first so the user gets logged into the site instantly!
     localStorage.setItem("corevia_profile_v1", JSON.stringify(newProfile));
     initializeDatabase(true, newProfile); // Initializing clean ERP workspace with user-provided settings
     
-    // Sync states
     setProfile(newProfile);
     setHasCompletedOnboarding(true);
     setLang(newProfile.defaultLanguage);
@@ -1042,11 +1040,19 @@ export default function App() {
     localStorage.setItem("corevia_custom_colors_v1", JSON.stringify(defaults));
     setCustomColorsList(defaults);
 
-    // Initial silent synchronization of the empty tables structure to the tenant's database partition
-    if (session && session.company_id) {
-      pushFullTenantData(session.company_id, session.email).catch(err => {
-        console.warn("Initial multi-tenant sync warning (ignorable if tables not present yet):", err);
-      });
+    // 2. Persist to cloud in background without blocking UI entry
+    if (session && session.user_id && session.company_id) {
+      saveOnboardingCompletionInCloud(session.user_id, session.company_id, session.email, newProfile)
+        .then(() => {
+          if (session && session.company_id) {
+            pushFullTenantData(session.company_id, session.email).catch(err => {
+              console.warn("Initial multi-tenant sync background warning:", err);
+            });
+          }
+        })
+        .catch(err => {
+          console.error("Cloud onboarding background save failed:", err);
+        });
     }
 
     triggerToast(
@@ -1192,6 +1198,49 @@ export default function App() {
     return () => clearInterval(interval);
   }, [session, lang, supabase]);
 
+  // Fetch platform announcements from cloud db
+  const fetchAnnouncements = async () => {
+    if (!supabase || !session) return;
+    try {
+      const { data, error } = await supabase
+        .from("corevia_announcements")
+        .select("*")
+        .order("created_at", { ascending: false });
+      
+      if (error) {
+        if (error.code === "PGRST205" || error.message.includes("relation does not exist")) {
+          return;
+        }
+        throw error;
+      }
+      
+      const plan = saasAccount?.subscriptionPlan || "Trial";
+      const isExpired = isSuspended;
+      
+      const filtered = (data || []).filter((ann: any) => {
+        const target = (ann.target_type || ann.targetType || "all").toLowerCase();
+        if (target === "all") return true;
+        if (target === "trial" && String(plan).toLowerCase() === "trial") return true;
+        if (target === "expired" && isExpired) return true;
+        return false;
+      });
+      
+      setAnnouncements(filtered);
+    } catch (err) {
+      console.warn("Failed to fetch platform announcements:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (session && supabase) {
+      fetchAnnouncements();
+      const interval = setInterval(fetchAnnouncements, 30000);
+      return () => clearInterval(interval);
+    } else {
+      setAnnouncements([]);
+    }
+  }, [session, supabase, saasAccount, isSuspended]);
+
   // Dynamic low stock alerts calculated live
   const dynamicAlerts = useMemo(() => {
     const alertsList: string[] = [];
@@ -1229,8 +1278,12 @@ export default function App() {
       }
     });
 
+    announcements.forEach(ann => {
+      alertsList.push(`📢 [${ann.title}]: ${ann.content}`);
+    });
+
     return alertsList;
-  }, [basicInventory, subInventory, returnInventory, products, lang]);
+  }, [basicInventory, subInventory, returnInventory, products, lang, announcements]);
 
   // AUTOMATIC OWNERSHIP AUDIT TRAILING FOR REAL WORKSPACE COLLABORATION
   const decorateWithAudit = <T extends { id: string, createdBy?: string, createdDate?: string, createdTime?: string, updatedBy?: string, updatedDate?: string, updatedTime?: string }>(
@@ -2421,6 +2474,7 @@ export default function App() {
             orders={orders} 
             products={products} 
             lang={lang} 
+            announcements={announcements}
           />
         )}
 
@@ -2576,6 +2630,15 @@ export default function App() {
             onRestoreItem={handleRestoreItem}
             onClearTrashAll={handleClearTrashAll}
             lang={lang}
+          />
+        )}
+
+        {activeTab === "support" && (
+          <SupportView
+            lang={lang}
+            session={session}
+            profile={activeProfile}
+            onTriggerNotification={triggerToast}
           />
         )}
 

@@ -9,7 +9,7 @@ import { translations } from "../translations";
 import { 
   TrendingUp, TrendingDown, Layers, ShoppingBag, 
   Package, CheckCircle2, History, AlertCircle,
-  Palette, Ruler, MapPin, Award
+  Palette, Ruler, MapPin, Award, Megaphone
 } from "lucide-react";
 import { SmartCountryMap } from "./SmartCountryMap";
 
@@ -17,9 +17,10 @@ interface DashboardViewProps {
   orders: Order[];
   products: Product[];
   lang: LanguageType;
+  announcements?: any[];
 }
 
-export default function DashboardView({ orders, products, lang }: DashboardViewProps) {
+export default function DashboardView({ orders, products, lang, announcements }: DashboardViewProps) {
   const t = translations[lang];
   const isRtl = lang === "ar";
 
@@ -222,6 +223,49 @@ export default function DashboardView({ orders, products, lang }: DashboardViewP
           <p className="text-xs text-slate-400 mt-1">{t.appSubtitle}</p>
         </div>
       </div>
+
+      {/* Platform Announcements Ticker/Bulletin Board */}
+      {announcements && announcements.length > 0 && (
+        <div className="bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-indigo-950/40 border border-indigo-500/20 rounded-2xl p-4 md:p-5 relative overflow-hidden shadow-lg" id="dashboard_announcements_ticker">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className={`flex items-start gap-4 ${isRtl ? "text-right flex-row" : "text-left flex-row-reverse"}`}>
+            <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 rounded-xl shrink-0">
+              <Megaphone className="w-5 h-5 animate-bounce" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <div className={`flex justify-between items-center ${isRtl ? "flex-row-reverse" : "flex-row"}`}>
+                <h2 className="text-sm font-black text-white tracking-wide">
+                  {lang === "ar" ? "📢 إعلانات وتحديثات المنصة الهامة" : "📢 Important Platform Announcements"}
+                </h2>
+                <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/25 px-2 py-0.5 rounded-full font-bold">
+                  {announcements.length} {lang === "ar" ? "نشط" : "Active"}
+                </span>
+              </div>
+              <div className="space-y-3 mt-2">
+                {announcements.slice(0, 2).map((ann, idx) => (
+                  <div key={ann.id || idx} className="p-3 bg-black/35 border border-zinc-800/60 rounded-xl hover:border-zinc-700/60 transition-colors">
+                    <div className={`flex justify-between items-center gap-2 ${isRtl ? "flex-row-reverse" : "flex-row"} mb-1`}>
+                      <h3 className={`text-xs font-bold text-white flex items-center gap-1.5 ${isRtl ? "flex-row-reverse" : "flex-row"}`}>
+                        {ann.type === "Warning" && "⚠️"}
+                        {ann.type === "Critical" && "🚨"}
+                        {ann.type === "Maintenance" && "🔧"}
+                        {ann.type === "New Feature" && "🚀"}
+                        <span>{ann.title}</span>
+                      </h3>
+                      <span className="text-[9px] text-zinc-400 font-mono">
+                        {ann.created_at ? ann.created_at.split("T")[0] : ""}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed font-sans mt-1 whitespace-pre-line">
+                      {ann.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* QUICK STATS CARDS GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard_state_badges">

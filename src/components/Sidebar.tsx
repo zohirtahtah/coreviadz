@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, ShoppingBag, Users, 
   Receipt, Landmark, LandmarkIcon, TrendingUp, Trash2, Settings,
   Globe, Sun, Moon, Bell, Lock, Unlock, KeyRound, Eye, EyeOff, LogOut, Check,
-  Shield, History, Menu, X, MessageSquare, UserCheck
+  Shield, History, Menu, X, MessageSquare, UserCheck, HelpCircle
 } from "lucide-react";
 import { LanguageType, ThemeType, BusinessProfile } from "../types";
 import { translations } from "../translations";
@@ -184,6 +184,7 @@ export default function Sidebar({
     { id: "activity-log", label: lang === "ar" ? "سجل العمليات" : lang === "fr" ? "Journal d'Activité" : "Activity Log", icon: History, isRestricted: lockedPagesList.includes("activity-log") },
     { id: "users-permissions", label: lang === "ar" ? "المستخدمون والصلاحيات" : lang === "fr" ? "Utilisateurs & Permissions" : "Users & Permissions", icon: Shield, isRestricted: lockedPagesList.includes("users-permissions") },
     { id: "trash", label: t.navTrash, icon: Trash2, isRestricted: lockedPagesList.includes("trash") },
+    { id: "support", label: lang === "ar" ? "الدعم الفني" : lang === "fr" ? "Support Technique" : "Contact Support", icon: HelpCircle, isRestricted: false },
     { id: "settings", label: t.navSettings, icon: Settings, isRestricted: lockedPagesList.includes("settings") },
   ];
 

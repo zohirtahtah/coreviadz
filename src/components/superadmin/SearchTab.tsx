@@ -52,8 +52,7 @@ export default function SearchTab({ isRtl, onTriggerNotification, onSelectCompan
         supabase.from("corevia_saas_users").select("company_id")
       ]);
 
-      const validCompanyIds = new Set((saasUsers || []).map(u => u.company_id));
-      const filteredCompanies = (cos || []).filter(c => validCompanyIds.has(c.id));
+      const filteredCompanies = cos || [];
 
       setResults({
         companies: filteredCompanies,
