@@ -60,12 +60,15 @@ export default function SettingsView({
 
   // State variables synchronized with user props
   const [bName, setBName] = useState(profile.businessName || "");
+  const [bOwnerName, setBOwnerName] = useState(profile.ownerName || "");
   const [bEmail, setBEmail] = useState(profile.email || "");
   const [bPhone, setBPhone] = useState(profile.phone || "");
   const [bCurrency, setBCurrency] = useState(profile.currency || "DZD");
   const [bCountry, setBCountry] = useState<"Algeria" | "France" | "Morocco" | "Other">(profile.country || "Algeria");
   const [bRegistry, setBRegistry] = useState(profile.commercialRegistry || "");
   const [bAddress, setBAddress] = useState(profile.address || "");
+  const [bWebsite, setBWebsite] = useState(profile.website || "");
+  const [bTaxNumber, setBTaxNumber] = useState(profile.taxNumber || "");
   const [bRC1, setBRC1] = useState(profile.rc1 || "");
   const [bRC2, setBRC2] = useState(profile.rc2 || "");
   const [bNIF, setBNIF] = useState(profile.nif || "");
@@ -74,12 +77,15 @@ export default function SettingsView({
   // Synchronize local states when parent profile changes
   React.useEffect(() => {
     setBName(profile.businessName || "");
+    setBOwnerName(profile.ownerName || "");
     setBEmail(profile.email || "");
     setBPhone(profile.phone || "");
     setBCurrency(profile.currency || "DZD");
     setBCountry(profile.country || "Algeria");
     setBRegistry(profile.commercialRegistry || "");
     setBAddress(profile.address || "");
+    setBWebsite(profile.website || "");
+    setBTaxNumber(profile.taxNumber || "");
     setBRC1(profile.rc1 || "");
     setBRC2(profile.rc2 || "");
     setBNIF(profile.nif || "");
@@ -774,6 +780,7 @@ $$;`;
     const modified: BusinessProfile = {
       ...profile,
       businessName: bName,
+      ownerName: bOwnerName,
       email: bEmail,
       phone: bPhone,
       currency: bCurrency,
@@ -781,6 +788,8 @@ $$;`;
       commercialRegistry: bRegistry,
       passcode,
       address: bAddress,
+      website: bWebsite,
+      taxNumber: bTaxNumber,
       rc1: bRC1,
       rc2: bRC2,
       nif: bNIF,
@@ -1460,7 +1469,7 @@ $$;`;
 
             <form onSubmit={handleUpdateBrandSettings} className="space-y-3.5 text-xs font-sans">
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* Business Name */}
                 <div>
                   <label className="block text-slate-400 font-bold mb-1 text-[10.5px]">{currentT.labelBName}</label>
@@ -1469,6 +1478,21 @@ $$;`;
                     required
                     value={bName}
                     onChange={(e) => setBName(e.target.value)}
+                    className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs ${isRtl ? "text-right" : "text-left"}`}
+                  />
+                </div>
+
+                {/* Owner Name */}
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1 text-[10.5px]">
+                    {isRtl ? "اسم صاحب الشركة (المالك) *" : "Owner / Manager Name *"}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={bOwnerName}
+                    onChange={(e) => setBOwnerName(e.target.value)}
+                    placeholder="Owner Name"
                     className={`w-full bg-[#040406] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs ${isRtl ? "text-right" : "text-left"}`}
                   />
                 </div>
@@ -1650,6 +1674,32 @@ $$;`;
                       onChange={(e) => setBNIF(e.target.value)}
                       placeholder="002016098765432"
                       className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg font-mono text-xs focus:outline-none focus:border-rose-500 placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  {/* Website */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1 text-[10.5px]">{isRtl ? "الموقع الإلكتروني (Website)" : "Website"}</label>
+                    <input
+                      type="url"
+                      value={bWebsite}
+                      onChange={(e) => setBWebsite(e.target.value)}
+                      placeholder="https://example.com"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
+                    />
+                  </div>
+
+                  {/* Tax Number */}
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1 text-[10.5px]">{isRtl ? "الرقم الضريبي (Tax ID)" : "Tax ID"}</label>
+                    <input
+                      type="text"
+                      value={bTaxNumber}
+                      onChange={(e) => setBTaxNumber(e.target.value)}
+                      placeholder="123456789"
+                      className={`w-full bg-[#09090b] border border-[#27272a] p-1.8 text-white rounded-lg focus:outline-none focus:border-rose-500 text-xs placeholder-slate-500 ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </div>
                 </div>

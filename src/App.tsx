@@ -334,68 +334,42 @@ export default function App() {
   // ==========================================
   // MULTI-TENANT SaaS COMPLETED INTEGRATION
   // ==========================================
-  const getSaaSAccountForSession = () => {
-    if (!session || !session.email) return null;
-    const stored = localStorage.getItem("corevia_saas_companies_v1");
-    if (!stored) return null;
-    try {
-      const parsed: SaaSCompany[] = JSON.parse(stored);
-      const found = parsed.find(c => c.email.toLowerCase() === session.email.toLowerCase());
-      if (found) {
-        if (!found.otpCode || found.otpCode.trim() === "") {
-          found.otpCode = "123456";
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-        }
+  // ==========================================
+  // MULTI-TENANT SaaS COMPLETED INTEGRATION
+  // ==========================================
+  const saasAccount = dbCompanyRecord ? {
+    id: dbCompanyRecord.id,
+    companyName: dbCompanyRecord.name || dbCompanyRecord.companyName || "Your Company",
+    ownerName: dbCompanyRecord.owner_name || dbCompanyRecord.ownerName || "Owner",
+    email: dbCompanyRecord.email || dbCompanyRecord.owner_email || "",
+    phone: dbCompanyRecord.phone || "",
+    country: dbCompanyRecord.country || "Algeria",
+    registrationDate: dbCompanyRecord.registration_date || dbCompanyRecord.created_at,
+    emailVerified: dbCompanyRecord.email_verified !== false,
+    subscriptionPlan: dbCompanyRecord.subscription_plan || dbCompanyRecord.subscriptionPlan || "Trial",
+    seatsLimit: dbCompanyRecord.seats_limit || dbCompanyRecord.seatsLimit || 5,
+    accountStatus: dbCompanyRecord.subscription_status || dbCompanyRecord.status || dbCompanyRecord.accountStatus || "Active",
+    otpCode: dbCompanyRecord.otp_code || dbCompanyRecord.otpCode || "123456"
+  } : (session ? {
+    id: session.company_id || "",
+    companyName: "Loading...",
+    ownerName: session.username || "Owner",
+    email: session.email || "",
+    phone: "",
+    country: "Algeria",
+    registrationDate: new Date().toISOString(),
+    emailVerified: true, // assume true temporarily to avoid flickering before load
+    subscriptionPlan: "Trial",
+    seatsLimit: 5,
+    accountStatus: "Active",
+    otpCode: "123456"
+  } : null);
 
-        // Auto-heal of account status to Active if user-onboarding is completed
-        const hasOnboarded = getBusinessProfile()?.businessName;
-        if (found.accountStatus === "Pending Verification" && hasOnboarded) {
-          found.accountStatus = "Active";
-          found.emailVerified = true;
-          localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-          if (supabase) {
-            supabase
-              .from("corevia_companies")
-              .update({ accountStatus: "Active" })
-              .eq("id", found.id)
-              .then(() => console.log("[Auto-Heal] Activated company on login."));
-          }
-        }
-
-        // Automated Check for Expired Subscriptions
-        if (found.expirationDate && found.accountStatus === "Active") {
-          const expTime = new Date(found.expirationDate).getTime();
-          if (expTime < Date.now()) {
-            console.warn(`[Auto-Billing] Subscription expired for ${found.companyName} on ${found.expirationDate}. Downgrading status to Suspended.`);
-            found.accountStatus = "Suspended";
-            localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(parsed));
-            
-            // Sync status to Supabase in background
-            if (supabase) {
-              supabase
-                .from("corevia_companies")
-                .update({ accountStatus: "Suspended" })
-                .eq("id", found.id)
-                .then(() => {
-                  console.log("[Auto-Billing] Safely updated company status on Supabase.");
-                });
-            }
-          }
-        }
-
-        return found;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  };
-
-  const saasAccount = getSaaSAccountForSession();
+  const getSaaSAccountForSession = () => saasAccount;
   
   // Resolve properties using either Supabase DB company record (priority/live) or local storage (compatibility)
   const resolvedStatus = dbCompanyRecord 
-    ? (dbCompanyRecord.subscription_status || dbCompanyRecord.accountStatus || "Active") 
+    ? (dbCompanyRecord.subscription_status || dbCompanyRecord.status || dbCompanyRecord.accountStatus || "Active") 
     : (saasAccount ? saasAccount.accountStatus : "Active");
 
   const resolvedStatusLower = String(resolvedStatus).toLowerCase();
@@ -1957,13 +1931,27 @@ export default function App() {
         setLang={setLang}
         theme={theme}
         setTheme={setTheme}
-        onAuthSuccess={(newSession) => {
+        onAuthSuccess={async (newSession) => {
           setSession(newSession);
           saveUserSession(newSession);
           
           // Auto sync tenant list on login or sign-up!
           if (newSession && newSession.email) {
             registerSaaSCompanyOnLoginAndSignUp(newSession.email, newSession.username || newSession.email.split("@")[0]);
+          }
+
+          if (newSession) {
+            try {
+              const meta = await fetchUserSaaSMeta(
+                newSession.user_id || newSession.userId || "",
+                newSession.email,
+                newSession.username || newSession.email.split("@")[0]
+              );
+              setHasCompletedOnboarding(meta.hasCompletedOnboarding);
+            } catch (err) {
+              console.error("Failed to fetch user SaaS metadata on auth success:", err);
+              setHasCompletedOnboarding(false);
+            }
           }
         }}
         onTriggerNotification={triggerToast}
