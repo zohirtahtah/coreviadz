@@ -463,8 +463,8 @@ app.post("/api/auth/login", async (req, res) => {
     // Set Cookie with strict secure flags
     res.cookie("corevia_session_v1_cookie", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
       path: "/"
     });
@@ -979,8 +979,8 @@ app.post("/api/auth/change-first-login-password", async (req, res) => {
 
     res.cookie("corevia_session_v1_cookie", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: "/"
     });
@@ -1323,8 +1323,8 @@ app.post("/api/auth/claim-invite", async (req, res) => {
 
     res.cookie("corevia_session_v1_cookie", jwtToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
       path: "/"
     });
@@ -1448,20 +1448,51 @@ app.get("/api/superadmin/companies", requireSuperAdmin, async (req, res) => {
     let profiles: any[] = [];
 
     if (pgPool) {
-      const usersRes = await pgPool.query("SELECT * FROM corevia_saas_users");
-      const companiesRes = await pgPool.query("SELECT * FROM corevia_companies");
-      const profilesRes = await pgPool.query("SELECT * FROM corevia_profile");
-      users = usersRes.rows || [];
-      companies = companiesRes.rows || [];
-      profiles = profilesRes.rows || [];
+      try {
+        const usersRes = await pgPool.query("SELECT * FROM corevia_saas_users");
+        users = usersRes.rows || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_saas_users from pgPool:", err.message);
+      }
+
+      try {
+        const companiesRes = await pgPool.query("SELECT * FROM corevia_companies");
+        companies = companiesRes.rows || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_companies from pgPool:", err.message);
+      }
+
+      try {
+        const profilesRes = await pgPool.query("SELECT * FROM corevia_profile");
+        profiles = profilesRes.rows || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_profile from pgPool:", err.message);
+      }
     } else {
       // Fallback using high-privilege context (or standard server-side client)
-      const { data: dbUsers } = await supabase.from("corevia_saas_users").select("*");
-      const { data: dbCompanies } = await supabase.from("corevia_companies").select("*");
-      const { data: dbProfiles } = await supabase.from("corevia_profile").select("*");
-      users = dbUsers || [];
-      companies = dbCompanies || [];
-      profiles = dbProfiles || [];
+      try {
+        const { data: dbUsers, error: uErr } = await supabase.from("corevia_saas_users").select("*");
+        if (uErr) throw uErr;
+        users = dbUsers || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_saas_users from Supabase:", err.message);
+      }
+
+      try {
+        const { data: dbCompanies, error: cErr } = await supabase.from("corevia_companies").select("*");
+        if (cErr) throw cErr;
+        companies = dbCompanies || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_companies from Supabase:", err.message);
+      }
+
+      try {
+        const { data: dbProfiles, error: pErr } = await supabase.from("corevia_profile").select("*");
+        if (pErr) throw pErr;
+        profiles = dbProfiles || [];
+      } catch (err: any) {
+        console.warn("[Superadmin API] Failed to query corevia_profile from Supabase:", err.message);
+      }
     }
 
     // Merge in local companies & users so registered ones (including local-only ones) always show up
@@ -1486,6 +1517,64 @@ app.get("/api/superadmin/companies", requireSuperAdmin, async (req, res) => {
         users[matchedIdx] = { ...users[matchedIdx], ...lu };
       }
     });
+
+    // Merge in actual Supabase Auth accounts if service role is available
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+    if (serviceRoleKey) {
+      try {
+        const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false }
+        });
+        const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (!authErr && authData && authData.users) {
+          (authData.users as any[]).forEach(au => {
+            const hasSaaSUser = users.some(u => u.user_id === au.id || u.email?.toLowerCase().trim() === au.email?.toLowerCase().trim());
+            if (!hasSaaSUser) {
+              const companyId = au.user_metadata?.company_id || `cop_${au.id.substring(0, 15)}`;
+              users.push({
+                user_id: au.id,
+                company_id: companyId,
+                email: au.email,
+                username: au.user_metadata?.full_name || au.user_metadata?.username || au.email?.split("@")[0] || "User",
+                role: au.user_metadata?.role || "admin",
+                created_at: au.created_at
+              });
+            }
+
+            const targetCompanyId = au.user_metadata?.company_id || `cop_${au.id.substring(0, 15)}`;
+            const hasCompany = companies.some(c => c.id === targetCompanyId || c.email?.toLowerCase().trim() === au.email?.toLowerCase().trim());
+            if (!hasCompany) {
+              const todayStr = au.created_at ? au.created_at.split("T")[0] : new Date().toISOString().split("T")[0];
+              const trialEndStr = new Date(new Date(todayStr).getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+              companies.push({
+                id: targetCompanyId,
+                name: au.user_metadata?.company_name || au.user_metadata?.business_name || `Company (${au.email?.split("@")[0]})`,
+                owner_name: au.user_metadata?.full_name || au.user_metadata?.owner_name || au.email?.split("@")[0] || "User",
+                email: au.email,
+                owner_email: au.email,
+                phone: au.user_metadata?.phone || "",
+                country: au.user_metadata?.country || "Algeria",
+                registration_date: todayStr,
+                trial_start_date: todayStr,
+                trial_end_date: trialEndStr,
+                accountStatus: au.email_confirmed_at ? "Active" : "Pending Verification",
+                status: au.email_confirmed_at ? "Active" : "pending_verification",
+                subscription_status: "trial",
+                subscription_plan: "Trial",
+                subscriptionPlan: "Trial",
+                seats_limit: 5,
+                seatsLimit: 5,
+                email_verified: !!au.email_confirmed_at,
+                emailVerified: !!au.email_confirmed_at,
+                created_at: au.created_at
+              });
+            }
+          });
+        }
+      } catch (authErr) {
+        console.warn("[Superadmin API] Failed to fetch Supabase Auth users:", authErr);
+      }
+    }
 
     return res.status(200).json({
       users,
@@ -1746,7 +1835,7 @@ app.post("/api/auth/resend-verification", async (req, res) => {
 
 // POST /api/auth/logout -> Wipes session credentials cookie
 app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("corevia_session_v1_cookie", { path: "/" });
+  res.clearCookie("corevia_session_v1_cookie", { path: "/", secure: true, sameSite: "none" });
   return res.status(200).json({ success: true });
 });
 
@@ -1811,7 +1900,7 @@ app.get("/api/auth/session", async (req, res) => {
       }
     });
   } catch (err) {
-    res.clearCookie("corevia_session_v1_cookie", { path: "/" });
+    res.clearCookie("corevia_session_v1_cookie", { path: "/", secure: true, sameSite: "none" });
     return res.status(401).json({ authenticated: false, error: "Stale or compromised JWT session credentials." });
   }
 });

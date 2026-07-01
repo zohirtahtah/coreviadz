@@ -9,13 +9,15 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar, Legend
 } from "recharts";
+import { SaaSCompany } from "../../types";
 
 interface OverviewTabProps {
   isRtl: boolean;
+  companies: SaaSCompany[];
   onTriggerNotification: (msg: string, type: "success" | "info") => void;
 }
 
-export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTabProps) {
+export default function OverviewTab({ isRtl, companies, onTriggerNotification }: OverviewTabProps) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalCompanies: 0,
@@ -39,12 +41,6 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
   const loadDashboardStats = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Companies
-      const { data: companies, error: coErr } = await supabase
-        .from("corevia_companies")
-        .select("*");
-      if (coErr) throw coErr;
-
       // 1b. Fetch SaaS Users (Issue 1) to verify user accounts actually exist
       const { data: saasUsers } = await supabase
         .from("corevia_saas_users")
@@ -67,12 +63,8 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
         .from("corevia_products")
         .select("id");
 
-      // Only display metrics for companies (excluding test accounts)
-      const companyList = (companies || []).filter(rc => {
-        const name = (rc.name || "").toLowerCase();
-        const email = (rc.owner_email || rc.email || "").toLowerCase();
-        return !(name.includes("test") || name.includes("proof corp") || email.includes("test.com"));
-      });
+      // Show ALL companies registered in Supabase
+      const companyList = companies || [];
       const employeeList = employees || [];
       const orderList = orders || [];
       const productList = products || [];
@@ -99,13 +91,13 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
 
       companyList.forEach(c => {
         // Status checks
-        const status = c.accountStatus || c.accountstatus || "Active";
+        const status = c.accountStatus || "Active";
         if (status === "Active") activeCompanies++;
         if (status === "Suspended") suspendedCompanies++;
 
         // Plan checks
-        const plan = c.subscriptionPlan || c.subscriptionplan || "Starter";
-        if (plan.toLowerCase().includes("starter") || plan.toLowerCase().includes("free")) {
+        const plan = c.subscriptionPlan || "Basic";
+        if (plan.toLowerCase().includes("starter") || plan.toLowerCase().includes("free") || plan.toLowerCase().includes("trial")) {
           trialCompanies++;
           planCounts.Starter++;
           totalRevenue += 0;
@@ -124,14 +116,15 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
         }
 
         // Expiration check
-        const expiry = c.expirationDate || c.expirationdate || "";
+        const expiry = c.expirationDate || "";
         if (expiry && expiry < todayStr) {
           expiredCompanies++;
         }
 
-        // Online check (within 15 mins)
-        const updatedAt = c.created_at || c.updated_at || "";
-        if (updatedAt && new Date(updatedAt) > fifteenMinsAgo) {
+        // Online check (within 15 mins or active string indicators)
+        const lastLogin = c.lastLogin || "";
+        const isRecent = lastLogin.includes("Just now") || lastLogin.includes("Active now") || lastLogin.includes("minutes ago");
+        if (isRecent) {
           onlineCompanies++;
         }
       });
@@ -142,17 +135,40 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
       const storageMb = (kbSize / 1024).toFixed(2);
       const dbMb = (kbSize * 1.25 / 1024).toFixed(2); // indices included
 
-      // Generate Revenue Timeline Chart data
-      const months = isRtl 
-        ? ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو"]
-        : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+      // Calculate real signups and monthly cumulative revenue growth (no random/fake math)
+      const monthsEn = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+      const monthsAr = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو"];
       
-      const chartData = months.map((m, idx) => {
-        const factor = 1 + idx * 0.15 + (Math.random() * 0.1 - 0.05);
+      const chartData = monthsEn.map((m, idx) => {
+        const targetMonthNum = idx + 1; // 1-indexed (Jan = 1, Jul = 7)
+        const registeredUpToMonth = companyList.filter(c => {
+          const regDate = c.registrationDate || "";
+          if (!regDate) return true;
+          const dateObj = new Date(regDate);
+          if (isNaN(dateObj.getTime())) return true;
+          const regMonth = dateObj.getMonth() + 1;
+          const regYear = dateObj.getFullYear();
+          return regYear < 2026 || (regYear === 2026 && regMonth <= targetMonthNum);
+        });
+
+        let monthlyRevenue = 0;
+        registeredUpToMonth.forEach(c => {
+          const plan = c.subscriptionPlan || "Basic";
+          if (plan.toLowerCase().includes("pro")) {
+            monthlyRevenue += 79;
+          } else if (plan.toLowerCase().includes("business")) {
+            monthlyRevenue += 149;
+          } else if (plan.toLowerCase().includes("enterprise")) {
+            monthlyRevenue += 299;
+          } else if (!plan.toLowerCase().includes("starter") && !plan.toLowerCase().includes("free")) {
+            monthlyRevenue += 499;
+          }
+        });
+
         return {
-          name: m,
-          Revenue: Math.round(totalRevenue * factor * 10) / 10,
-          Companies: Math.round(totalCompanies * (0.4 + idx * 0.1))
+          name: isRtl ? monthsAr[idx] : m,
+          Revenue: Math.round(monthlyRevenue * 10) / 10,
+          Companies: registeredUpToMonth.length
         };
       });
 
@@ -161,22 +177,22 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
       // Pie chart distribution
       const pieData = Object.keys(planCounts).map(k => ({
         name: k,
-        value: planCounts[k] || (k === "Starter" ? 1 : 0) // fallback to 1 starter if empty
+        value: planCounts[k]
       }));
       setPlanDistribution(pieData);
 
-      // Set state
+      // Set state using strictly real counts
       setStats({
         totalCompanies,
         activeCompanies,
         suspendedCompanies,
         trialCompanies,
         expiredCompanies,
-        totalEmployees: employeeList.length || 3,
-        totalOrders: orderList.length || 10,
-        totalProducts: productList.length || 5,
+        totalEmployees: employeeList.length,
+        totalOrders: orderList.length,
+        totalProducts: productList.length,
         totalRevenue: Math.round(totalRevenue),
-        onlineCompanies: onlineCompanies || Math.min(3, totalCompanies),
+        onlineCompanies: onlineCompanies,
         storageUsage: `${storageMb} MB`,
         databaseSize: `${dbMb} MB`,
         lastBackupDate: new Date().toLocaleDateString()
@@ -192,37 +208,7 @@ export default function OverviewTab({ isRtl, onTriggerNotification }: OverviewTa
 
   useEffect(() => {
     loadDashboardStats();
-
-    // Live synchronization (Issue 7): Automatically refresh when any company or user changes
-    const companiesChannel = supabase
-      .channel("overview_realtime_companies")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "corevia_companies" },
-        () => {
-          console.log("Realtime overview sync: corevia_companies updated, reloading...");
-          loadDashboardStats();
-        }
-      )
-      .subscribe();
-
-    const usersChannel = supabase
-      .channel("overview_realtime_users")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "corevia_saas_users" },
-        () => {
-          console.log("Realtime overview sync: corevia_saas_users updated, reloading...");
-          loadDashboardStats();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      companiesChannel.unsubscribe();
-      usersChannel.unsubscribe();
-    };
-  }, []);
+  }, [companies]);
 
   const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#a855f7"];
 

@@ -21,7 +21,9 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/superadmin/support-tickets");
+      const response = await fetch("/api/superadmin/support-tickets", {
+        credentials: "include"
+      });
       if (!response.ok) {
         throw new Error(`Failed to load support tickets: ${response.statusText}`);
       }
@@ -36,7 +38,9 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
 
   const loadMessages = async (ticketId: string) => {
     try {
-      const response = await fetch(`/api/superadmin/support-messages/${ticketId}`);
+      const response = await fetch(`/api/superadmin/support-messages/${ticketId}`, {
+        credentials: "include"
+      });
       if (!response.ok) {
         throw new Error(`Failed to load messages: ${response.statusText}`);
       }
@@ -83,7 +87,8 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
       const response = await fetch("/api/superadmin/support-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        credentials: "include"
       });
 
       if (!response.ok) {

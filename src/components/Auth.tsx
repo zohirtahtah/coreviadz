@@ -291,7 +291,8 @@ export default function Auth({
       const res = await fetch("/api/auth/claim-invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: activeInviteToken, password: passwordInput })
+        body: JSON.stringify({ token: activeInviteToken, password: passwordInput }),
+        credentials: "include"
       });
 
       const resData = await res.json();
@@ -362,7 +363,8 @@ export default function Auth({
         const response = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ credential: finalEmail, password: finalPassword })
+          body: JSON.stringify({ credential: finalEmail, password: finalPassword }),
+          credentials: "include"
         });
 
         const resData = await response.json();
@@ -646,7 +648,8 @@ export default function Auth({
             name: nameInput.trim(),
             phone: phoneInput.trim(),
             country: countryInput
-          })
+          }),
+          credentials: "include"
         }).then(res => res.json())
           .then(data => console.log("[Auto-Verification] Sent email on registration:", data))
           .catch(err => console.error("[Auto-Verification] Failed to send email:", err));
@@ -816,7 +819,8 @@ export default function Auth({
             credential: emailInput.trim(),
             oldPassword: tempOldPassword,
             newPassword: passwordInput
-          })
+          }),
+          credentials: "include"
         });
 
         const resData = await response.json();

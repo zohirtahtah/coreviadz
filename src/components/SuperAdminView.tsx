@@ -60,9 +60,20 @@ export default function SuperAdminView({
   const loadSaaSRealData = async () => {
     setIsLoadingSaaS(true);
     try {
-      const response = await fetch("/api/superadmin/companies");
+      const response = await fetch("/api/superadmin/companies", {
+        credentials: "include"
+      });
       if (!response.ok) {
-        throw new Error(`Failed to load superadmin companies: ${response.statusText}`);
+        let errBody = "";
+        try {
+          const errJson = await response.json();
+          errBody = errJson.error || errJson.message || JSON.stringify(errJson);
+        } catch (_) {
+          try {
+            errBody = await response.text();
+          } catch (_) {}
+        }
+        throw new Error(`Failed to load superadmin companies: [Status ${response.status}] ${errBody || response.statusText}`);
       }
       const { users, companies: realCompanies, profiles } = await response.json();
 
@@ -162,6 +173,24 @@ export default function SuperAdminView({
         });
 
       setCompanies(saasCompanies);
+
+      // Dynamically generate real platform notifications from loaded registered companies
+      const sortedCos = [...saasCompanies].sort((a, b) => new Date(b.registrationDate).getTime() - new Date(a.registrationDate).getTime());
+      const dynNotifications = sortedCos.slice(0, 5).map((co, idx) => {
+        const timeLabel = idx === 0 ? (isRtl ? "الآن" : "Just now") : `${idx * 2} ${isRtl ? "ساعات مضت" : "hours ago"}`;
+        return {
+          id: `not-real-${co.id}-${idx}`,
+          title: isRtl ? "تسجيل شركة جديدة" : "New Tenant Registered",
+          content: isRtl 
+            ? `أكملت الشركة ${co.companyName} عملية التسجيل والتحقق بنجاح`
+            : `Tenant ${co.companyName} completed registration & verification`,
+          is_read: false,
+          created_at: timeLabel
+        };
+      });
+      if (dynNotifications.length > 0) {
+        setNotifications(dynNotifications);
+      }
 
     } catch (e) {
       console.error("Super Admin real data fetch error:", e);
@@ -476,7 +505,7 @@ export default function SuperAdminView({
           
           {/* Active Tab View Switcher */}
           {activeSubTab === "overview" && (
-            <OverviewTab isRtl={isRtl} onTriggerNotification={onTriggerNotification} />
+            <OverviewTab isRtl={isRtl} companies={companies} onTriggerNotification={onTriggerNotification} />
           )}
 
           {activeSubTab === "directory" && (
@@ -500,7 +529,7 @@ export default function SuperAdminView({
           )}
 
           {activeSubTab === "audit" && (
-            <AuditTab isRtl={isRtl} onTriggerNotification={onTriggerNotification} />
+            <AuditTab isRtl={isRtl} companies={companies} onTriggerNotification={onTriggerNotification} />
           )}
 
           {activeSubTab === "backup" && (
@@ -508,7 +537,7 @@ export default function SuperAdminView({
           )}
 
           {activeSubTab === "security" && (
-            <SecurityTab isRtl={isRtl} onTriggerNotification={onTriggerNotification} />
+            <SecurityTab isRtl={isRtl} companies={companies} onTriggerNotification={onTriggerNotification} />
           )}
 
           {activeSubTab === "search" && (

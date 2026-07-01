@@ -456,7 +456,8 @@ export default function UsersPermissionsView({
             employee_id: employeeId,
             username: username.trim().toLowerCase(),
             full_name: fullName.trim()
-          })
+          }),
+          credentials: "include"
         });
 
         if (!response.ok) {

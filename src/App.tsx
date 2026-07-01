@@ -168,7 +168,8 @@ export default function App() {
       const res = await fetch("/api/auth/resend-verification", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: session?.email })
+        body: JSON.stringify({ email: session?.email }),
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -286,7 +287,7 @@ export default function App() {
   useEffect(() => {
     const isSuperAdminEmail = session?.email?.toLowerCase().trim() === "coreviadz@gmail.com" || session?.email?.toLowerCase().trim() === "admin@corevia.com";
     if (session && (session.role === "super_admin" || session.role === "super-admin" || isSuperAdminEmail)) {
-      fetch("/api/auth/verify-super-admin")
+      fetch("/api/auth/verify-super-admin", { credentials: "include" })
         .then(res => {
           if (res.ok) return res.json();
           throw new Error("Super admin verification failed");
@@ -561,7 +562,7 @@ export default function App() {
   // 1. Core Session persistence and automatic session restoration
   useEffect(() => {
     // Attempt to restore server-side JWT cookie-based session first as single source of truth
-    fetch("/api/auth/session")
+    fetch("/api/auth/session", { credentials: "include" })
       .then(res => {
         if (res.ok) {
           return res.json();
@@ -1058,7 +1059,7 @@ export default function App() {
 
     // Clear session cookies securely on the backend server
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch (err) {
       console.warn("Could not contact server to clear auth cookies:", err);
     }
