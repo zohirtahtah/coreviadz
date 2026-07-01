@@ -635,10 +635,18 @@ export default function Auth({
         }).then(() => console.log("New registration logged to Supabase logs"));
 
         // Trigger automatic verification email immediately after registration
-        fetch("/api/auth/resend-verification", {
+        await fetch("/api/auth/register-company", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: emailInput.trim().toLowerCase() })
+          body: JSON.stringify({
+            userId,
+            email: emailInput.trim().toLowerCase(),
+            password: passwordInput,
+            companyName: companyNameInput.trim(),
+            name: nameInput.trim(),
+            phone: phoneInput.trim(),
+            country: countryInput
+          })
         }).then(res => res.json())
           .then(data => console.log("[Auto-Verification] Sent email on registration:", data))
           .catch(err => console.error("[Auto-Verification] Failed to send email:", err));

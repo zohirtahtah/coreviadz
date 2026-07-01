@@ -67,11 +67,6 @@ export default function SuperAdminView({
       const { users, companies: realCompanies, profiles } = await response.json();
 
       const saasCompanies: SaaSCompany[] = (realCompanies || [])
-        .filter(rc => {
-          const name = (rc.name || "").toLowerCase();
-          const email = (rc.owner_email || rc.email || "").toLowerCase();
-          return !(name.includes("test") || name.includes("proof corp") || email.includes("test.com"));
-        })
         .map(rc => {
           const companyId = rc.id;
           const prof = (profiles || []).find(p => p.id === companyId || p.company_id === companyId);

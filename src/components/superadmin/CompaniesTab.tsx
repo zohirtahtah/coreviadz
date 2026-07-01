@@ -249,6 +249,13 @@ export default function CompaniesTab({
                           <span className="font-bold text-white block">{c.ownerName}</span>
                           <span className="text-[10px] text-zinc-400 block">{c.email}</span>
                           <span className="text-[10px] text-zinc-500 block">{c.phone}</span>
+                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded mt-1 ${
+                            c.emailVerified ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                          }`}>
+                            {c.emailVerified 
+                              ? (isRtl ? "✓ البريد مؤكد" : "✓ Email Verified") 
+                              : (isRtl ? "✗ البريد غير مؤكد" : "✗ Email Unverified")}
+                          </span>
                         </div>
                       </td>
 
