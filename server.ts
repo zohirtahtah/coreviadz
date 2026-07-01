@@ -935,6 +935,176 @@ app.get("/api/auth/verify-super-admin", requireAuth, async (req, res) => {
   }
 });
 
+// Middleware to require Super Admin role
+const requireSuperAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.cookies.corevia_session_v1_cookie;
+  if (!token) {
+    return res.status(411).json({ error: "Missing required authorization cookie credentials." });
+  }
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+
+    const userEmail = decoded?.email ? decoded.email.toLowerCase().trim() : "";
+    const isSuperEmail = userEmail === "coreviadz@gmail.com" || userEmail === "admin@corevia.com";
+    const isSuperRole = decoded?.role === "super_admin" || decoded?.role === "super-admin";
+
+    if (isSuperRole || isSuperEmail) {
+      return next();
+    }
+
+    // Direct DB check
+    const { data: saasUser } = await supabase
+      .from("corevia_saas_users")
+      .select("role")
+      .eq("user_id", decoded.user_id)
+      .maybeSingle();
+
+    if (saasUser && (saasUser.role === "super_admin" || saasUser.role === "super-admin")) {
+      return next();
+    }
+
+    return res.status(403).json({ error: "Access Denied. Insufficient administrative privileges." });
+  } catch (err) {
+    return res.status(401).json({ error: "Unauthorized session credentials." });
+  }
+};
+
+// GET /api/superadmin/companies -> Fetches all SaaS users, companies, and profiles, bypassing RLS
+app.get("/api/superadmin/companies", requireSuperAdmin, async (req, res) => {
+  try {
+    if (pgPool) {
+      const usersRes = await pgPool.query("SELECT * FROM corevia_saas_users");
+      const companiesRes = await pgPool.query("SELECT * FROM corevia_companies");
+      const profilesRes = await pgPool.query("SELECT * FROM corevia_profile");
+      return res.status(200).json({
+        users: usersRes.rows,
+        companies: companiesRes.rows,
+        profiles: profilesRes.rows
+      });
+    }
+
+    // Fallback using high-privilege context (or standard server-side client)
+    const { data: users } = await supabase.from("corevia_saas_users").select("*");
+    const { data: companies } = await supabase.from("corevia_companies").select("*");
+    const { data: profiles } = await supabase.from("corevia_profile").select("*");
+    return res.status(200).json({
+      users: users || [],
+      companies: companies || [],
+      profiles: profiles || []
+    });
+  } catch (err: any) {
+    console.error("Superadmin companies fetch error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/superadmin/support-tickets -> Fetches all support tickets across all tenants, bypassing RLS
+app.get("/api/superadmin/support-tickets", requireSuperAdmin, async (req, res) => {
+  try {
+    if (pgPool) {
+      const ticketsRes = await pgPool.query("SELECT * FROM corevia_support_tickets ORDER BY updated_at DESC");
+      return res.status(200).json(ticketsRes.rows);
+    }
+    const { data, error } = await supabase
+      .from("corevia_support_tickets")
+      .select("*")
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    return res.status(200).json(data || []);
+  } catch (err: any) {
+    console.error("Superadmin support tickets fetch error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/superadmin/support-messages/:ticketId -> Fetches messages for a given ticket, bypassing RLS
+app.get("/api/superadmin/support-messages/:ticketId", requireSuperAdmin, async (req, res) => {
+  const { ticketId } = req.params;
+  try {
+    if (pgPool) {
+      const messagesRes = await pgPool.query("SELECT * FROM corevia_ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC", [ticketId]);
+      return res.status(200).json(messagesRes.rows);
+    }
+    const { data, error } = await supabase
+      .from("corevia_ticket_messages")
+      .select("*")
+      .eq("ticket_id", ticketId)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    return res.status(200).json(data || []);
+  } catch (err: any) {
+    console.error("Superadmin support messages fetch error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/superadmin/support-reply -> Allows super admin to reply and update ticket status
+app.post("/api/superadmin/support-reply", requireSuperAdmin, async (req, res) => {
+  const { ticket_id, sender_name, sender_role, message, is_internal } = req.body;
+  if (!ticket_id || !message) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const newMessage = {
+      id: `msg-${Date.now()}`,
+      ticket_id,
+      sender_name: sender_name || "SaaS Super Admin",
+      sender_role: sender_role || "admin",
+      message: message.trim(),
+      is_internal: !!is_internal,
+      attachments: [],
+      created_at: new Date().toISOString()
+    };
+
+    if (pgPool) {
+      // Insert message
+      await pgPool.query(
+        `INSERT INTO corevia_ticket_messages (id, ticket_id, sender_name, sender_role, message, is_internal, attachments, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [newMessage.id, newMessage.ticket_id, newMessage.sender_name, newMessage.sender_role, newMessage.message, newMessage.is_internal, JSON.stringify([]), newMessage.created_at]
+      );
+
+      // Update ticket status and updated_at
+      const updatedStatus = newMessage.is_internal ? undefined : "Answered";
+      if (updatedStatus) {
+        await pgPool.query(
+          `UPDATE corevia_support_tickets SET status = $1, updated_at = $2 WHERE ticket_id = $3`,
+          [updatedStatus, new Date().toISOString(), ticket_id]
+        );
+      } else {
+        await pgPool.query(
+          `UPDATE corevia_support_tickets SET updated_at = $1 WHERE ticket_id = $2`,
+          [new Date().toISOString(), ticket_id]
+        );
+      }
+    } else {
+      const { error: msgErr } = await supabase
+        .from("corevia_ticket_messages")
+        .insert(newMessage);
+      if (msgErr) throw msgErr;
+
+      const updatedStatus = newMessage.is_internal ? undefined : "Answered";
+      const updateData: any = { updated_at: new Date().toISOString() };
+      if (updatedStatus) {
+        updateData.status = updatedStatus;
+      }
+      const { error: ticketErr } = await supabase
+        .from("corevia_support_tickets")
+        .update(updateData)
+        .eq("ticket_id", ticket_id);
+      if (ticketErr) throw ticketErr;
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    console.error("Superadmin support reply error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Resend Verification Rate Limiting in-memory tracker
 const lastResendTimes = new Map<string, number>();
 

@@ -21,19 +21,11 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("corevia_support_tickets")
-        .select("*")
-        .order("updated_at", { ascending: false });
-      
-      if (error) {
-        if (error.code === "PGRST205" || error.message.includes("relation does not exist")) {
-          // Fallback if table doesn't exist yet
-          setTickets([]);
-          return;
-        }
-        throw error;
+      const response = await fetch("/api/superadmin/support-tickets");
+      if (!response.ok) {
+        throw new Error(`Failed to load support tickets: ${response.statusText}`);
       }
+      const data = await response.json();
       setTickets(data || []);
     } catch (err: any) {
       console.error("Error loading support tickets:", err);
@@ -44,13 +36,11 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
 
   const loadMessages = async (ticketId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("corevia_ticket_messages")
-        .select("*")
-        .eq("ticket_id", ticketId)
-        .order("created_at", { ascending: true });
-      
-      if (error) throw error;
+      const response = await fetch(`/api/superadmin/support-messages/${ticketId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load messages: ${response.statusText}`);
+      }
+      const data = await response.json();
       setMessages(data || []);
     } catch (err: any) {
       console.error("Error loading messages:", err);
@@ -59,7 +49,18 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
 
   useEffect(() => {
     loadTickets();
+    const interval = setInterval(loadTickets, 8000); // Poll ticket list every 8 seconds
+    return () => clearInterval(interval);
   }, []);
+
+  // Poll active ticket messages every 4 seconds for real-time chat feeling
+  useEffect(() => {
+    if (!selectedTicket) return;
+    const interval = setInterval(() => {
+      loadMessages(selectedTicket.ticket_id);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [selectedTicket]);
 
   const handleSelectTicket = async (ticket: any) => {
     setSelectedTicket(ticket);
@@ -71,41 +72,30 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
     if (!replyText.trim() || !selectedTicket) return;
 
     try {
-      const newMessage = {
-        id: `msg-${Date.now()}`,
+      const payload = {
         ticket_id: selectedTicket.ticket_id,
         sender_name: "SaaS Super Admin",
         sender_role: "admin",
         message: replyText.trim(),
-        is_internal: isInternal,
-        attachments: [],
-        created_at: new Date().toISOString()
+        is_internal: isInternal
       };
 
-      const { error: msgErr } = await supabase
-        .from("corevia_ticket_messages")
-        .insert(newMessage);
-      
-      if (msgErr) throw msgErr;
+      const response = await fetch("/api/superadmin/support-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
 
-      // Update ticket status
-      const updatedStatus = isInternal ? selectedTicket.status : "Answered";
-      const { error: ticketErr } = await supabase
-        .from("corevia_support_tickets")
-        .update({ 
-          status: updatedStatus,
-          updated_at: new Date().toISOString()
-        })
-        .eq("ticket_id", selectedTicket.ticket_id);
+      if (!response.ok) {
+        throw new Error("Failed to send reply through server");
+      }
 
-      if (ticketErr) throw ticketErr;
-
-      setMessages(prev => [...prev, newMessage]);
       setReplyText("");
       onTriggerNotification(isRtl ? "تم إرسال الرد وتحديث حالة التذكرة!" : "Reply sent, ticket status updated!", "success");
       
-      // Reload tickets directory
-      loadTickets();
+      // Reload tickets directory & messages
+      await loadMessages(selectedTicket.ticket_id);
+      await loadTickets();
     } catch (err: any) {
       onTriggerNotification(err.message, "info");
     }

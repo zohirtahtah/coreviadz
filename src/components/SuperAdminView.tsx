@@ -56,23 +56,15 @@ export default function SuperAdminView({
   ]);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
 
-  // Load companies and basic activity lists directly from Supabase
+  // Load companies and basic activity lists directly from Supabase via superadmin API bypassing RLS
   const loadSaaSRealData = async () => {
-    if (!supabase) return;
     setIsLoadingSaaS(true);
     try {
-      const { data: users, error: reErr } = await supabase
-        .from("corevia_saas_users")
-        .select("*");
-      if (reErr) throw reErr;
-
-      const { data: realCompanies } = await supabase
-        .from("corevia_companies")
-        .select("*");
-
-      const { data: profiles } = await supabase
-        .from("corevia_profile")
-        .select("*");
+      const response = await fetch("/api/superadmin/companies");
+      if (!response.ok) {
+        throw new Error(`Failed to load superadmin companies: ${response.statusText}`);
+      }
+      const { users, companies: realCompanies, profiles } = await response.json();
 
       const saasCompanies: SaaSCompany[] = (realCompanies || [])
         .filter(rc => {

@@ -111,6 +111,20 @@ export async function fetchUserSaaSMeta(
       .eq("user_id", userId)
       .maybeSingle();
 
+    if (userError) {
+      console.warn("Error fetching corevia_saas_users:", userError);
+      // Use cached localStorage onboarding state instead of blindly overwriting
+      const isCompletedLocal = localStorage.getItem("corevia_completed_onboarding") === "true" || localStorage.getItem("corevia_profile_v1") !== null;
+      return {
+        userId,
+        companyId: defaultCompanyId,
+        hasCompletedOnboarding: isCompletedLocal,
+        email: cleanEmail,
+        username: fallbackName,
+        role: initialRole
+      };
+    }
+
     if (userMeta) {
       let activeRole = userMeta.role || "admin";
       // If of super admin email but has non-super-admin role in DB, auto-update it

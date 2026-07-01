@@ -991,6 +991,7 @@ export default function App() {
   const handleOnboardingComplete = async (newProfile: BusinessProfile) => {
     // 1. Sync states locally first so the user gets logged into the site instantly!
     localStorage.setItem("corevia_profile_v1", JSON.stringify(newProfile));
+    localStorage.setItem("corevia_completed_onboarding", "true");
     initializeDatabase(true, newProfile); // Initializing clean ERP workspace with user-provided settings
     
     setProfile(newProfile);
@@ -1208,7 +1209,7 @@ export default function App() {
   useEffect(() => {
     if (session && supabase) {
       fetchAnnouncements();
-      const interval = setInterval(fetchAnnouncements, 30000);
+      const interval = setInterval(fetchAnnouncements, 10000);
       return () => clearInterval(interval);
     } else {
       setAnnouncements([]);

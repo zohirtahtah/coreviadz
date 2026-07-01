@@ -90,7 +90,18 @@ export default function SupportView({
 
   useEffect(() => {
     loadTickets();
+    const interval = setInterval(loadTickets, 8000); // Poll ticket list every 8 seconds
+    return () => clearInterval(interval);
   }, [companyId]);
+
+  // Poll active ticket messages every 4 seconds for real-time chat feeling
+  useEffect(() => {
+    if (!selectedTicket?.ticket_id) return;
+    const interval = setInterval(() => {
+      loadMessages(selectedTicket.ticket_id);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [selectedTicket?.ticket_id]);
 
   const handleSelectTicket = async (ticket: any) => {
     setSelectedTicket(ticket);
