@@ -398,6 +398,17 @@ app.post("/api/auth/register", async (req, res) => {
     }
 
     const userId = authData.user!.id;
+
+    // Trigger confirmation email via anon key client (admin.createUser does NOT send emails)
+    try {
+      await supabase.auth.resend({
+        type: "signup",
+        email: cleanEmail,
+        options: { emailRedirectTo: "https://coreviadz-psi.vercel.app" }
+      });
+    } catch (resendErr) {
+      console.warn("[Register] Resend triggered but Supabase may have rate-limited:", resendErr);
+    }
     const companyId = `cop_${userId.substring(0, 15)}`;
     const todayStr = new Date().toISOString().split("T")[0];
     const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
@@ -1276,8 +1287,25 @@ app.post("/api/auth/resend-verification", async (req, res) => {
     const companyId = saasUser.company_id || "cop_default";
     const username = saasUser.username || "Tenant Owner";
 
-    // Simulate sending email beautifully
-    console.log(`[Email Service] Resending verification code / link to ${email} for company ${companyId}`);
+    // Actually call Supabase to send the confirmation email
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: "https://coreviadz-psi.vercel.app" }
+      });
+      if (resendError) {
+        return res.status(500).json({
+          error_en: "Failed to send verification email: " + resendError.message,
+          error_ar: "فشل إرسال بريد التحقق: " + resendError.message
+        });
+      }
+    } catch (resendErr: any) {
+      return res.status(500).json({
+        error_en: "Failed to send verification email: " + (resendErr.message || resendErr),
+        error_ar: "فشل إرسال بريد التحقق: " + (resendErr.message || resendErr)
+      });
+    }
 
     // Create log notification inside Supabase activity log
     await supabase.from("corevia_activity_logs").insert({

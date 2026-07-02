@@ -342,6 +342,15 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
     const userId = authData.user.id;
+    try {
+      await supabase.auth.resend({
+        type: "signup",
+        email: cleanEmail,
+        options: { emailRedirectTo: "https://coreviadz-psi.vercel.app" }
+      });
+    } catch (resendErr) {
+      console.warn("[Register] Resend triggered but Supabase may have rate-limited:", resendErr);
+    }
     const companyId = `cop_${userId.substring(0, 15)}`;
     const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1e3).toISOString().split("T")[0];
@@ -1043,7 +1052,24 @@ app.post("/api/auth/resend-verification", async (req, res) => {
     }
     const companyId = saasUser.company_id || "cop_default";
     const username = saasUser.username || "Tenant Owner";
-    console.log(`[Email Service] Resending verification code / link to ${email} for company ${companyId}`);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: "https://coreviadz-psi.vercel.app" }
+      });
+      if (resendError) {
+        return res.status(500).json({
+          error_en: "Failed to send verification email: " + resendError.message,
+          error_ar: "\u0641\u0634\u0644 \u0625\u0631\u0633\u0627\u0644 \u0628\u0631\u064A\u062F \u0627\u0644\u062A\u062D\u0642\u0642: " + resendError.message
+        });
+      }
+    } catch (resendErr) {
+      return res.status(500).json({
+        error_en: "Failed to send verification email: " + (resendErr.message || resendErr),
+        error_ar: "\u0641\u0634\u0644 \u0625\u0631\u0633\u0627\u0644 \u0628\u0631\u064A\u062F \u0627\u0644\u062A\u062D\u0642\u0642: " + (resendErr.message || resendErr)
+      });
+    }
     await supabase.from("corevia_activity_logs").insert({
       id: `log-${Date.now()}`,
       company_id: companyId,
