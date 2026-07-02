@@ -48,7 +48,7 @@ import {
   getSyncSettings, pushRealOrdersToGoogleSheet, saveSimulationSheetData, 
   serializeOrderToRow, getDynamicOrderColumns, logSyncAudit 
 } from "./googleSyncUtils";
-import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2 } from "lucide-react";
+import { AlertCircle, RotateCcw, X, BadgeAlert, Globe, Sun, Moon, Bell, Check, KeyRound, Shield, Loader2, Mail, RefreshCw } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { 
   fetchUserSaaSMeta, 
@@ -160,6 +160,7 @@ export default function App() {
   const [dbCompanyRecord, setDbCompanyRecord] = useState<any>(null);
   const [resendingVerification, setResendingVerification] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [showEmailVerificationBanner, setShowEmailVerificationBanner] = useState(false);
 
   const handleResendVerification = async () => {
     if (resendingVerification || resendCooldown > 0) return;
@@ -619,18 +620,6 @@ export default function App() {
           console.warn("Server session validation offline - restoring from cache:", err);
           const cachedSess = getUserSession();
           if (cachedSess && cachedSess.isRegistered) {
-            // Defense-in-depth: verify email is confirmed via Supabase
-            if (supabase && cachedSess.email) {
-              try {
-                const { data: { user: authUser } } = await supabase.auth.getUser();
-                if (authUser && !authUser.email_confirmed_at) {
-                  console.warn("Cached session rejected: email not confirmed");
-                  saveUserSession(null as any);
-                  setHasCompletedOnboarding(false);
-                  return;
-                }
-              } catch (_) {}
-            }
             setSession(cachedSess);
             try {
               const meta = await fetchUserSaaSMeta(
@@ -1122,6 +1111,16 @@ export default function App() {
         : "Welcome to Corevia! Workspace initialized and backed up to cloud successfully.",
       "success"
     );
+
+    // After onboarding save, check if email is verified. If not, show verification prompt.
+    if (session?.email && supabase) {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser && !authUser.email_confirmed_at) {
+          setShowEmailVerificationBanner(true);
+        }
+      } catch (_) {}
+    }
   };
 
   // Safe logout
@@ -2019,22 +2018,6 @@ export default function App() {
         theme={theme}
         setTheme={setTheme}
         onAuthSuccess={async (newSession) => {
-          // Defense-in-depth: verify email confirmation with Supabase before allowing access
-          if (supabase && newSession?.email) {
-            try {
-              const { data: { user: authUser } } = await supabase.auth.getUser();
-              if (authUser && !authUser.email_confirmed_at) {
-                setSession(null);
-                saveUserSession(null as any);
-                triggerToast(
-                  isRtl ? "يرجى تأكيد بريدك الإلكتروني أولاً" : "Please verify your email first",
-                  "info"
-                );
-                return;
-              }
-            } catch (_) {}
-          }
-
           setSession(newSession);
           saveUserSession(newSession);
           
@@ -2878,6 +2861,51 @@ export default function App() {
                 className="flex-1 py-2.5 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-450 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-rose-500/10 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
               >
                 {confirmDialog.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Verification Banner — shown after onboarding if email not yet confirmed */}
+      {showEmailVerificationBanner && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#121214] border border-[#27272a] rounded-2xl p-6 sm:p-8 text-center space-y-6 animate-fade-in">
+            <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+              <Mail className="w-7 h-7" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white mb-2">
+                {lang === "ar" ? "يرجى تأكيد بريدك الإلكتروني" : "Verify Your Email"}
+              </h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {lang === "ar"
+                  ? `تم إرسال رسالة التفعيل إلى ${session?.email}. يرجى التحقق من بريدك الإلكتروني والنقر على رابط التفعيل، ثم تسجيل الدخول مرة أخرى.`
+                  : `A verification email was sent to ${session?.email}. Please check your inbox and click the verification link, then log in again.`}
+              </p>
+            </div>
+            <div className="border-t border-[#27272a]/60 pt-4 space-y-3">
+              <button
+                onClick={handleResendVerification}
+                disabled={resendingVerification || resendCooldown > 0}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2.5 rounded-xl transition-all font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {resendingVerification ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Mail className="w-4 h-4" />
+                )}
+                <span>
+                  {lang === "ar"
+                    ? (resendCooldown > 0 ? `إعادة الإرسال بعد ${resendCooldown}ث` : "إعادة إرسال رسالة التفعيل")
+                    : (resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend Verification Email")}
+                </span>
+              </button>
+              <button
+                onClick={() => { setSession(null); saveUserSession(null as any); setShowEmailVerificationBanner(false); }}
+                className="w-full bg-[#1c1c1e] hover:bg-[#27272a] text-slate-400 text-xs py-2 rounded-xl transition-all font-semibold"
+              >
+                {lang === "ar" ? "تسجيل الخروج" : "Log out"}
               </button>
             </div>
           </div>

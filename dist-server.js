@@ -398,6 +398,23 @@ app.post("/api/auth/register", async (req, res) => {
         break;
       }
     }
+    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      email: cleanEmail,
+      password
+    });
+    if (signInError) {
+      return res.status(201).json({
+        registered: true,
+        userId,
+        companyId,
+        email: cleanEmail,
+        username: ownerName.trim(),
+        role: "admin",
+        message_en: "Account created. Please log in.",
+        message_ar: "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
+      });
+    }
+    const session = signInData.session;
     res.status(201).json({
       registered: true,
       userId,
@@ -405,8 +422,11 @@ app.post("/api/auth/register", async (req, res) => {
       email: cleanEmail,
       username: ownerName.trim(),
       role: "admin",
-      message_en: "Account created. Please check your email to verify your account before logging in.",
-      message_ar: "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0628\u0631\u064A\u062F\u0643 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0644\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628\u0643 \u0642\u0628\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
+      access_token: session?.access_token || "",
+      refresh_token: session?.refresh_token || "",
+      expires_in: session?.expires_in || 3600,
+      message_en: "Registration successful. Please check your email to verify your account.",
+      message_ar: "\u062A\u0645 \u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0628\u0646\u062C\u0627\u062D. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0628\u0631\u064A\u062F\u0643 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0644\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628\u0643."
     });
   } catch (err) {
     console.error("Registration error:", err);

@@ -655,13 +655,19 @@ export default function Auth({
           throw new Error(registerData.error_en || registerData.error_ar || "Registration failed");
         }
 
-        const { userId, companyId } = registerData;
+        const { userId, companyId, access_token, refresh_token } = registerData;
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const todayStr = new Date().toISOString().split("T")[0];
         const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-        // No session tokens returned — user must verify email first
-        // Show the pending_verification screen instead
+        // Session tokens allow user to proceed through onboarding
+        // Email verification will be enforced at the END of onboarding
+        if (access_token && refresh_token && supabase) {
+          await supabase.auth.setSession({
+            access_token,
+            refresh_token
+          });
+        }
 
         // Cache company in localStorage for offline resilience
         const newCompanyObj: SaaSCompany = {
@@ -716,8 +722,21 @@ export default function Auth({
         } catch (_) {}
 
         setPendingVerifyEmail(emailInput.trim().toLowerCase());
-        setAuthMode("pending_verification");
-        onTriggerNotification(isRtl ? "تم إنشاء الحساب! يرجى التحقق من بريدك الإلكتروني لتفعيل حسابك قبل تسجيل الدخول." : "Account created! Please check your email to verify your account before logging in.", "success");
+
+        const sessionRecord: UserSession = {
+          username: nameInput.trim(),
+          email: emailInput.trim().toLowerCase(),
+          isRegistered: true,
+          isApproved: true,
+          isSuspended: false,
+          user_id: userId,
+          userId: userId,
+          company_id: companyId,
+          role: "admin"
+        };
+
+        onAuthSuccess(sessionRecord);
+        onTriggerNotification(isRtl ? "تم إنشاء الحساب! يرجى إكمال الإعداد، ثم تأكيد بريدك الإلكتروني." : "Account created! Please complete onboarding, then verify your email.", "success");
 
       } catch (err: any) {
         console.error("Auth register error:", err);

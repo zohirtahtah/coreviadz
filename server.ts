@@ -470,7 +470,29 @@ app.post("/api/auth/register", async (req, res) => {
       }
     }
 
-    // Step C: No session created — user must verify email first before logging in
+    // Step C: Sign in to get session tokens (allows onboarding to proceed)
+    // Email verification will be enforced at the END of onboarding
+    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      email: cleanEmail,
+      password: password
+    });
+
+    if (signInError) {
+      // Fallback: return user info without session (user can log in manually)
+      return res.status(201).json({
+        registered: true,
+        userId,
+        companyId,
+        email: cleanEmail,
+        username: ownerName.trim(),
+        role: "admin",
+        message_en: "Account created. Please log in.",
+        message_ar: "تم إنشاء الحساب. يرجى تسجيل الدخول."
+      });
+    }
+
+    // Return full session to the frontend
+    const session = signInData.session;
     res.status(201).json({
       registered: true,
       userId,
@@ -478,8 +500,11 @@ app.post("/api/auth/register", async (req, res) => {
       email: cleanEmail,
       username: ownerName.trim(),
       role: "admin",
-      message_en: "Account created. Please check your email to verify your account before logging in.",
-      message_ar: "تم إنشاء الحساب. يرجى التحقق من بريدك الإلكتروني لتفعيل حسابك قبل تسجيل الدخول."
+      access_token: session?.access_token || "",
+      refresh_token: session?.refresh_token || "",
+      expires_in: session?.expires_in || 3600,
+      message_en: "Registration successful. Please check your email to verify your account.",
+      message_ar: "تم التسجيل بنجاح. يرجى التحقق من بريدك الإلكتروني لتفعيل حسابك."
     });
 
   } catch (err: any) {
