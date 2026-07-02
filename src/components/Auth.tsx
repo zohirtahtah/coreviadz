@@ -13,9 +13,6 @@ import { translations } from "../translations";
 import { Flag } from "./Flag";
 import { supabase } from "../supabaseClient";
 import { getLocalEmployees, Employee } from "../employeeService";
-import { logActivity } from "../activityLogService";
-import { resilientUpsert } from "../supabaseSync";
-import OnboardingWizard from "./OnboardingWizard";
 
 interface AuthProps {
   lang: LanguageType;
@@ -264,6 +261,79 @@ export default function Auth({
     }
   }, []);
 
+  // Google Sign-In Handler
+  const handleGoogleSignIn = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) {
+      onTriggerNotification(isRtl ? "فشل تسجيل الدخول بـ Google" : "Google sign-in failed", "info");
+    }
+  };
+
+  // Detect OAuth callback on mount (Google, etc.)
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(async ({ data: { session: supabaseSession } }) => {
+      if (!supabaseSession?.user) return;
+      if (sessionStorage.getItem("gcb")) return;
+      sessionStorage.setItem("gcb", "1");
+      let companyId = `cop_${supabaseSession.user.id.substring(0, 15)}`;
+      let role = "admin";
+      let username = supabaseSession.user.email?.split("@")[0] || "User";
+      let isNewUser = false;
+      try {
+        const { data: userData } = await supabase
+          .from("corevia_saas_users")
+          .select("*")
+          .eq("email", (supabaseSession.user.email || "").toLowerCase().trim())
+          .maybeSingle();
+        if (userData) {
+          companyId = userData.company_id || companyId;
+          role = userData.role || role;
+          username = userData.username || username;
+        } else {
+          isNewUser = true;
+        }
+      } catch { isNewUser = true; }
+      if (isNewUser) {
+        const email = (supabaseSession.user.email || "").toLowerCase().trim();
+        username = email.split("@")[0];
+        const fullName = supabaseSession.user.user_metadata?.full_name || username;
+        // Use server-side API to provision company (bypasses RLS via service_role)
+        try {
+          await fetch("/api/auth/provision-company", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: supabaseSession.user.id,
+              email,
+              fullName
+            })
+          });
+        } catch (provErr) {
+          console.error("Server-side provision failed, falling back to client-side:", provErr);
+        }
+      }
+      const oauthSession: UserSession = {
+        username,
+        email: supabaseSession.user.email || "",
+        isRegistered: true,
+        isApproved: true,
+        isSuspended: false,
+        userId: supabaseSession.user.id,
+        user_id: supabaseSession.user.id,
+        company_id: companyId,
+        role,
+        jobTitle: "Admin"
+      };
+      onAuthSuccess(oauthSession);
+      onTriggerNotification(isRtl ? "تم تسجيل الدخول بنجاح!" : "Logged in successfully!", "success");
+    });
+  }, []);
+
   // Toggle Theme
   const handleToggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light");
@@ -292,8 +362,7 @@ export default function Auth({
       const res = await fetch("/api/auth/claim-invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: activeInviteToken, password: passwordInput }),
-        credentials: "include"
+        body: JSON.stringify({ token: activeInviteToken, password: passwordInput })
       });
 
       const resData = await res.json();
@@ -309,11 +378,7 @@ export default function Auth({
       );
 
       // Pass the session down up to the application state
-      const sessionWithToken = {
-        ...resData.session,
-        token: resData.token
-      };
-      onAuthSuccess(sessionWithToken);
+      onAuthSuccess(resData.session);
 
     } catch (err: any) {
       console.error("claim-invite submit error:", err);
@@ -368,8 +433,7 @@ export default function Auth({
         const response = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ credential: finalEmail, password: finalPassword }),
-          credentials: "include"
+          body: JSON.stringify({ credential: finalEmail, password: finalPassword })
         });
 
         const resData = await response.json();
@@ -379,9 +443,6 @@ export default function Auth({
         }
 
         const authenticatedSession: UserSession = resData.session;
-        if (authenticatedSession && resData.token) {
-          authenticatedSession.token = resData.token;
-        }
 
         if (authenticatedSession && (authenticatedSession as any).isFirstLogin) {
           setTempOldPassword(finalPassword);
@@ -530,73 +591,41 @@ export default function Auth({
       }
 
       try {
-        if (!supabase) throw new Error("Supabase is not initialized.");
-
-        // First register with Supabase Auth
-        const { data, error } = await supabase.auth.signUp({
-          email: emailInput,
-          password: passwordInput,
-          options: {
-            data: {
-              full_name: nameInput,
-            }
-          }
+        // Call server-side /api/auth/register which uses service_role key
+        // to bypass RLS and create the Auth user, company, and user record atomically
+        const registerRes = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: emailInput.trim(),
+            password: passwordInput,
+            companyName: companyNameInput.trim(),
+            ownerName: nameInput.trim(),
+            phone: phoneInput.trim(),
+            country: countryInput
+          })
         });
 
-        if (error) throw error;
+        const registerData = await registerRes.json();
 
-        const userId = data.user?.id || `usr-${Date.now()}`;
-        const companyId = `cop_${userId.substring(0, 15)}`;
+        if (!registerRes.ok) {
+          throw new Error(registerData.error_en || registerData.error_ar || "Registration failed");
+        }
+
+        const { userId, companyId, access_token, refresh_token } = registerData;
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-        // 1. Save company to corevia_companies (SOLE Authoritative Source)
         const todayStr = new Date().toISOString().split("T")[0];
         const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-        
-        const { error: compErr } = await resilientUpsert("corevia_companies", [{
-          id: companyId,
-          name: companyNameInput.trim(),
-          owner_name: nameInput.trim(),
-          phone: phoneInput.trim(),
-          owner_email: emailInput.trim().toLowerCase(), // compatibility
-          email: emailInput.trim().toLowerCase(),
-          seatsLimit: 5,
-          seats_limit: 5, // compatibility
-          accountStatus: "Pending Verification", // Verified immediately or on activation
-          status: "pending_verification", // compatibility
-          subscriptionPlan: "Trial",
-          created_at: new Date().toISOString(),
-          
-          // Strict 15-Day Free Trial Requirements
-          registration_date: todayStr,
-          trial_start_date: todayStr,
-          trial_end_date: trialEndStr,
-          subscription_status: "trial",
-          subscription_plan: "Trial",
-          trial_days: 15,
-          trial_start: new Date().toISOString(),
-          trial_end: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
-          
-          // Pre-existing DB Columns Compatibility Mapping
-          trial_start_at: todayStr,
-          subscription_end_at: trialEndStr,
-          subscription_end_date: trialEndStr,
-          email_verified: false
-        }]);
-        if (compErr) console.warn("Supabase corevia_companies upsert error during registration:", compErr);
 
-        // 2. Save owner to corevia_saas_users table
-        const { error: saasUserErr } = await resilientUpsert("corevia_saas_users", [{
-          user_id: userId,
-          company_id: companyId,
-          email: emailInput.trim().toLowerCase(),
-          username: nameInput.trim(),
-          has_completed_onboarding: false,
-          role: "admin"
-        }]);
-        if (saasUserErr) console.warn("Supabase corevia_saas_users upsert error during registration:", saasUserErr);
+        // If server returned session tokens, authenticate the frontend Supabase client instantly
+        if (access_token && refresh_token && supabase) {
+          await supabase.auth.setSession({
+            access_token,
+            refresh_token
+          });
+        }
 
-        // 4. Update corevia_saas_companies_v1 in localStorage to cache state immediately
+        // Cache company in localStorage for offline resilience
         const newCompanyObj: SaaSCompany = {
           id: companyId,
           companyName: companyNameInput.trim(),
@@ -611,7 +640,7 @@ export default function Auth({
           seatsLimit: 5,
           seatsUsed: 1,
           accountStatus: "Pending Verification",
-          expirationDate: trialEndStr, // Trial end Date (15 days)
+          expirationDate: trialEndStr,
           activeDevices: [],
           otpCode
         };
@@ -627,48 +656,26 @@ export default function Auth({
         }
         localStorage.setItem("corevia_saas_companies_v1", JSON.stringify(list));
 
-        // Create log notification inside Supabase activity log for Super Admin
-        await supabase.from("corevia_activity_logs").insert({
-          id: `log-${Date.now()}`,
-          company_id: companyId,
-          actor_name: nameInput.trim(),
-          actor_role: "SaaS Tenant Owner",
-          operation: "تسجيل شركة جديدة",
-          item_type: "saas_creation",
-          new_value: {
-            companyName: companyNameInput.trim(),
-            ownerName: nameInput.trim(),
-            email: emailInput.trim().toLowerCase(),
-            plan: "Trial"
-          },
-          ip_address: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
-        }).then(() => console.log("New registration logged to Supabase logs"));
-
-        // Trigger automatic verification email immediately after registration
-        let token = "";
+        // Log registration activity (fire-and-forget)
         try {
-          const regRes = await fetch("/api/auth/register-company", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId,
-              email: emailInput.trim().toLowerCase(),
-              password: passwordInput,
-              companyName: companyNameInput.trim(),
-              name: nameInput.trim(),
-              phone: phoneInput.trim(),
-              country: countryInput
-            }),
-            credentials: "include"
-          });
-          const regData = await regRes.json();
-          if (regData && regData.token) {
-            token = regData.token;
+          if (supabase) {
+            await supabase.from("corevia_activity_logs").insert({
+              id: `log-${Date.now()}`,
+              company_id: companyId,
+              actor_name: nameInput.trim(),
+              actor_role: "SaaS Tenant Owner",
+              operation: "تسجيل شركة جديدة",
+              item_type: "saas_creation",
+              new_value: {
+                companyName: companyNameInput.trim(),
+                ownerName: nameInput.trim(),
+                email: emailInput.trim().toLowerCase(),
+                plan: "Trial"
+              },
+              ip_address: "197.200." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255)
+            });
           }
-          console.log("[Auto-Verification] Sent email on registration:", regData);
-        } catch (err) {
-          console.error("[Auto-Verification] Failed to send email:", err);
-        }
+        } catch (_) {}
 
         const sessionRecord: UserSession = {
           username: nameInput.trim(),
@@ -679,8 +686,7 @@ export default function Auth({
           user_id: userId,
           userId: userId,
           company_id: companyId,
-          role: "admin",
-          token: token
+          role: "admin"
         };
 
         onAuthSuccess(sessionRecord);
@@ -836,8 +842,7 @@ export default function Auth({
             credential: emailInput.trim(),
             oldPassword: tempOldPassword,
             newPassword: passwordInput
-          }),
-          credentials: "include"
+          })
         });
 
         const resData = await response.json();
@@ -847,9 +852,8 @@ export default function Auth({
         }
 
         const authenticatedSession: UserSession = resData.session;
-        if (authenticatedSession && resData.token) {
-          authenticatedSession.token = resData.token;
-        }
+
+        // Optionally cache to local storage in parallel for fallback
         try {
           const currentLocal = getLocalEmployees();
           const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
@@ -1038,7 +1042,7 @@ export default function Auth({
 
           {/* LOGIN VIEW TEMPLATE */}
           {authMode === "login" && (
-            <form onSubmit={handleSubmit} className="space-y-4" id="login_form">
+            <><form onSubmit={handleSubmit} className="space-y-4" id="login_form">
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-300">
                   {isRtl ? "البريد الإلكتروني أو الهاتف أو اسم المستخدم" : "Email, Phone, or Username"}
@@ -1118,17 +1122,194 @@ export default function Auth({
                 )}
               </button>
             </form>
-          )}
 
-                    {/* REGISTER VIEW TEMPLATE */}
+              {/* Divider */}
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-[#27272a]" />
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">or</span>
+                <div className="flex-1 h-px bg-[#27272a]" />
+              </div>
+
+              {/* Google Sign-In Button */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-gray-800 rounded-xl py-2.5 text-xs font-bold shadow-md active:scale-[0.99] transition-all duration-300 border border-gray-200"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+                <span>{isRtl ? "تسجيل الدخول باستخدام Google" : "Sign in with Google"}</span>
+              </button>
+            </>)
+          }
+
+          {/* REGISTER VIEW TEMPLATE */}
           {authMode === "register" && (
-            <OnboardingWizard
-              onAuthSuccess={onAuthSuccess}
-              onTriggerNotification={onTriggerNotification}
-              isRtl={isRtl}
-              t={t}
-              setAuthMode={setAuthMode}
-            />
+            <form onSubmit={handleSubmit} className="space-y-4" id="register_form">
+              {/* Company Name */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "اسم المؤسسة / الشركة" : "Company / Enterprise Name"}
+                </label>
+                <div className="relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>🏢</span>
+                  <input
+                    type="text"
+                    required
+                    value={companyNameInput}
+                    onChange={(e) => setCompanyNameInput(e.target.value)}
+                    placeholder={isRtl ? "شات تيك للتجارة والتوزيع" : "Corevia Tech Trading"}
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Owner Name */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "الاسم الكامل للمالك" : "Owner Full Name"}
+                </label>
+                <div className="relative">
+                  <User className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type="text"
+                    required
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Benali Abderrahmane"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Email Address */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "البريد الإلكتروني المعتمر" : "Email Address"}
+                </label>
+                <div className="relative">
+                  <Mail className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type="email"
+                    required
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="owner@gmail.com"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Phone Number */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "رقم الهاتف" : "Phone Number"}
+                </label>
+                <div className="relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>📞</span>
+                  <input
+                    type="tel"
+                    required
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value)}
+                    placeholder="+213 550 12 34 56"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Country Selection */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  {isRtl ? "الدولة" : "Country"}
+                </label>
+                <div className="relative">
+                  <Globe className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <select
+                    value={countryInput}
+                    onChange={(e) => setCountryInput(e.target.value)}
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-250 text-xs focus:outline-none focus:border-indigo-500 transition-all appearance-none ${
+                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
+                    }`}
+                  >
+                    <option value="Algeria">{isRtl ? "الجزائر 🇩🇿" : "Algeria 🇩🇿"}</option>
+                    <option value="France">{isRtl ? "فرنسا 🇫🇷" : "France 🇫🇷"}</option>
+                    <option value="Morocco">{isRtl ? "المغرب 🇲🇦" : "Morocco 🇲🇦"}</option>
+                    <option value="Other">{isRtl ? "دولة أخرى" : "Other"}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">{t.password}</label>
+                <div className="relative">
+                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
+                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
+                  >
+                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group overflow-hidden bg-gradient-to-r from-emerald-600 via-indigo-600 to-violet-600 hover:from-emerald-500 hover:via-indigo-500 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg shadow-emerald-500/10 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-emerald-500/10"
+              >
+                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isRtl ? "جاري إنشاء الحساب المتكامل..." : "Provisioning profile workspace..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{t.register}</span>
+                    <span className={`transition-transform duration-300 ${isRtl ? "group-hover:-translate-x-1" : "group-hover:translate-x-1"}`}>
+                      {isRtl ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
+                    </span>
+                  </>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                  className="text-slate-400 hover:text-white text-xs font-semibold"
+                >
+                  {isRtl ? "لديك حساب بالفعل؟ تسجيل الدخول" : "Already have an account? Sign In"}
+                </button>
+              </div>
+            </form>
           )}
 
           {/* FORGOT PASSWORD FORM */}
