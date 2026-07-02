@@ -287,7 +287,13 @@ export default function App() {
   useEffect(() => {
     const isSuperAdminEmail = session?.email?.toLowerCase().trim() === "coreviadz@gmail.com" || session?.email?.toLowerCase().trim() === "admin@corevia.com";
     if (session && (session.role === "super_admin" || session.role === "super-admin" || isSuperAdminEmail)) {
-      fetch("/api/auth/verify-super-admin", { credentials: "include" })
+      const headers: Record<string, string> = {};
+      const token = (session as any)?.token;
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const url = token ? `/api/auth/verify-super-admin?token=${encodeURIComponent(token)}` : "/api/auth/verify-super-admin";
+      fetch(url, { headers, credentials: "include" })
         .then(res => {
           if (res.ok) return res.json();
           throw new Error("Super admin verification failed");
@@ -561,8 +567,23 @@ export default function App() {
 
   // 1. Core Session persistence and automatic session restoration
   useEffect(() => {
+    let token = "";
+    try {
+      const cachedRaw = localStorage.getItem("corevia_session_v1");
+      if (cachedRaw) {
+        const parsed = JSON.parse(cachedRaw);
+        token = parsed?.token || "";
+      }
+    } catch (_) {}
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const url = token ? `/api/auth/session?token=${encodeURIComponent(token)}` : "/api/auth/session";
+
     // Attempt to restore server-side JWT cookie-based session first as single source of truth
-    fetch("/api/auth/session", { credentials: "include" })
+    fetch(url, { headers, credentials: "include" })
       .then(res => {
         if (res.ok) {
           return res.json();
@@ -572,8 +593,12 @@ export default function App() {
       .then(async (data) => {
         if (data.authenticated && data.session) {
           console.log("🟩 Server session validated and restored successfully:", data.session);
-          setSession(data.session);
-          saveUserSession(data.session);
+          const finalSess = { ...data.session };
+          if (data.token) {
+            finalSess.token = data.token;
+          }
+          setSession(finalSess);
+          saveUserSession(finalSess);
           try {
             const meta = await fetchUserSaaSMeta(
               data.session.user_id || data.session.userId || "",
@@ -2303,7 +2328,9 @@ export default function App() {
             triggerToast(isRtl ? "تم تفويض وتفعيل حسابك بنجاح!" : "Authorized and activated successfully!", "success");
             setTypedOtpCode("");
             // Force session refresh
-            setSession({ ...session!, isApproved: true });
+            const updatedSess = { ...session!, isApproved: true };
+            setSession(updatedSess);
+            saveUserSession(updatedSess);
           } catch (err: any) {
             console.error("Failed to verify in Supabase:", err);
             triggerToast(isRtl ? "فشل تحديث حالة الحساب في قاعدة البيانات." : "Database sync failure.", "info");

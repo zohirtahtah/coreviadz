@@ -46,6 +46,7 @@ export interface UserSession {
   allowedPages?: string[];
   jobTitle?: string;
   isReadOnly?: boolean;
+  token?: string;
 }
 
 export interface OrderItem {

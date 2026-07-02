@@ -15,6 +15,7 @@ import { supabase } from "../supabaseClient";
 import { getLocalEmployees, Employee } from "../employeeService";
 import { logActivity } from "../activityLogService";
 import { resilientUpsert } from "../supabaseSync";
+import OnboardingWizard from "./OnboardingWizard";
 
 interface AuthProps {
   lang: LanguageType;
@@ -308,7 +309,11 @@ export default function Auth({
       );
 
       // Pass the session down up to the application state
-      onAuthSuccess(resData.session);
+      const sessionWithToken = {
+        ...resData.session,
+        token: resData.token
+      };
+      onAuthSuccess(sessionWithToken);
 
     } catch (err: any) {
       console.error("claim-invite submit error:", err);
@@ -374,6 +379,9 @@ export default function Auth({
         }
 
         const authenticatedSession: UserSession = resData.session;
+        if (authenticatedSession && resData.token) {
+          authenticatedSession.token = resData.token;
+        }
 
         if (authenticatedSession && (authenticatedSession as any).isFirstLogin) {
           setTempOldPassword(finalPassword);
@@ -637,22 +645,30 @@ export default function Auth({
         }).then(() => console.log("New registration logged to Supabase logs"));
 
         // Trigger automatic verification email immediately after registration
-        await fetch("/api/auth/register-company", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId,
-            email: emailInput.trim().toLowerCase(),
-            password: passwordInput,
-            companyName: companyNameInput.trim(),
-            name: nameInput.trim(),
-            phone: phoneInput.trim(),
-            country: countryInput
-          }),
-          credentials: "include"
-        }).then(res => res.json())
-          .then(data => console.log("[Auto-Verification] Sent email on registration:", data))
-          .catch(err => console.error("[Auto-Verification] Failed to send email:", err));
+        let token = "";
+        try {
+          const regRes = await fetch("/api/auth/register-company", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId,
+              email: emailInput.trim().toLowerCase(),
+              password: passwordInput,
+              companyName: companyNameInput.trim(),
+              name: nameInput.trim(),
+              phone: phoneInput.trim(),
+              country: countryInput
+            }),
+            credentials: "include"
+          });
+          const regData = await regRes.json();
+          if (regData && regData.token) {
+            token = regData.token;
+          }
+          console.log("[Auto-Verification] Sent email on registration:", regData);
+        } catch (err) {
+          console.error("[Auto-Verification] Failed to send email:", err);
+        }
 
         const sessionRecord: UserSession = {
           username: nameInput.trim(),
@@ -663,7 +679,8 @@ export default function Auth({
           user_id: userId,
           userId: userId,
           company_id: companyId,
-          role: "admin"
+          role: "admin",
+          token: token
         };
 
         onAuthSuccess(sessionRecord);
@@ -830,8 +847,9 @@ export default function Auth({
         }
 
         const authenticatedSession: UserSession = resData.session;
-
-        // Optionally cache to local storage in parallel for fallback
+        if (authenticatedSession && resData.token) {
+          authenticatedSession.token = resData.token;
+        }
         try {
           const currentLocal = getLocalEmployees();
           const idx = currentLocal.findIndex(e => e.id === authenticatedSession.userId);
@@ -1102,168 +1120,15 @@ export default function Auth({
             </form>
           )}
 
-          {/* REGISTER VIEW TEMPLATE */}
+                    {/* REGISTER VIEW TEMPLATE */}
           {authMode === "register" && (
-            <form onSubmit={handleSubmit} className="space-y-4" id="register_form">
-              {/* Company Name */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "اسم المؤسسة / الشركة" : "Company / Enterprise Name"}
-                </label>
-                <div className="relative">
-                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>🏢</span>
-                  <input
-                    type="text"
-                    required
-                    value={companyNameInput}
-                    onChange={(e) => setCompanyNameInput(e.target.value)}
-                    placeholder={isRtl ? "شات تيك للتجارة والتوزيع" : "Corevia Tech Trading"}
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Owner Name */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "الاسم الكامل للمالك" : "Owner Full Name"}
-                </label>
-                <div className="relative">
-                  <User className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type="text"
-                    required
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="Benali Abderrahmane"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Email Address */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "البريد الإلكتروني المعتمر" : "Email Address"}
-                </label>
-                <div className="relative">
-                  <Mail className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type="email"
-                    required
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="owner@gmail.com"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Phone Number */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "رقم الهاتف" : "Phone Number"}
-                </label>
-                <div className="relative">
-                  <span className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} text-[13px] font-bold text-slate-500`}>📞</span>
-                  <input
-                    type="tel"
-                    required
-                    value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value)}
-                    placeholder="+213 550 12 34 56"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Country Selection */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  {isRtl ? "الدولة" : "Country"}
-                </label>
-                <div className="relative">
-                  <Globe className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <select
-                    value={countryInput}
-                    onChange={(e) => setCountryInput(e.target.value)}
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-250 text-xs focus:outline-none focus:border-indigo-500 transition-all appearance-none ${
-                      isRtl ? "pr-10 pl-4 text-right" : "pl-10 pr-4 text-left"
-                    }`}
-                  >
-                    <option value="Algeria">{isRtl ? "الجزائر 🇩🇿" : "Algeria 🇩🇿"}</option>
-                    <option value="France">{isRtl ? "فرنسا 🇫🇷" : "France 🇫🇷"}</option>
-                    <option value="Morocco">{isRtl ? "المغرب 🇲🇦" : "Morocco 🇲🇦"}</option>
-                    <option value="Other">{isRtl ? "دولة أخرى" : "Other"}</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Password */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">{t.password}</label>
-                <div className="relative">
-                  <KeyRound className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "right-3.5" : "left-3.5"} w-4 h-4 text-slate-500`} />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="••••••••"
-                    className={`w-full bg-[#09090b] border border-[#27272a] rounded-xl py-2.5 text-slate-200 text-xs focus:outline-none focus:border-indigo-500 transition-all ${
-                      isRtl ? "pr-10 pl-16 text-right" : "pl-10 pr-16 text-left"
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className={`absolute top-1/2 -translate-y-1/2 ${isRtl ? "left-3" : "right-3"} text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 bg-[#1c1c1e] rounded border border-[#27272a] flex items-center gap-1`}
-                  >
-                    {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                    <span>{showPassword ? t.hidePassword : t.showPassword}</span>
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full relative group overflow-hidden bg-gradient-to-r from-emerald-600 via-indigo-600 to-violet-600 hover:from-emerald-500 hover:via-indigo-500 hover:to-violet-500 text-white rounded-xl py-3 text-xs font-black shadow-lg shadow-emerald-500/10 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 border border-emerald-500/10"
-              >
-                <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>{isRtl ? "جاري إنشاء الحساب المتكامل..." : "Provisioning profile workspace..."}</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{t.register}</span>
-                    <span className={`transition-transform duration-300 ${isRtl ? "group-hover:-translate-x-1" : "group-hover:translate-x-1"}`}>
-                      {isRtl ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-                    </span>
-                  </>
-                )}
-              </button>
-
-              <div className="text-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => setAuthMode("login")}
-                  className="text-slate-400 hover:text-white text-xs font-semibold"
-                >
-                  {isRtl ? "لديك حساب بالفعل؟ تسجيل الدخول" : "Already have an account? Sign In"}
-                </button>
-              </div>
-            </form>
+            <OnboardingWizard
+              onAuthSuccess={onAuthSuccess}
+              onTriggerNotification={onTriggerNotification}
+              isRtl={isRtl}
+              t={t}
+              setAuthMode={setAuthMode}
+            />
           )}
 
           {/* FORGOT PASSWORD FORM */}

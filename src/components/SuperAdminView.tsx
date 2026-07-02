@@ -60,7 +60,27 @@ export default function SuperAdminView({
   const loadSaaSRealData = async () => {
     setIsLoadingSaaS(true);
     try {
-      const response = await fetch("/api/superadmin/companies", {
+      let token = (session as any)?.token;
+      if (!token) {
+        try {
+          const cachedRaw = localStorage.getItem("corevia_session_v1");
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            token = parsed?.token || undefined;
+          }
+        } catch (_) {}
+      }
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const url = token ? `/api/superadmin/companies?token=${encodeURIComponent(token)}` : "/api/superadmin/companies";
+      const response = await fetch(url, {
+        headers,
         credentials: "include"
       });
       if (!response.ok) {

@@ -10,6 +10,23 @@ interface SupportTabProps {
   onTriggerNotification: (msg: string, type: "success" | "info") => void;
 }
 
+const getAuthDetails = () => {
+  let token = "";
+  try {
+    const cachedRaw = localStorage.getItem("corevia_session_v1");
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      token = parsed?.token || "";
+    }
+  } catch (_) {}
+  
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return { token, headers };
+};
+
 export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabProps) {
   const [tickets, setTickets] = useState<any[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
@@ -21,7 +38,10 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/superadmin/support-tickets", {
+      const { token, headers } = getAuthDetails();
+      const url = token ? `/api/superadmin/support-tickets?token=${encodeURIComponent(token)}` : "/api/superadmin/support-tickets";
+      const response = await fetch(url, {
+        headers,
         credentials: "include"
       });
       if (!response.ok) {
@@ -38,7 +58,10 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
 
   const loadMessages = async (ticketId: string) => {
     try {
-      const response = await fetch(`/api/superadmin/support-messages/${ticketId}`, {
+      const { token, headers } = getAuthDetails();
+      const url = token ? `/api/superadmin/support-messages/${ticketId}?token=${encodeURIComponent(token)}` : `/api/superadmin/support-messages/${ticketId}`;
+      const response = await fetch(url, {
+        headers,
         credentials: "include"
       });
       if (!response.ok) {
@@ -84,9 +107,14 @@ export default function SupportTab({ isRtl, onTriggerNotification }: SupportTabP
         is_internal: isInternal
       };
 
-      const response = await fetch("/api/superadmin/support-reply", {
+      const { token, headers } = getAuthDetails();
+      const url = token ? `/api/superadmin/support-reply?token=${encodeURIComponent(token)}` : "/api/superadmin/support-reply";
+      const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          ...headers,
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(payload),
         credentials: "include"
       });
