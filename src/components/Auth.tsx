@@ -23,7 +23,7 @@ interface AuthProps {
   onTriggerNotification: (msg: string, type?: "success" | "info") => void;
 }
 
-type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "activate_invite" | "first_login_change";
+type AuthMode = "login" | "register" | "forgot" | "forgot_otp" | "pending_approval" | "suspended" | "update_password" | "activate_invite" | "first_login_change" | "pending_verification";
 
 export default function Auth({
   lang,
@@ -56,15 +56,51 @@ export default function Auth({
   // Pending Session State to mock Waiting List
   const [pendingSession, setPendingSession] = useState<UserSession | null>(null);
 
+  // Email verification resend
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState("");
+  const handleResendVerification = async () => {
+    if (!supabase || !pendingVerifyEmail) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: pendingVerifyEmail
+      });
+      if (error) throw error;
+      onTriggerNotification(
+        isRtl ? "تم إعادة إرسال رسالة التفعيل. يرجى التحقق من بريدك الإلكتروني." : "Verification email resent. Please check your inbox.",
+        "success"
+      );
+    } catch (err: any) {
+      onTriggerNotification(
+        isRtl ? `فشل إعادة الإرسال: ${err.message}` : `Resend failed: ${err.message}`,
+        "info"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Active secure invitation validation state
   const [activeInviteToken, setActiveInviteToken] = useState<string | null>(null);
   const [invitedEmployee, setInvitedEmployee] = useState<{ fullName: string, email: string, username: string, jobTitle: string } | null>(null);
 
-  // URL Hash Verification monitor for Password Recovery
+  // URL Hash Verification monitor for Password Recovery and Email Verification
   useEffect(() => {
     try {
       const hash = window.location.hash;
       if (hash && (hash.includes("type=recovery") || hash.includes("access_token="))) {
+        // Check if it's a signup verification (not recovery)
+        if (hash.includes("type=signup")) {
+          onTriggerNotification(
+            isRtl 
+              ? "✅ تم تأكيد بريدك الإلكتروني بنجاح! يمكنك الآن تسجيل الدخول." 
+              : "✅ Email verified successfully! You can now log in.", 
+            "success"
+          );
+          setAuthMode("login");
+          return;
+        }
         setAuthMode("update_password");
         onTriggerNotification(
           isRtl 
@@ -439,6 +475,13 @@ export default function Auth({
         const resData = await response.json();
 
         if (!response.ok) {
+          // Handle email_not_verified specifically
+          if (resData.email_not_verified) {
+            setPendingVerifyEmail(finalEmail.toLowerCase().trim());
+            setAuthMode("pending_verification");
+            setIsSubmitting(false);
+            return;
+          }
           throw new Error(isRtl ? (resData.error_ar || resData.error_en) : (resData.error_en || resData.error_ar));
         }
 
@@ -612,18 +655,13 @@ export default function Auth({
           throw new Error(registerData.error_en || registerData.error_ar || "Registration failed");
         }
 
-        const { userId, companyId, access_token, refresh_token } = registerData;
+        const { userId, companyId } = registerData;
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const todayStr = new Date().toISOString().split("T")[0];
         const trialEndStr = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-        // If server returned session tokens, authenticate the frontend Supabase client instantly
-        if (access_token && refresh_token && supabase) {
-          await supabase.auth.setSession({
-            access_token,
-            refresh_token
-          });
-        }
+        // No session tokens returned — user must verify email first
+        // Show the pending_verification screen instead
 
         // Cache company in localStorage for offline resilience
         const newCompanyObj: SaaSCompany = {
@@ -677,20 +715,9 @@ export default function Auth({
           }
         } catch (_) {}
 
-        const sessionRecord: UserSession = {
-          username: nameInput.trim(),
-          email: emailInput.trim().toLowerCase(),
-          isRegistered: true,
-          isApproved: true,
-          isSuspended: false,
-          user_id: userId,
-          userId: userId,
-          company_id: companyId,
-          role: "admin"
-        };
-
-        onAuthSuccess(sessionRecord);
-        onTriggerNotification(isRtl ? "تم تسجيل الحساب بنجاح! تم الدخول وبانتظار التحقق بـ OTP البريد الإلكتروني." : "Tenant created successfully! Awaiting email verification OTP link.", "success");
+        setPendingVerifyEmail(emailInput.trim().toLowerCase());
+        setAuthMode("pending_verification");
+        onTriggerNotification(isRtl ? "تم إنشاء الحساب! يرجى التحقق من بريدك الإلكتروني لتفعيل حسابك قبل تسجيل الدخول." : "Account created! Please check your email to verify your account before logging in.", "success");
 
       } catch (err: any) {
         console.error("Auth register error:", err);
@@ -1736,6 +1763,47 @@ export default function Auth({
               <div className="border-t border-[#27272a]/60 pt-4 space-y-2">
                 <button
                   onClick={() => setAuthMode("login")}
+                  className="w-full bg-[#1c1c1e] hover:bg-[#27272a] text-slate-400 text-xs py-2 rounded-xl transition-all font-semibold"
+                >
+                  {t.backToLogin}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PENDING EMAIL VERIFICATION */}
+          {authMode === "pending_verification" && (
+            <div className="space-y-6 text-center" id="pending_verification_block">
+              <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                <Mail className="w-7 h-7" />
+              </div>
+
+              <div>
+                <h2 className="text-base font-bold text-white mb-2">
+                  {isRtl ? "يرجى تأكيد بريدك الإلكتروني" : "Verify Your Email"}
+                </h2>
+                <div className="p-4 bg-[#09090b] border border-emerald-500/10 rounded-2xl text-[11px] text-slate-350 leading-relaxed mb-4" style={{textAlign: isRtl ? "right" : "left"}}>
+                  {isRtl
+                    ? `تم إرسال رسالة التفعيل إلى ${pendingVerifyEmail}. يرجى التحقق من بريدك الإلكتروني (بما في ذلك مجلد الرسائل غير المرغوب فيها) والنقر على رابط التفعيل لتأكيد حسابك، ثم تسجيل الدخول.`
+                    : `A verification email has been sent to ${pendingVerifyEmail}. Please check your inbox (including spam folder) and click the verification link to confirm your account, then log in.`}
+                </div>
+              </div>
+
+              <div className="border-t border-[#27272a]/60 pt-4 space-y-3">
+                <button
+                  onClick={handleResendVerification}
+                  disabled={isSubmitting}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2.5 rounded-xl transition-all font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Mail className="w-4 h-4" />
+                  )}
+                  <span>{isRtl ? "إعادة إرسال رسالة التفعيل" : "Resend Verification Email"}</span>
+                </button>
+                <button
+                  onClick={() => { setAuthMode("login"); setPendingVerifyEmail(""); }}
                   className="w-full bg-[#1c1c1e] hover:bg-[#27272a] text-slate-400 text-xs py-2 rounded-xl transition-all font-semibold"
                 >
                   {t.backToLogin}

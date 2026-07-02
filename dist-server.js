@@ -221,10 +221,25 @@ app.post("/api/auth/login", async (req, res) => {
         password
       });
       if (authError || !authData.user) {
+        const errMsg = authError?.message || "";
+        if (errMsg.toLowerCase().includes("email not confirmed") || errMsg.toLowerCase().includes("email_not_confirmed")) {
+          return res.status(403).json({
+            email_not_verified: true,
+            error_en: "Please verify your email first, then try logging in.",
+            error_ar: "\u064A\u0631\u062C\u0649 \u062A\u0623\u0643\u064A\u062F \u0628\u0631\u064A\u062F\u0643 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0623\u0648\u0644\u0627\u064B\u060C \u062B\u0645 \u062D\u0627\u0648\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
+          });
+        }
         console.warn("[Auth API] Sign-in rejection:", authError);
         return res.status(401).json({
           error_en: "Sign-in failed. Please verify your credentials and try again.",
           error_ar: "\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0623\u0648\u0631\u0627\u0642 \u0627\u0639\u062A\u0645\u0627\u062F\u0643 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649."
+        });
+      }
+      if (!authData.user.email_confirmed_at) {
+        return res.status(403).json({
+          email_not_verified: true,
+          error_en: "Please verify your email first, then try logging in.",
+          error_ar: "\u064A\u0631\u062C\u0649 \u062A\u0623\u0643\u064A\u062F \u0628\u0631\u064A\u062F\u0643 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0623\u0648\u0644\u0627\u064B\u060C \u062B\u0645 \u062D\u0627\u0648\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
         });
       }
       userId = authData.user.id;
@@ -314,7 +329,7 @@ app.post("/api/auth/register", async (req, res) => {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: cleanEmail,
       password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: {
         full_name: ownerName,
         company_name: companyName
@@ -383,23 +398,6 @@ app.post("/api/auth/register", async (req, res) => {
         break;
       }
     }
-    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
-      email: cleanEmail,
-      password
-    });
-    if (signInError) {
-      return res.status(201).json({
-        registered: true,
-        userId,
-        companyId,
-        email: cleanEmail,
-        username: ownerName.trim(),
-        role: "admin",
-        message_en: "Account created. Please log in.",
-        message_ar: "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
-      });
-    }
-    const session = signInData.session;
     res.status(201).json({
       registered: true,
       userId,
@@ -407,11 +405,8 @@ app.post("/api/auth/register", async (req, res) => {
       email: cleanEmail,
       username: ownerName.trim(),
       role: "admin",
-      access_token: session?.access_token || "",
-      refresh_token: session?.refresh_token || "",
-      expires_in: session?.expires_in || 3600,
-      message_en: "Registration successful.",
-      message_ar: "\u062A\u0645 \u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0628\u0646\u062C\u0627\u062D."
+      message_en: "Account created. Please check your email to verify your account before logging in.",
+      message_ar: "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0628\u0631\u064A\u062F\u0643 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0644\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628\u0643 \u0642\u0628\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644."
     });
   } catch (err) {
     console.error("Registration error:", err);

@@ -253,10 +253,27 @@ app.post("/api/auth/login", async (req, res) => {
       });
 
       if (authError || !authData.user) {
+        const errMsg = authError?.message || "";
+        // Detect "Email not confirmed" and give a specific message
+        if (errMsg.toLowerCase().includes("email not confirmed") || errMsg.toLowerCase().includes("email_not_confirmed")) {
+          return res.status(403).json({
+            email_not_verified: true,
+            error_en: "Please verify your email first, then try logging in.",
+            error_ar: "يرجى تأكيد بريدك الإلكتروني أولاً، ثم حاول تسجيل الدخول."
+          });
+        }
         console.warn("[Auth API] Sign-in rejection:", authError);
         return res.status(401).json({
           error_en: "Sign-in failed. Please verify your credentials and try again.",
           error_ar: "فشل تسجيل الدخول. يرجى التحقق من أوراق اعتمادك والمحاولة مرة أخرى."
+        });
+      }
+      // Explicit check: even if sign-in succeeded, ensure email is confirmed
+      if (!authData.user.email_confirmed_at) {
+        return res.status(403).json({
+          email_not_verified: true,
+          error_en: "Please verify your email first, then try logging in.",
+          error_ar: "يرجى تأكيد بريدك الإلكتروني أولاً، ثم حاول تسجيل الدخول."
         });
       }
       userId = authData.user.id;
@@ -362,11 +379,11 @@ app.post("/api/auth/register", async (req, res) => {
       auth: { persistSession: false, autoRefreshToken: false }
     });
 
-    // Step A: Create the user in Supabase Auth (auto-confirm email)
+    // Step A: Create the user in Supabase Auth (email_confirm: false => sends verification email)
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: cleanEmail,
       password: password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: {
         full_name: ownerName,
         company_name: companyName
@@ -453,28 +470,7 @@ app.post("/api/auth/register", async (req, res) => {
       }
     }
 
-    // Step C: Sign in as the newly created user to get session tokens
-    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
-      email: cleanEmail,
-      password: password
-    });
-
-    if (signInError) {
-      // Fallback: return user info without session (user can log in manually)
-      return res.status(201).json({
-        registered: true,
-        userId,
-        companyId,
-        email: cleanEmail,
-        username: ownerName.trim(),
-        role: "admin",
-        message_en: "Account created. Please log in.",
-        message_ar: "تم إنشاء الحساب. يرجى تسجيل الدخول."
-      });
-    }
-
-    // Return full session to the frontend
-    const session = signInData.session;
+    // Step C: No session created — user must verify email first before logging in
     res.status(201).json({
       registered: true,
       userId,
@@ -482,11 +478,8 @@ app.post("/api/auth/register", async (req, res) => {
       email: cleanEmail,
       username: ownerName.trim(),
       role: "admin",
-      access_token: session?.access_token || "",
-      refresh_token: session?.refresh_token || "",
-      expires_in: session?.expires_in || 3600,
-      message_en: "Registration successful.",
-      message_ar: "تم التسجيل بنجاح."
+      message_en: "Account created. Please check your email to verify your account before logging in.",
+      message_ar: "تم إنشاء الحساب. يرجى التحقق من بريدك الإلكتروني لتفعيل حسابك قبل تسجيل الدخول."
     });
 
   } catch (err: any) {

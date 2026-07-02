@@ -619,6 +619,18 @@ export default function App() {
           console.warn("Server session validation offline - restoring from cache:", err);
           const cachedSess = getUserSession();
           if (cachedSess && cachedSess.isRegistered) {
+            // Defense-in-depth: verify email is confirmed via Supabase
+            if (supabase && cachedSess.email) {
+              try {
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (authUser && !authUser.email_confirmed_at) {
+                  console.warn("Cached session rejected: email not confirmed");
+                  saveUserSession(null as any);
+                  setHasCompletedOnboarding(false);
+                  return;
+                }
+              } catch (_) {}
+            }
             setSession(cachedSess);
             try {
               const meta = await fetchUserSaaSMeta(
@@ -2007,6 +2019,22 @@ export default function App() {
         theme={theme}
         setTheme={setTheme}
         onAuthSuccess={async (newSession) => {
+          // Defense-in-depth: verify email confirmation with Supabase before allowing access
+          if (supabase && newSession?.email) {
+            try {
+              const { data: { user: authUser } } = await supabase.auth.getUser();
+              if (authUser && !authUser.email_confirmed_at) {
+                setSession(null);
+                saveUserSession(null as any);
+                triggerToast(
+                  isRtl ? "يرجى تأكيد بريدك الإلكتروني أولاً" : "Please verify your email first",
+                  "info"
+                );
+                return;
+              }
+            } catch (_) {}
+          }
+
           setSession(newSession);
           saveUserSession(newSession);
           
