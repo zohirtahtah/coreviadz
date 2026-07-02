@@ -576,64 +576,112 @@ export default function App() {
       }
     } catch (_) {}
 
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    const url = token ? `/api/auth/session?token=${encodeURIComponent(token)}` : "/api/auth/session";
+    const runStandardSessionRestore = () => {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const url = token ? `/api/auth/session?token=${encodeURIComponent(token)}` : "/api/auth/session";
 
-    // Attempt to restore server-side JWT cookie-based session first as single source of truth
-    fetch(url, { headers, credentials: "include" })
-      .then(res => {
-        if (res.ok) {
-          return res.json();
-        }
-        throw new Error("No server session available");
-      })
-      .then(async (data) => {
-        if (data.authenticated && data.session) {
-          console.log("🟩 Server session validated and restored successfully:", data.session);
-          const finalSess = { ...data.session };
-          if (data.token) {
-            finalSess.token = data.token;
+      // Attempt to restore server-side JWT cookie-based session first as single source of truth
+      fetch(url, { headers, credentials: "include" })
+        .then(res => {
+          if (res.ok) {
+            return res.json();
           }
-          setSession(finalSess);
-          saveUserSession(finalSess);
-          try {
-            const meta = await fetchUserSaaSMeta(
-              data.session.user_id || data.session.userId || "",
-              data.session.email,
-              data.session.username
-            );
-            setHasCompletedOnboarding(meta.hasCompletedOnboarding);
-          } catch (mErr) {
-            console.error("Could not fetch user meta on restore:", mErr);
+          throw new Error("No server session available");
+        })
+        .then(async (data) => {
+          if (data.authenticated && data.session) {
+            console.log("🟩 Server session validated and restored successfully:", data.session);
+            const finalSess = { ...data.session };
+            if (data.token) {
+              finalSess.token = data.token;
+            }
+            setSession(finalSess);
+            saveUserSession(finalSess);
+            try {
+              const meta = await fetchUserSaaSMeta(
+                data.session.user_id || data.session.userId || "",
+                data.session.email,
+                data.session.username
+              );
+              setHasCompletedOnboarding(meta.hasCompletedOnboarding);
+            } catch (mErr) {
+              console.error("Could not fetch user meta on restore:", mErr);
+              setHasCompletedOnboarding(false);
+            }
+          } else {
+            throw new Error("Unauthenticated server session");
+          }
+        })
+        .catch(async (err) => {
+          console.warn("Server session validation offline - restoring from cache:", err);
+          const cachedSess = getUserSession();
+          if (cachedSess && cachedSess.isRegistered) {
+            setSession(cachedSess);
+            try {
+              const meta = await fetchUserSaaSMeta(
+                cachedSess.user_id || cachedSess.userId || "",
+                cachedSess.email,
+                cachedSess.username
+              );
+              setHasCompletedOnboarding(meta.hasCompletedOnboarding);
+            } catch (mErr) {
+              console.error("Could not fetch user meta on cache restore:", mErr);
+              setHasCompletedOnboarding(false);
+            }
+          } else {
             setHasCompletedOnboarding(false);
           }
+        });
+    };
+
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: { session: sbSession } }) => {
+        if (sbSession) {
+          const user = sbSession.user;
+          const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "User";
+          const avatarUrl = user.user_metadata?.avatar_url || "";
+          
+          fetch("/api/auth/oauth-login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: user.id,
+              email: user.email,
+              name,
+              avatarUrl
+            })
+          })
+          .then(res => res.json())
+          .then(data => {
+            if (data.authenticated && data.session) {
+              console.log("🟩 Google OAuth session synchronized and restored successfully:", data.session);
+              const finalSess = { ...data.session };
+              if (data.token) {
+                finalSess.token = data.token;
+              }
+              setSession(finalSess);
+              saveUserSession(finalSess);
+              setHasCompletedOnboarding(data.hasCompletedOnboarding);
+            } else {
+              runStandardSessionRestore();
+            }
+          })
+          .catch(err => {
+            console.error("Google OAuth session sync error, falling back:", err);
+            runStandardSessionRestore();
+          });
         } else {
-          throw new Error("Unauthenticated server session");
+          runStandardSessionRestore();
         }
-      })
-      .catch(async (err) => {
-        console.warn("Server session validation offline - restoring from cache:", err);
-        const cachedSess = getUserSession();
-        if (cachedSess && cachedSess.isRegistered) {
-          setSession(cachedSess);
-          try {
-            const meta = await fetchUserSaaSMeta(
-              cachedSess.user_id || cachedSess.userId || "",
-              cachedSess.email,
-              cachedSess.username
-            );
-            setHasCompletedOnboarding(meta.hasCompletedOnboarding);
-          } catch (mErr) {
-            console.error("Could not fetch user meta on cache restore:", mErr);
-            setHasCompletedOnboarding(false);
-          }
-        } else {
-          setHasCompletedOnboarding(false);
-        }
+      }).catch(() => {
+        runStandardSessionRestore();
       });
+    } else {
+      runStandardSessionRestore();
+    }
   }, []);
 
   const handlePaymentSuccess = async (plan: string, durationMonths: number) => {

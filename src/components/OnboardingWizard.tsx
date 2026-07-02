@@ -7,6 +7,32 @@ import {
 } from "lucide-react";
 import { supabase } from "../supabaseClient";
 
+// Safe sessionStorage wrapper with memory fallback to protect against iframe/sandbox SecurityErrors
+const memorySessionStorage: Record<string, string> = {};
+const safeSessionStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return sessionStorage.getItem(key);
+    } catch (e) {
+      return memorySessionStorage[key] || null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      sessionStorage.setItem(key, value);
+    } catch (e) {
+      memorySessionStorage[key] = value;
+    }
+  },
+  removeItem: (key: string): void => {
+    try {
+      sessionStorage.removeItem(key);
+    } catch (e) {
+      delete memorySessionStorage[key];
+    }
+  }
+};
+
 interface OnboardingWizardProps {
   onAuthSuccess: (session: any) => void;
   onTriggerNotification: (message: string, type?: "success" | "info") => void;
@@ -64,10 +90,10 @@ export default function OnboardingWizard({
   const [otpError, setOtpError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Load state from sessionStorage on mount
+  // Load state from safeSessionStorage on mount
   useEffect(() => {
     try {
-      const savedStateStr = sessionStorage.getItem("corevia_onboarding_wizard_state");
+      const savedStateStr = safeSessionStorage.getItem("corevia_onboarding_wizard_state");
       if (savedStateStr) {
         const savedState: OnboardingState = JSON.parse(savedStateStr);
         if (savedState.companyName) setCompanyName(savedState.companyName);
@@ -84,7 +110,7 @@ export default function OnboardingWizard({
         
         // Restore step if they are past step 1 and have a userId
         if (savedState.userId) {
-          const savedStep = sessionStorage.getItem("corevia_onboarding_wizard_step");
+          const savedStep = safeSessionStorage.getItem("corevia_onboarding_wizard_step");
           if (savedStep) {
             setStep(parseInt(savedStep));
           }
@@ -98,17 +124,17 @@ export default function OnboardingWizard({
   // Save state helper
   const saveStateToSession = (updates: Partial<OnboardingState>, nextStep?: number) => {
     try {
-      const savedStateStr = sessionStorage.getItem("corevia_onboarding_wizard_state");
+      const savedStateStr = safeSessionStorage.getItem("corevia_onboarding_wizard_state");
       const currentState: OnboardingState = savedStateStr ? JSON.parse(savedStateStr) : {
         companyName, ownerName, email, phone, country, numEmployees, businessActivity, logoUrl: uploadedLogoUrl
       };
       
       const updatedState = { ...currentState, ...updates };
-      sessionStorage.setItem("corevia_onboarding_wizard_state", JSON.stringify(updatedState));
+      safeSessionStorage.setItem("corevia_onboarding_wizard_state", JSON.stringify(updatedState));
       
       if (nextStep) {
         setStep(nextStep);
-        sessionStorage.setItem("corevia_onboarding_wizard_step", nextStep.toString());
+        safeSessionStorage.setItem("corevia_onboarding_wizard_step", nextStep.toString());
       }
     } catch (e) {
       console.error("Failed to save state:", e);
@@ -122,6 +148,31 @@ export default function OnboardingWizard({
       return () => clearTimeout(timer);
     }
   }, [resendCooldown]);
+
+  // Handle Google OAuth authentication
+  const handleGoogleSignIn = async () => {
+    if (!supabase) {
+      onTriggerNotification(
+        isRtl ? "نظام Supabase غير متاح حالياً" : "Supabase service is currently unavailable",
+        "info"
+      );
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/`
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Google OAuth Error:", err);
+      onTriggerNotification(err.message || "Google Authentication failed", "info");
+      setIsSubmitting(false);
+    }
+  };
 
   // Step 1: Submit Company / Admin Credentials
   const handleStep1Submit = async (e: React.FormEvent) => {
@@ -247,7 +298,7 @@ export default function OnboardingWizard({
   const handleStep3StartNow = async () => {
     setIsSubmitting(true);
     try {
-      const savedStateStr = sessionStorage.getItem("corevia_onboarding_wizard_state");
+      const savedStateStr = safeSessionStorage.getItem("corevia_onboarding_wizard_state");
       if (!savedStateStr) throw new Error("Onboarding state is missing. Please restart.");
       const state: OnboardingState = JSON.parse(savedStateStr);
 
@@ -372,7 +423,7 @@ export default function OnboardingWizard({
     setOtpError("");
     setIsSubmitting(true);
     try {
-      const savedStateStr = sessionStorage.getItem("corevia_onboarding_wizard_state");
+      const savedStateStr = safeSessionStorage.getItem("corevia_onboarding_wizard_state");
       const state: OnboardingState = savedStateStr ? JSON.parse(savedStateStr) : { email };
 
       const response = await fetch("/api/auth/verify-otp", {
@@ -390,8 +441,8 @@ export default function OnboardingWizard({
       }
 
       // Success activation & auto login!
-      sessionStorage.removeItem("corevia_onboarding_wizard_state");
-      sessionStorage.removeItem("corevia_onboarding_wizard_step");
+      safeSessionStorage.removeItem("corevia_onboarding_wizard_state");
+      safeSessionStorage.removeItem("corevia_onboarding_wizard_step");
 
       onTriggerNotification(
         isRtl ? "تم التحقق وتنشيط مساحة عملك بنجاح! جاري دخولك..." : "Workspace activated successfully! Logging you in...",
@@ -610,6 +661,30 @@ export default function OnboardingWizard({
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
+              </button>
+
+              {/* Google OAuth Login Button */}
+              <div className="relative flex py-1.5 items-center">
+                <div className="flex-grow border-t border-[#1f1f23]"></div>
+                <span className="flex-shrink mx-3 text-[10px] text-zinc-500 uppercase tracking-wider font-bold">
+                  {isRtl ? "أو تابع باستخدام" : "Or continue with"}
+                </span>
+                <div className="flex-grow border-t border-[#1f1f23]"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isSubmitting}
+                className="w-full bg-[#09090b] hover:bg-[#121214] text-zinc-250 border border-[#27272a] hover:border-zinc-700 rounded-xl py-2.5 text-xs font-bold active:scale-[0.99] flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path
+                    fill="#EA4335"
+                    d="M12.24 10.285V14.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.86-3.577-7.86-8s3.53-8 7.86-8c2.46 0 4.105 1.025 5.047 1.926l3.258-3.133C18.427 1.838 15.618.5 12.24.5c-6.353 0-11.5 5.147-11.5 11.5s5.147 11.5 11.5 11.5c6.635 0 11.04-4.664 11.04-11.25 0-.756-.08-1.335-.178-1.965H12.24z"
+                  />
+                </svg>
+                <span>{isRtl ? "متابعة باستخدام Google" : "Continue with Google"}</span>
               </button>
 
               <p className="text-center text-[10px] text-zinc-400 pt-1">

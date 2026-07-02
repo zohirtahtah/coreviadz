@@ -743,6 +743,250 @@ async function sendOTPMail(email: string, ownerName: string, companyName: string
   }
 }
 
+// POST /api/auth/oauth-login -> Handle client-side Supabase Google OAuth callback synchronizations
+app.post("/api/auth/oauth-login", async (req, res) => {
+  const { userId, email, name, avatarUrl } = req.body;
+
+  if (!email || !userId) {
+    return res.status(400).json({
+      error_en: "Email and User ID are required."
+    });
+  }
+
+  const targetEmail = email.toLowerCase().trim();
+  const companyId = `cop_${userId.substring(0, 15)}`;
+
+  try {
+    // Check if user exists locally or in DB
+    const localUsers = loadLocalUsers();
+    let matchedUser = localUsers.find(u => u.email?.toLowerCase() === targetEmail || u.user_id === userId);
+
+    let dbUser = null;
+    if (supabase) {
+      const { data } = await supabase
+        .from("corevia_saas_users")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+      dbUser = data;
+    }
+
+    const saasUser = matchedUser || dbUser;
+
+    // Check if company exists locally or in DB
+    const localCompanies = loadLocalCompanies();
+    let matchedCompany = localCompanies.find(c => c.owner_email?.toLowerCase() === targetEmail || c.id === (saasUser?.company_id || companyId));
+
+    let dbCompany = null;
+    if (supabase) {
+      const { data } = await supabase
+        .from("corevia_companies")
+        .select("*")
+        .eq("id", saasUser?.company_id || companyId)
+        .maybeSingle();
+      dbCompany = data;
+    }
+
+    const companyExists = matchedCompany || dbCompany;
+
+    let hasCompletedOnboarding = false;
+    let finalCompanyId = companyId;
+
+    if (saasUser) {
+      hasCompletedOnboarding = saasUser.has_completed_onboarding === true || saasUser.hasCompletedOnboarding === true;
+      finalCompanyId = saasUser.company_id || companyId;
+    }
+
+    if (!companyExists) {
+      // Flag as onboarding incomplete (new tenant)
+      hasCompletedOnboarding = false;
+
+      // Automatically initialize their admin user and company profile record
+      const newCompany = {
+        id: finalCompanyId,
+        name: `${name || targetEmail.split("@")[0]} Trading`,
+        owner_name: name || "User",
+        owner_email: targetEmail,
+        email: targetEmail,
+        phone: "",
+        country: "Algeria",
+        seats_limit: 5,
+        status: "active",
+        subscription_status: "Active",
+        subscription_plan: "Trial",
+        created_at: new Date().toISOString(),
+        email_verified: true,
+        logoUrl: avatarUrl || "",
+        logo_url: avatarUrl || "",
+        num_employees: "1 - 5",
+        business_activity: "",
+        otpCode: "123456"
+      };
+
+      // Save locally
+      localCompanies.push(newCompany);
+      saveLocalCompanies(localCompanies);
+
+      const newUser = {
+        user_id: userId,
+        company_id: finalCompanyId,
+        email: targetEmail,
+        username: name || targetEmail.split("@")[0],
+        has_completed_onboarding: false,
+        role: "admin",
+        userType: "admin"
+      };
+
+      localUsers.push(newUser);
+      saveLocalUsers(localUsers);
+
+      // Save to Postgres DB if active
+      if (pgPool) {
+        try {
+          await pgPool.query(
+            `INSERT INTO corevia_companies (id, name, owner_name, email, phone, country, seats_limit, status, subscription_status, subscription_plan, email_verified, "otpCode")
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             ON CONFLICT (id) DO NOTHING`,
+            [finalCompanyId, newCompany.name, newCompany.owner_name, targetEmail, "", "Algeria", 5, "active", "Active", "Trial", true, "123456"]
+          );
+          await pgPool.query(
+            `INSERT INTO corevia_saas_users (user_id, company_id, email, username, has_completed_onboarding, role)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (user_id) DO NOTHING`,
+            [userId, finalCompanyId, targetEmail, newUser.username, false, "admin"]
+          );
+        } catch (dbErr) {
+          console.warn("[OAuth Sync] Postgres pre-insert failed:", dbErr);
+        }
+      } else if (supabase) {
+        try {
+          await supabase.from("corevia_companies").upsert({
+            id: finalCompanyId,
+            name: newCompany.name,
+            owner_name: newCompany.owner_name,
+            email: newCompany.email,
+            phone: "",
+            country: "Algeria",
+            status: "active",
+            subscription_status: "Active",
+            subscription_plan: "Trial",
+            email_verified: true,
+            otpCode: "123456"
+          });
+
+          await supabase.from("corevia_saas_users").upsert({
+            user_id: userId,
+            company_id: finalCompanyId,
+            email: targetEmail,
+            username: name || targetEmail.split("@")[0],
+            has_completed_onboarding: false,
+            role: "admin"
+          });
+        } catch (dbErr: any) {
+          console.warn("[OAuth Sync] Supabase pre-insert failed:", dbErr.message);
+        }
+      }
+    } else {
+      // If company exists, but user record is missing, link them
+      if (!saasUser) {
+        const newUser = {
+          user_id: userId,
+          company_id: companyExists.id,
+          email: targetEmail,
+          username: name || targetEmail.split("@")[0],
+          has_completed_onboarding: companyExists.business_activity ? true : false,
+          role: "admin",
+          userType: "admin"
+        };
+        localUsers.push(newUser);
+        saveLocalUsers(localUsers);
+
+        if (pgPool) {
+          try {
+            await pgPool.query(
+              `INSERT INTO corevia_saas_users (user_id, company_id, email, username, has_completed_onboarding, role)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (user_id) DO NOTHING`,
+              [userId, companyExists.id, targetEmail, newUser.username, companyExists.business_activity ? true : false, "admin"]
+            );
+          } catch (dbErr) {
+            console.warn("[OAuth Sync] Postgres link failed:", dbErr);
+          }
+        } else if (supabase) {
+          try {
+            await supabase.from("corevia_saas_users").upsert({
+              user_id: userId,
+              company_id: companyExists.id,
+              email: targetEmail,
+              username: name || targetEmail.split("@")[0],
+              has_completed_onboarding: companyExists.business_activity ? true : false,
+              role: "admin"
+            });
+          } catch (dbErr: any) {
+            console.warn("[OAuth Sync] Supabase link failed:", dbErr.message);
+          }
+        }
+
+        hasCompletedOnboarding = companyExists.business_activity ? true : false;
+        finalCompanyId = companyExists.id;
+      } else {
+        hasCompletedOnboarding = saasUser.has_completed_onboarding === true || saasUser.hasCompletedOnboarding === true;
+        finalCompanyId = saasUser.company_id || companyExists.id;
+      }
+    }
+
+    // Generate custom JWT token embedding user identity, role, and tenant isolation parameters
+    const exp = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 Days expiration
+    const token = jwt.sign(
+      { 
+        user_id: userId, 
+        tenant_id: finalCompanyId, 
+        role: "admin", 
+        email: targetEmail,
+        is_read_only: false,
+        iat: Math.floor(Date.now() / 1000), 
+        exp: exp 
+      }, 
+      JWT_SECRET
+    );
+
+    // Set Cookie with strict secure flags
+    res.cookie("corevia_session_v1_cookie", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      path: "/"
+    });
+
+    const sessionObj = {
+      username: name || targetEmail.split("@")[0],
+      email: targetEmail,
+      isRegistered: true,
+      isApproved: true,
+      isSuspended: false,
+      userId: userId,
+      user_id: userId,
+      company_id: finalCompanyId,
+      role: "admin",
+      token: token
+    };
+
+    return res.status(200).json({
+      authenticated: true,
+      token: token,
+      hasCompletedOnboarding: hasCompletedOnboarding,
+      session: sessionObj
+    });
+
+  } catch (err: any) {
+    console.error("[OAuth Sync API] Error:", err);
+    return res.status(500).json({
+      error_en: err.message || "Authentication synchronization failed"
+    });
+  }
+});
+
 // POST /api/auth/register -> Multi-tenant Initial Sign up
 app.post("/api/auth/register", async (req, res) => {
   const { companyName, name, email, phone, password, country } = req.body;
